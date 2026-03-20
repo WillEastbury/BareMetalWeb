@@ -9,6 +9,7 @@ namespace BareMetalWeb.Data;
 [DataEntity("Users", ShowOnNav = false, NavGroup = "Admin", NavOrder = 10, Permissions = "admin")]
 public class User : BaseDataObject
 {
+    public override string EntityTypeName => "Users";
     private const int Ord_UserName = BaseFieldCount + 0;
     private const int Ord_DisplayName = BaseFieldCount + 1;
     private const int Ord_Email = BaseFieldCount + 2;

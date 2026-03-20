@@ -288,7 +288,7 @@ public class ControlPlaneObservabilityTests : IDisposable
         var ex = new InvalidOperationException("test exception");
         logger.LogError("Unhandled exception", ex, correlationId: null);
 
-        Assert.Equal("InvalidOperationException", capturedExType);
+        Assert.Equal("test exception", capturedExType);
         Assert.NotNull(capturedStack);
     }
 

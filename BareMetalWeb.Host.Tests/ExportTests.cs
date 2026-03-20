@@ -14,6 +14,7 @@ public class ExportTests
     [DataEntity("Test Order Rows", Slug = "test-export-order-rows")]
     private class TestOrderRow : BaseDataObject
     {
+        public override string EntityTypeName => "Test Order Rows";
         private const int Ord_LineTotal = BaseFieldCount + 0;
         private const int Ord_Notes = BaseFieldCount + 1;
         private const int Ord_ProductId = BaseFieldCount + 2;
@@ -82,6 +83,7 @@ public class ExportTests
     [DataEntity("Test Orders", Slug = "test-export-orders")]
     private class TestOrder : BaseDataObject
     {
+        public override string EntityTypeName => "Test Orders";
         private const int Ord_CurrencyId = BaseFieldCount + 0;
         private const int Ord_CustomerId = BaseFieldCount + 1;
         private const int Ord_OrderDate = BaseFieldCount + 2;

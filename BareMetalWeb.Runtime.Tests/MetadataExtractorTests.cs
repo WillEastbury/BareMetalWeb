@@ -21,6 +21,7 @@ public class MetadataExtractorTests
         IdGeneration = AutoIdStrategy.Sequential)]
     private class SampleWidget : BaseDataObject
     {
+        public override string EntityTypeName => "Sample Widgets";
         private const int Ord_Category = BaseFieldCount + 0;
         private const int Ord_CreatedDate = BaseFieldCount + 1;
         private const int Ord_IsActive = BaseFieldCount + 2;
@@ -100,6 +101,7 @@ public class MetadataExtractorTests
     [DataEntity("Sample Orders", IdGeneration = AutoIdStrategy.Sequential)]
     private class SampleOrder : BaseDataObject
     {
+        public override string EntityTypeName => "Sample Orders";
         private const int Ord_Description = BaseFieldCount + 0;
         private const int Ord_DueDate = BaseFieldCount + 1;
         private const int Ord_Status = BaseFieldCount + 2;

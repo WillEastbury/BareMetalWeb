@@ -29,6 +29,7 @@ public sealed class OrdinalIndirectionTests : IDisposable
     [DataEntity("OrdinalItems")]
     private sealed class OrdinalItem : BaseDataObject
     {
+        public override string EntityTypeName => "OrdinalItems";
         private const int Ord_BigVal = BaseFieldCount + 0;
         private const int Ord_Label = BaseFieldCount + 1;
         private const int Ord_Score = BaseFieldCount + 2;

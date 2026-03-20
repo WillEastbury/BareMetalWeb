@@ -14,6 +14,7 @@ namespace BareMetalWeb.Data.Tests;
 [DataEntity("Test Searchable Item", Slug = "testsearchableitem")]
 public class TestSearchableItem : BaseDataObject
 {
+    public override string EntityTypeName => "Test Searchable Item";
     private const int Ord_Category = BaseFieldCount + 0;
     private const int Ord_Description = BaseFieldCount + 1;
     private const int Ord_Name = BaseFieldCount + 2;
@@ -80,6 +81,7 @@ public class TestSearchableItem : BaseDataObject
 [DataEntity("List Field Test", Slug = "listfieldtest")]
 public class ListFieldEntity : BaseDataObject
 {
+    public override string EntityTypeName => "List Field Test";
     private const int Ord_Tags = BaseFieldCount + 0;
     internal new const int TotalFieldCount = BaseFieldCount + 1;
 
@@ -112,6 +114,7 @@ public class ListFieldEntity : BaseDataObject
 [DataEntity("Nullable Int Test", Slug = "nullableinttest")]
 public class NullableIntEntity : BaseDataObject
 {
+    public override string EntityTypeName => "Nullable Int Test";
     private const int Ord_Score = BaseFieldCount + 0;
     internal new const int TotalFieldCount = BaseFieldCount + 1;
 
@@ -144,6 +147,7 @@ public class NullableIntEntity : BaseDataObject
 [DataEntity("Int List Test", Slug = "intlisttest")]
 public class IntListEntity : BaseDataObject
 {
+    public override string EntityTypeName => "Int List Test";
     private const int Ord_Values = BaseFieldCount + 0;
     internal new const int TotalFieldCount = BaseFieldCount + 1;
 
@@ -176,6 +180,7 @@ public class IntListEntity : BaseDataObject
 [DataEntity("BTree Test", Slug = "btreetest")]
 public class BTreeEntity : BaseDataObject
 {
+    public override string EntityTypeName => "BTree Test";
     private const int Ord_Label = BaseFieldCount + 0;
     internal new const int TotalFieldCount = BaseFieldCount + 1;
 

@@ -8,6 +8,7 @@ namespace BareMetalWeb.Data.Tests;
 [DataEntity("Calculated Test", Slug = "calculatedtest")]
 public class CalculatedTestEntity : BaseDataObject
 {
+    public override string EntityTypeName => "Calculated Test";
     private const int Ord_DiscountPercent = BaseFieldCount + 0;
     private const int Ord_LineTotal = BaseFieldCount + 1;
     private const int Ord_Quantity = BaseFieldCount + 2;
@@ -81,6 +82,7 @@ public class CalculatedTestEntity : BaseDataObject
 [DataEntity("Circular Test", Slug = "circulartest")]
 public class CircularTestEntity : BaseDataObject
 {
+    public override string EntityTypeName => "Circular Test";
     private const int Ord_A = BaseFieldCount + 0;
     private const int Ord_B = BaseFieldCount + 1;
     internal new const int TotalFieldCount = BaseFieldCount + 2;
@@ -126,6 +128,7 @@ public class CircularTestEntity : BaseDataObject
 [DataEntity("Independent Test", Slug = "independenttest")]
 public class IndependentFieldsTestEntity : BaseDataObject
 {
+    public override string EntityTypeName => "Independent Test";
     private const int Ord_Price = BaseFieldCount + 0;
     private const int Ord_PriceWithMarkup = BaseFieldCount + 1;
     private const int Ord_Tax = BaseFieldCount + 2;

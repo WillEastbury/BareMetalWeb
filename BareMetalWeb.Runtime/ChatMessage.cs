@@ -10,6 +10,7 @@ namespace BareMetalWeb.Runtime;
 [DataEntity("Chat Messages", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1011)]
 public class ChatMessage : BaseDataObject
 {
+    public override string EntityTypeName => "Chat Messages";
     private const int Ord_SessionId = BaseFieldCount + 0;
     private const int Ord_Role = BaseFieldCount + 1;
     private const int Ord_Content = BaseFieldCount + 2;

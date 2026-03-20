@@ -15,6 +15,7 @@ namespace BareMetalWeb.Data;
 )]
 public sealed class RecordComment : BaseDataObject
 {
+    public override string EntityTypeName => "Record Comment";
     private const int Ord_RecordType = BaseFieldCount + 0;
     private const int Ord_RecordKey = BaseFieldCount + 1;
     private const int Ord_Text = BaseFieldCount + 2;

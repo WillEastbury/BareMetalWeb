@@ -12,6 +12,7 @@ namespace BareMetalWeb.Data.Tests;
 [DataEntity("Singleton Test Items", Slug = "singleton-test-items")]
 public class SingletonTestItem : BaseDataObject
 {
+    public override string EntityTypeName => "Singleton Test Items";
     private const int Ord_IsDefault = BaseFieldCount + 0;
     private const int Ord_Name = BaseFieldCount + 1;
     internal new const int TotalFieldCount = BaseFieldCount + 2;
@@ -57,6 +58,7 @@ public class SingletonTestItem : BaseDataObject
 [DataEntity("Multi Singleton Test Items", Slug = "multi-singleton-test-items")]
 public class MultiSingletonTestItem : BaseDataObject
 {
+    public override string EntityTypeName => "Multi Singleton Test Items";
     private const int Ord_IsPrimary = BaseFieldCount + 0;
     private const int Ord_IsSecondary = BaseFieldCount + 1;
     private const int Ord_Name = BaseFieldCount + 2;

@@ -17,6 +17,7 @@ namespace BareMetalWeb.Data;
 )]
 public sealed class AuditEntry : BaseDataObject
 {
+    public override string EntityTypeName => "Audit Entry";
     private const int Ord_EntityType = BaseFieldCount + 0;
     private const int Ord_EntityKey = BaseFieldCount + 1;
     private const int Ord_Operation = BaseFieldCount + 2;

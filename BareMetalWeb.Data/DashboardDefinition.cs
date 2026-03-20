@@ -11,6 +11,7 @@ namespace BareMetalWeb.Data;
     Permissions = "admin", NavGroup = "Admin", NavOrder = 95)]
 public sealed class DashboardDefinition : BaseDataObject
 {
+    public override string EntityTypeName => "Dashboard Definitions";
     private const int Ord_Name = BaseFieldCount + 0;
     private const int Ord_Description = BaseFieldCount + 1;
     private const int Ord_TilesJson = BaseFieldCount + 2;

@@ -55,6 +55,7 @@ public class ComputedFieldTests : IDisposable
     [DataEntity("Test Products")]
     public class TestProduct : BaseDataObject
     {
+        public override string EntityTypeName => "Test Products";
         private const int Ord_BasePrice = BaseFieldCount + 0;
         private const int Ord_Name = BaseFieldCount + 1;
         private const int Ord_StockQuantity = BaseFieldCount + 2;
@@ -109,6 +110,7 @@ public class ComputedFieldTests : IDisposable
     [DataEntity("Test Orders")]
     public class TestOrder : BaseDataObject
     {
+        public override string EntityTypeName => "Test Orders";
         private const int Ord_CurrentPriceCached = BaseFieldCount + 0;
         private const int Ord_CurrentPriceLive = BaseFieldCount + 1;
         private const int Ord_Lines = BaseFieldCount + 2;

@@ -11,6 +11,7 @@ namespace BareMetalWeb.Runtime;
 [DataEntity("Deployment Nodes", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1021)]
 public class DeploymentNode : BaseDataObject
 {
+    public override string EntityTypeName => "Deployment Nodes";
     private const int Ord_NodeId = BaseFieldCount + 0;
     private const int Ord_SecretHash = BaseFieldCount + 1;
     private const int Ord_Ring = BaseFieldCount + 2;

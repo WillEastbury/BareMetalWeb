@@ -35,6 +35,7 @@ public class ReportQueryTests : IDisposable
     [DataEntity("Test Customers", Slug = "test-customers")]
     public class TestCustomer : BaseDataObject
     {
+        public override string EntityTypeName => "Test Customers";
         private const int Ord_Discount = BaseFieldCount + 0;
         private const int Ord_Name = BaseFieldCount + 1;
         internal new const int TotalFieldCount = BaseFieldCount + 2;
@@ -78,6 +79,7 @@ public class ReportQueryTests : IDisposable
     [DataEntity("Report Test Orders", Slug = "report-test-orders")]
     public class ReportTestOrder : BaseDataObject
     {
+        public override string EntityTypeName => "Report Test Orders";
         private const int Ord_Amount = BaseFieldCount + 0;
         private const int Ord_CustomerId = BaseFieldCount + 1;
         private const int Ord_Status = BaseFieldCount + 2;

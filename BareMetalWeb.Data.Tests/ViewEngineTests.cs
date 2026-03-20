@@ -39,6 +39,7 @@ public sealed class ViewEngineTests : IDisposable
     [DataEntity("View Test Products", Slug = "view-test-products")]
     public class ViewTestProduct : BaseDataObject
     {
+        public override string EntityTypeName => "View Test Products";
         private const int Ord_Category = BaseFieldCount + 0;
         private const int Ord_Name = BaseFieldCount + 1;
         private const int Ord_Price = BaseFieldCount + 2;
@@ -104,6 +105,7 @@ public sealed class ViewEngineTests : IDisposable
     [DataEntity("View Test Orders", Slug = "view-test-orders")]
     public class ViewTestOrder : BaseDataObject
     {
+        public override string EntityTypeName => "View Test Orders";
         private const int Ord_ProductId = BaseFieldCount + 0;
         private const int Ord_Quantity = BaseFieldCount + 1;
         private const int Ord_Status = BaseFieldCount + 2;

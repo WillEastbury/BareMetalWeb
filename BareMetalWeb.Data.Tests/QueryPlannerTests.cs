@@ -17,6 +17,7 @@ public class QueryPlannerTests
     [DataEntity("QueryPlanner Test Products", Slug = "qp-products")]
     private class QueryPlannerTestProduct : BaseDataObject
     {
+        public override string EntityTypeName => "QueryPlanner Test Products";
         private const int Ord_Category = BaseFieldCount + 0;
         private const int Ord_Name = BaseFieldCount + 1;
         private const int Ord_Price = BaseFieldCount + 2;
@@ -72,6 +73,7 @@ public class QueryPlannerTests
     [DataEntity("QueryPlanner Test Orders", Slug = "qp-orders")]
     private class QueryPlannerTestOrder : BaseDataObject
     {
+        public override string EntityTypeName => "QueryPlanner Test Orders";
         private const int Ord_ProductId = BaseFieldCount + 0;
         private const int Ord_Status = BaseFieldCount + 1;
         internal new const int TotalFieldCount = BaseFieldCount + 2;

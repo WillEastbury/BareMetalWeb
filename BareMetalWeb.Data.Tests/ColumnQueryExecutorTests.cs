@@ -24,6 +24,7 @@ public sealed class ColumnQueryExecutorTests : IDisposable
     [DataEntity("SampleItems")]
     private class SampleItem : BaseDataObject
     {
+        public override string EntityTypeName => "SampleItems";
         private const int Ord_Age = BaseFieldCount + 0;
         private const int Ord_BigNum = BaseFieldCount + 1;
         private const int Ord_Name = BaseFieldCount + 2;

@@ -17,6 +17,7 @@ public class MoneyFieldBindingTests
     [DataEntity("MoneyTestEntities")]
     private class MoneyTestEntity : BaseDataObject
     {
+        public override string EntityTypeName => "MoneyTestEntities";
         private const int Ord_Name = BaseFieldCount + 0;
         private const int Ord_Price = BaseFieldCount + 1;
         internal new const int TotalFieldCount = BaseFieldCount + 2;
@@ -183,6 +184,7 @@ public class MoneyFieldBindingTests
     [DataEntity("MoneyRequiredTestEntities")]
     private class MoneyRequiredEntity : BaseDataObject
     {
+        public override string EntityTypeName => "MoneyRequiredTestEntities";
         private const int Ord_Name = BaseFieldCount + 0;
         private const int Ord_Price = BaseFieldCount + 1;
         internal new const int TotalFieldCount = BaseFieldCount + 2;

@@ -419,7 +419,8 @@ public sealed class DataQueryEvaluator : IDataQueryEvaluator
                     }
                     else
                     {
-                        memberType = typeof(object);
+                        // No schema available — infer type from the stored value itself
+                        memberType = value?.GetType() ?? typeof(object);
                     }
                     return true;
                 }
