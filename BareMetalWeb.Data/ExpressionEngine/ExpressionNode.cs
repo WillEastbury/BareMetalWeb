@@ -484,7 +484,7 @@ public sealed class FunctionNode : ExpressionNode
         var value = node.Evaluate(context);
         if (value is string str)
             return str;
-        throw new ArgumentException($"Argument '{paramName}' must be a string literal, got: {value?.GetType().Name ?? "null"}");
+        throw new ArgumentException($"Argument '{paramName}' must be a string literal, got: {value ?? "null"}");
     }
 }
 

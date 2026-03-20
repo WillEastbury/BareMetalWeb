@@ -58,7 +58,7 @@ public sealed class TransactionCommitEngine
                 if (loaded is null)
                     return Fail("ENTITY_NOT_FOUND", $"Entity {mutation.AggregateType}:{mutation.AggregateId} not found.");
                 if (loaded is not BaseDataObject entity)
-                    return Fail("TYPE_MISMATCH", $"Expected BaseDataObject for {mutation.AggregateType}:{mutation.AggregateId}, got {loaded.GetType().Name}.");
+                    return Fail("TYPE_MISMATCH", $"Expected BaseDataObject for {mutation.AggregateType}:{mutation.AggregateId}, got non-entity object.");
 
                 var layout = EntityLayoutCompiler.GetOrCompile(meta);
                 loadedEntities[key] = (meta, entity, layout);
@@ -202,7 +202,7 @@ public sealed class TransactionCommitEngine
         if (loaded is null)
             return Fail("ENTITY_NOT_FOUND", $"Entity {action.AggregateType}:{aggregateId} not found.");
         if (loaded is not BaseDataObject entity)
-            return Fail("TYPE_MISMATCH", $"Expected BaseDataObject for {action.AggregateType}:{aggregateId}, got {loaded.GetType().Name}.");
+            return Fail("TYPE_MISMATCH", $"Expected BaseDataObject for {action.AggregateType}:{aggregateId}, got non-entity object.");
 
         var layout = EntityLayoutCompiler.GetOrCompile(meta);
 
@@ -232,7 +232,7 @@ public sealed class TransactionCommitEngine
         else
         {
             clone = (BaseDataObject)System.Runtime.CompilerServices.RuntimeHelpers
-                .GetUninitializedObject(source.GetType());
+                .GetUninitializedObject(meta.Type);
         }
 
         clone.Key = source.Key;
@@ -243,7 +243,7 @@ public sealed class TransactionCommitEngine
             try { field.Setter(clone, field.Getter(source)); }
             catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
             {
-                System.Diagnostics.Debug.WriteLine($"CloneEntity: skipping field {field.Name}: {ex.GetType().Name}");
+                System.Diagnostics.Debug.WriteLine($"CloneEntity: skipping field {field.Name}: {ex.Message}");
             }
         }
         return clone;

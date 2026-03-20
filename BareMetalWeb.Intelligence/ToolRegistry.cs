@@ -52,7 +52,7 @@ public sealed class ToolRegistry : IToolExecutor
         catch (Exception ex)
         {
             // Log but don't leak internal details
-            return ToolResult.Fail($"Tool execution failed: {ex.GetType().Name}");
+            return ToolResult.Fail($"Tool execution failed: {ex.Message}");
         }
     }
 

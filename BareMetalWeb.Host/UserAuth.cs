@@ -594,7 +594,7 @@ public static class UserAuth
         if (user == null)
             return null;
 
-        var meta = DataScaffold.GetEntityByType(user.GetType());
+        var meta = DataScaffold.GetEntityByName(user.EntityTypeName);
         if (meta != null)
             return meta;
 

@@ -388,7 +388,7 @@ public sealed class DataQueryEvaluator : IDataQueryEvaluator
     {
         if (obj is BaseDataObject dataObject)
         {
-            var meta = DataScaffold.GetEntityByType(dataObject.GetType());
+            var meta = DataScaffold.GetEntityByName(dataObject.EntityTypeName);
             if (meta != null)
             {
                 var fieldMeta = meta.FindField(field);
@@ -410,7 +410,17 @@ public sealed class DataQueryEvaluator : IDataQueryEvaluator
                 if (cmp == 0)
                 {
                     value = dataObject.GetFieldValue(fieldMap[mid].Ordinal);
-                    memberType = value?.GetType() ?? typeof(object);
+                    // Use schema CLR type when available; only fall back to typeof(object) for untyped slots
+                    var schema = dataObject.Schema;
+                    if (schema != null && fieldMap[mid].Ordinal >= BaseDataObject.BaseFieldCount)
+                    {
+                        int schemaIdx = fieldMap[mid].Ordinal - BaseDataObject.BaseFieldCount;
+                        memberType = schemaIdx < schema.ClrTypes.Length ? schema.ClrTypes[schemaIdx] : typeof(object);
+                    }
+                    else
+                    {
+                        memberType = typeof(object);
+                    }
                     return true;
                 }
                 if (cmp < 0) lo = mid + 1;
@@ -435,7 +445,7 @@ public sealed class DataQueryEvaluator : IDataQueryEvaluator
             return null;
 
         var effectiveType = Nullable.GetUnderlyingType(targetType) ?? targetType;
-        if (effectiveType.IsAssignableFrom(value.GetType()))
+        if (effectiveType.IsInstanceOfType(value))
             return value;
 
         if (value is string s)

@@ -259,7 +259,7 @@ public static class ClusterApiHandlers
 
         if (obj is BaseDataObject bdo)
         {
-            var meta = DataScaffold.GetEntityByType(bdo.GetType());
+            var meta = DataScaffold.GetEntityByName(bdo.EntityTypeName);
             if (meta != null)
             {
                 var field = meta.FindField(fieldName);

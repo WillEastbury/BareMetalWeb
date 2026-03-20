@@ -334,17 +334,17 @@ public sealed class ReportExecutor
     private static readonly Func<object, object?> _missingFieldSentinel = static _ => null;
 
     // Cached compiled property accessors — avoids per-cell metadata lookup in report projection.
-    private static readonly ConcurrentDictionary<(Type, string), Func<object, object?>> AccessorCache = new();
+    private static readonly ConcurrentDictionary<(string, string), Func<object, object?>> AccessorCache = new();
 
     /// <summary>
     /// Returns a compiled accessor for <paramref name="fieldName"/> on <paramref name="objType"/>,
     /// or <see langword="null"/> if the field is not found. Result is cached per (type, field) pair.
     /// </summary>
-    private static Func<object, object?>? GetOrCreateAccessor(Type objType, string fieldName)
+    private static Func<object, object?>? GetOrCreateAccessor(string entityName, string fieldName)
     {
-        var cached = AccessorCache.GetOrAdd((objType, fieldName), static key =>
+        var cached = AccessorCache.GetOrAdd((entityName, fieldName), static key =>
         {
-            var meta = DataScaffold.GetEntityByType(key.Item1);
+            var meta = DataScaffold.GetEntityByName(key.Item1);
             if (meta != null)
             {
                 var f = meta.FindField(key.Item2);
@@ -369,7 +369,7 @@ public sealed class ReportExecutor
                 continue;
             }
 
-            var getter = GetOrCreateAccessor(obj.GetType(), col.Field);
+            var getter = GetOrCreateAccessor(obj.EntityTypeName, col.Field);
             cells[i] = getter != null ? FormatValue(getter(obj), col.Format) : null;
         }
         return cells;
@@ -406,15 +406,15 @@ public sealed class ReportExecutor
             if (!row.TryGetValue(filter.Entity, out var obj))
                 return false;
 
-            var objType = obj.GetType();
-            if (!AccessorCache.TryGetValue((objType, filter.Field), out var getter))
+            var entityName = obj.EntityTypeName;
+            if (!AccessorCache.TryGetValue((entityName, filter.Field), out var getter))
             {
-                var meta = DataScaffold.GetEntityByType(objType);
+                var meta = DataScaffold.GetEntityByName(entityName);
                 getter = meta?.FindField(filter.Field)?.GetValueFn;
                 if (getter == null && meta != null)
                     getter = EntityLayoutCompiler.GetOrCompile(meta).FieldByName(filter.Field)?.Getter;
                 if (getter != null)
-                    AccessorCache.TryAdd((objType, filter.Field), getter);
+                    AccessorCache.TryAdd((entityName, filter.Field), getter);
             }
 
             var rawValue = getter?.Invoke(obj)?.ToString() ?? string.Empty;

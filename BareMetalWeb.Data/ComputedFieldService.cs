@@ -16,7 +16,7 @@ namespace BareMetalWeb.Data;
 public static class ComputedFieldService
 {
     private static readonly ConcurrentDictionary<string, ComputedValueCacheEntry> _cache = new();
-    private static readonly ConcurrentDictionary<(Type, string), Func<object, object?>?> _getterCache = new();
+    private static readonly ConcurrentDictionary<(string, string), Func<object, object?>?> _getterCache = new();
     private static DateTime _lastCacheScavenge = DateTime.UtcNow;
     private const int MaxCacheEntries = 10_000;
 
@@ -160,12 +160,12 @@ public static class ComputedFieldService
 
     [UnconditionalSuppressMessage("Trimming", "IL2070",
         Justification = "Fallback for non-entity POCO child types (e.g. order lines). Result is cached; runs once per (type, name).")]
-    private static Func<object, object?>? GetCachedGetter(Type type, string name)
+    private static Func<object, object?>? GetCachedGetter(string entityName, string name)
     {
-        return _getterCache.GetOrAdd((type, name), static key =>
+        return _getterCache.GetOrAdd((entityName, name), static key =>
         {
             // Prefer entity metadata compiled getter (AOT-safe, no reflection)
-            var meta = DataScaffold.GetEntityByType(key.Item1);
+            var meta = DataScaffold.GetEntityByName(key.Item1);
             if (meta != null)
             {
                 var field = meta.FindField(key.Item2);
@@ -173,13 +173,6 @@ public static class ComputedFieldService
                 return EntityLayoutCompiler.GetOrCompile(meta).FieldByName(key.Item2)?.Getter;
             }
 
-            // POCO child types: lookup via DataScaffold metadata (no reflection)
-            var childMeta = DataScaffold.GetEntityByType(key.Item1);
-            if (childMeta != null)
-            {
-                var childField = childMeta.FindField(key.Item2);
-                if (childField != null) return childField.GetValueFn;
-            }
             return null;
         });
     }
@@ -192,7 +185,7 @@ public static class ComputedFieldService
         CancellationToken cancellationToken)
     {
         // Get the foreign key value
-        var fkGetter = GetCachedGetter(metadata.Type, config.ForeignKeyField!);
+        var fkGetter = GetCachedGetter(metadata.Name, config.ForeignKeyField!);
         if (fkGetter == null)
             return null;
 
@@ -210,7 +203,7 @@ public static class ComputedFieldService
             return null;
 
         // Get the source field value
-        var sourceGetter = GetCachedGetter(config.SourceEntity!, config.SourceField!);
+        var sourceGetter = GetCachedGetter(sourceMetadata.Name, config.SourceField!);
         if (sourceGetter == null)
             return null;
 
@@ -225,7 +218,7 @@ public static class ComputedFieldService
         CancellationToken cancellationToken)
     {
         // Get the child collection property
-        var collectionGetter = GetCachedGetter(metadata.Type, config.ChildCollectionProperty!);
+        var collectionGetter = GetCachedGetter(metadata.Name, config.ChildCollectionProperty!);
         if (collectionGetter == null)
             return null;
 
@@ -256,14 +249,14 @@ public static class ComputedFieldService
         // Get values from the source field (cache lookup per item type)
         var values = new List<object?>();
         Func<object, object?>? cachedSourceGetter = null;
-        Type? cachedItemType = null;
+        string? cachedItemEntityName = null;
         foreach (var item in items)
         {
-            var itemType = item.GetType();
-            if (itemType != cachedItemType)
+            var itemEntityName = item is BaseDataObject bdoItem ? bdoItem.EntityTypeName : string.Empty;
+            if (itemEntityName != cachedItemEntityName)
             {
-                cachedItemType = itemType;
-                cachedSourceGetter = GetCachedGetter(itemType, config.SourceField);
+                cachedItemEntityName = itemEntityName;
+                cachedSourceGetter = GetCachedGetter(itemEntityName, config.SourceField);
             }
             if (cachedSourceGetter != null)
             {

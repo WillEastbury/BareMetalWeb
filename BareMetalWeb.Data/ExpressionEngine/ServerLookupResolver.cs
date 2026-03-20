@@ -150,7 +150,7 @@ public sealed class ServerLookupResolver : ILookupResolver
 
             DataEntityMetadata? nextMeta = null;
             // Use DataScaffold metadata (compiled delegates) instead of raw reflection
-            var stepMeta = DataScaffold.GetEntityByType(currentEntity.GetType());
+            var stepMeta = DataScaffold.GetEntityByName(currentEntity.EntityTypeName);
             if (stepMeta != null)
             {
                 var fieldMeta = stepMeta.FindField(nextFkField);
@@ -177,7 +177,7 @@ public sealed class ServerLookupResolver : ILookupResolver
         // Use metadata-first lookup (compiled delegates)
         if (entity is BaseDataObject bdo)
         {
-            var meta = DataScaffold.GetEntityByType(bdo.GetType());
+            var meta = DataScaffold.GetEntityByName(bdo.EntityTypeName);
             if (meta != null)
             {
                 var fieldMeta = meta.FindField(fieldName);
@@ -187,9 +187,10 @@ public sealed class ServerLookupResolver : ILookupResolver
         }
 
         // Metadata-driven field access via cached compiled delegate
-        var getter = _extractCache.GetOrAdd((entity.GetType(), fieldName), static key =>
+        var entityName = entity is BaseDataObject bdoE ? bdoE.EntityTypeName : string.Empty;
+        var getter = _extractCache.GetOrAdd((entityName, fieldName), static key =>
         {
-            var meta = DataScaffold.GetEntityByType(key.Item1);
+            var meta = DataScaffold.GetEntityByName(key.Item1);
             if (meta != null)
             {
                 var field = meta.FindField(key.Item2);
@@ -201,7 +202,7 @@ public sealed class ServerLookupResolver : ILookupResolver
         return getter?.Invoke(entity);
     }
 
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(Type, string), Func<object, object?>?> _extractCache = new();
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(string, string), Func<object, object?>?> _extractCache = new();
 
     private static bool ValuesEqual(object? a, object? b)
     {

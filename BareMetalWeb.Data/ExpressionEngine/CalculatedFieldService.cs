@@ -13,8 +13,8 @@ public static class CalculatedFieldService
 {
     private static readonly ConcurrentDictionary<string, ExpressionNode> _compiledExpressions = new();
     private const int MaxExpressionCacheSize = 4096;
-    private static readonly ConcurrentDictionary<Type, List<CalculatedFieldInfo>> _calculatedFieldsByType = new();
-    private static readonly ConcurrentDictionary<Type, Dictionary<string, HashSet<string>>> _dependencyGraph = new();
+    private static readonly ConcurrentDictionary<string, List<CalculatedFieldInfo>> _calculatedFieldsByType = new();
+    private static readonly ConcurrentDictionary<string, Dictionary<string, HashSet<string>>> _dependencyGraph = new();
 
     private sealed record CalculatedFieldInfo(
         string Name,
@@ -60,15 +60,16 @@ public static class CalculatedFieldService
     /// </summary>
     public static void EvaluateCalculatedFields(BaseDataObject instance)
     {
-        var type = instance.GetType();
-        var calculatedFields = GetCalculatedFields(type);
+        var entityName = instance.EntityTypeName;
+        if (string.IsNullOrEmpty(entityName)) return;
+        var calculatedFields = GetCalculatedFields(entityName);
 
         if (calculatedFields.Count == 0)
             return;
 
-        var context = BuildContext(instance, type);
+        var context = BuildContext(instance, entityName);
 
-        foreach (var fieldInfo in GetCalculatedFieldsInDependencyOrder(type))
+        foreach (var fieldInfo in GetCalculatedFieldsInDependencyOrder(entityName))
         {
             try
             {
@@ -109,7 +110,8 @@ public static class CalculatedFieldService
         IReadOnlyDictionary<string, object?>? parentContext = null,
         CancellationToken cancellationToken = default)
     {
-        var type = instance.GetType();
+        var type = instance.EntityTypeName;
+        if (string.IsNullOrEmpty(type)) return;
         var calculatedFields = GetCalculatedFields(type);
 
         if (calculatedFields.Count == 0)
@@ -149,11 +151,12 @@ public static class CalculatedFieldService
     /// </summary>
     public static string GenerateJavaScript(Type entityType)
     {
-        var calculatedFields = GetCalculatedFields(entityType);
+        var entityName = DataScaffold.GetEntityByType(entityType)?.Name ?? entityType.Name;
+        var calculatedFields = GetCalculatedFields(entityName);
         if (calculatedFields.Count == 0)
             return string.Empty;
 
-        var orderedFields = GetCalculatedFieldsInDependencyOrder(entityType);
+        var orderedFields = GetCalculatedFieldsInDependencyOrder(entityName);
         var jsLines = new List<string>();
 
         foreach (var fieldInfo in orderedFields)
@@ -171,7 +174,8 @@ public static class CalculatedFieldService
     /// </summary>
     public static HashSet<string> GetDependencies(Type entityType, string fieldName)
     {
-        var graph = GetDependencyGraph(entityType);
+        var entityName = DataScaffold.GetEntityByType(entityType)?.Name ?? entityType.Name;
+        var graph = GetDependencyGraph(entityName);
         return graph.TryGetValue(fieldName, out var deps) ? deps : new HashSet<string>();
     }
 
@@ -180,7 +184,8 @@ public static class CalculatedFieldService
     /// </summary>
     public static void ValidateNoCycles(Type entityType)
     {
-        var graph = GetDependencyGraph(entityType);
+        var entityName = DataScaffold.GetEntityByType(entityType)?.Name ?? entityType.Name;
+        var graph = GetDependencyGraph(entityName);
         var visited = new HashSet<string>();
         var recursionStack = new HashSet<string>();
 
@@ -194,13 +199,13 @@ public static class CalculatedFieldService
         }
     }
 
-    private static List<CalculatedFieldInfo> GetCalculatedFields(Type type)
+    private static List<CalculatedFieldInfo> GetCalculatedFields(string entityName)
     {
-        return _calculatedFieldsByType.GetOrAdd(type, static t =>
+        return _calculatedFieldsByType.GetOrAdd(entityName, static name =>
         {
             var fields = new List<CalculatedFieldInfo>();
 
-            var meta = DataScaffold.GetEntityByType(t);
+            var meta = DataScaffold.GetEntityByName(name);
             if (meta != null)
             {
                 foreach (var f in meta.Fields)
@@ -218,10 +223,10 @@ public static class CalculatedFieldService
         });
     }
 
-    private static List<CalculatedFieldInfo> GetCalculatedFieldsInDependencyOrder(Type type)
+    private static List<CalculatedFieldInfo> GetCalculatedFieldsInDependencyOrder(string entityName)
     {
-        var fields = GetCalculatedFields(type);
-        var graph = GetDependencyGraph(type);
+        var fields = GetCalculatedFields(entityName);
+        var graph = GetDependencyGraph(entityName);
         var fieldMap = new Dictionary<string, CalculatedFieldInfo>(fields.Count);
         foreach (var f in fields) fieldMap[f.Name] = f;
 
@@ -260,12 +265,12 @@ public static class CalculatedFieldService
         return sorted;
     }
 
-    private static Dictionary<string, HashSet<string>> GetDependencyGraph(Type type)
+    private static Dictionary<string, HashSet<string>> GetDependencyGraph(string entityName)
     {
-        return _dependencyGraph.GetOrAdd(type, t =>
+        return _dependencyGraph.GetOrAdd(entityName, name =>
         {
             var graph = new Dictionary<string, HashSet<string>>();
-            var fields = GetCalculatedFields(t);
+            var fields = GetCalculatedFields(name);
 
             foreach (var field in fields)
             {
@@ -307,9 +312,9 @@ public static class CalculatedFieldService
         return dependencies;
     }
 
-    private static Dictionary<string, object?> BuildContext(BaseDataObject instance, Type type)
+    private static Dictionary<string, object?> BuildContext(BaseDataObject instance, string entityName)
     {
-        var meta = DataScaffold.GetEntityByType(type);
+        var meta = DataScaffold.GetEntityByName(entityName);
         if (meta != null)
         {
             var layout = EntityLayoutCompiler.GetOrCompile(meta);

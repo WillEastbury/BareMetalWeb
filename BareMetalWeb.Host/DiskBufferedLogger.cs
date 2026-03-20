@@ -90,7 +90,7 @@ public sealed class DiskBufferedLogger : IBufferedLogger
         if (BmwLogLevel.Error < MinimumLevel) return;
         var entry = FormatEntry(BmwLogLevel.Error, message, correlationId, fields: null, ex);
         _ = LogErrorRawAsync(entry, BmwLogLevel.Error);
-        ErrorHook?.Invoke("ERROR", message, ex.GetType().Name, ex.ToString(), null, null, 0, correlationId);
+        ErrorHook?.Invoke("ERROR", message, ex.Message, ex.ToString(), null, null, 0, correlationId);
     }
 
     public void Log(BmwLogLevel level, string message, string? correlationId, LogFields? fields)
@@ -150,7 +150,7 @@ public sealed class DiskBufferedLogger : IBufferedLogger
         if (ex != null)
         {
             sb.Append(" | error=");
-            sb.Append(ex.GetType().Name);
+            sb.Append(ex.Message);
             sb.Append(" | stack=");
             sb.Append(LogRedactor.RedactStackTrace(ex.ToString()));
         }

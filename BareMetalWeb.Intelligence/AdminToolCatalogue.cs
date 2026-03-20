@@ -187,7 +187,7 @@ public static class AdminToolCatalogue
         }
         catch (Exception ex)
         {
-            return ValueTask.FromResult(ToolResult.Fail($"Failed to list entities: {ex.GetType().Name}"));
+            return ValueTask.FromResult(ToolResult.Fail($"Failed to list entities: {ex.Message}"));
         }
     }
 
@@ -224,7 +224,7 @@ public static class AdminToolCatalogue
         }
         catch (Exception ex)
         {
-            return ValueTask.FromResult(ToolResult.Fail($"Failed to describe entity: {ex.GetType().Name}"));
+            return ValueTask.FromResult(ToolResult.Fail($"Failed to describe entity: {ex.Message}"));
         }
     }
 
@@ -274,7 +274,7 @@ public static class AdminToolCatalogue
         }
         catch (Exception ex)
         {
-            return ToolResult.Fail($"Show failed: {ex.GetType().Name}");
+            return ToolResult.Fail($"Show failed: {ex.Message}");
         }
     }
 
@@ -329,7 +329,7 @@ public static class AdminToolCatalogue
         }
         catch (Exception ex)
         {
-            return ToolResult.Fail($"Query failed: {ex.GetType().Name}");
+            return ToolResult.Fail($"Query failed: {ex.Message}");
         }
     }
 
@@ -353,7 +353,7 @@ public static class AdminToolCatalogue
         }
         catch (Exception ex)
         {
-            return ToolResult.Fail($"Count failed: {ex.GetType().Name}");
+            return ToolResult.Fail($"Count failed: {ex.Message}");
         }
     }
 

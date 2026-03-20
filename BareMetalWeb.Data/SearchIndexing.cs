@@ -353,8 +353,8 @@ public sealed class SearchIndexManager
 
     private readonly string _indexRoot;
     private readonly IBufferedLogger? _logger;
-    private readonly ConcurrentDictionary<Type, IndexData> _indexes = new();
-    private static readonly ConcurrentDictionary<Type, TypeMetadata> _typeMetadata = new();
+    private readonly ConcurrentDictionary<string, IndexData> _indexes = new();
+    private static readonly ConcurrentDictionary<string, TypeMetadata> _typeMetadata = new();
 
     public SearchIndexManager(string rootPath, IBufferedLogger? logger)
     {
@@ -363,9 +363,14 @@ public sealed class SearchIndexManager
         _logger = logger;
     }
 
+    /// <summary>Resolves a CLR Type to its entity name string for use as dictionary key.</summary>
+    private static string EntityNameFromType(Type type)
+        => BareMetalWeb.Core.DataScaffold.GetEntityByType(type)?.Name ?? type.Name;
+
     public bool HasIndexedFields(Type type, out List<IndexedFieldAccessor> fields)
     {
-        var metadata = GetOrCreateTypeMetadata(type);
+        var entityName = EntityNameFromType(type);
+        var metadata = GetOrCreateTypeMetadata(entityName);
         fields = new List<IndexedFieldAccessor>(metadata.IndexedFields);
         return fields.Count > 0;
     }
@@ -376,7 +381,7 @@ public sealed class SearchIndexManager
     /// </summary>
     public void WarmTypeMetadata(Type type)
     {
-        GetOrCreateTypeMetadata(type);
+        GetOrCreateTypeMetadata(EntityNameFromType(type));
     }
 
     private static readonly TypeMetadata EmptyMetadata = new()
@@ -385,12 +390,12 @@ public sealed class SearchIndexManager
         IndexKinds = new HashSet<IndexKind>(0)
     };
 
-    private TypeMetadata GetOrCreateTypeMetadata(Type type)
+    private TypeMetadata GetOrCreateTypeMetadata(string entityName)
     {
-        if (_typeMetadata.TryGetValue(type, out var cached))
+        if (_typeMetadata.TryGetValue(entityName, out var cached))
             return cached;
 
-        var entityMeta = BareMetalWeb.Core.DataScaffold.GetEntityByType(type);
+        var entityMeta = BareMetalWeb.Core.DataScaffold.GetEntityByName(entityName);
         if (entityMeta == null)
             return EmptyMetadata; // Don't cache — entity may be registered later
 
@@ -409,13 +414,14 @@ public sealed class SearchIndexManager
             IndexedFields = indexed.ToArray(),
             IndexKinds = kinds
         };
-        _typeMetadata.TryAdd(type, metadata);
+        _typeMetadata.TryAdd(entityName, metadata);
         return metadata;
     }
 
     public void EnsureBuilt(Type type, Func<IEnumerable<BaseDataObject>> loadAll)
     {
-        var index = _indexes.GetOrAdd(type, LoadIndex);
+        var entityName = EntityNameFromType(type);
+        var index = _indexes.GetOrAdd(entityName, LoadIndex);
         if (index.IsBuilt)
             return;
 
@@ -427,7 +433,7 @@ public sealed class SearchIndexManager
 
             BuildFrom(index, loadAll);
             index.IsBuilt = true;
-            SaveIndex(type, index);
+            SaveIndex(entityName, index);
         }
         finally
         {
@@ -440,9 +446,10 @@ public sealed class SearchIndexManager
         if (obj == null || obj.Key == 0)
             return;
 
-        var type = obj.GetType();
-        var index = _indexes.GetOrAdd(type, LoadIndex);
-        var metadata = GetOrCreateTypeMetadata(type);
+        var entityName = obj.EntityTypeName;
+        if (string.IsNullOrEmpty(entityName)) return;
+        var index = _indexes.GetOrAdd(entityName, LoadIndex);
+        var metadata = GetOrCreateTypeMetadata(entityName);
         var tokens = BuildTokens(obj, index);
 
         index.Sync.EnterWriteLock();
@@ -452,7 +459,7 @@ public sealed class SearchIndexManager
             if (tokens.Count == 0)
             {
                 index.IsBuilt = true;
-                SaveIndex(type, index);
+                SaveIndex(entityName, index);
                 return;
             }
 
@@ -479,14 +486,14 @@ public sealed class SearchIndexManager
                     AddToBloomFilter(index, token, obj.Key);
 
                 if (metadata.IndexKinds.Contains(IndexKind.Graph) && uint.TryParse(token, out var targetId))
-                    AddToGraphIndex(index, obj.Key, targetId, type.Name);
+                    AddToGraphIndex(index, obj.Key, targetId, entityName);
 
                 if (metadata.IndexKinds.Contains(IndexKind.Spatial) && TryParseCoordinate(token, out var lat, out var lng))
                     AddToSpatialIndex(index, obj.Key, lat, lng);
             }
 
             index.IsBuilt = true;
-            SaveIndex(type, index);
+            SaveIndex(entityName, index);
         }
         finally
         {
@@ -545,14 +552,15 @@ public sealed class SearchIndexManager
         if (obj == null || obj.Key == 0)
             return;
 
-        var type = obj.GetType();
-        var metadata = GetOrCreateTypeMetadata(type);
-        var index = _indexes.GetOrAdd(type, LoadIndex);
+        var entityName = obj.EntityTypeName;
+        if (string.IsNullOrEmpty(entityName)) return;
+        var metadata = GetOrCreateTypeMetadata(entityName);
+        var index = _indexes.GetOrAdd(entityName, LoadIndex);
         index.Sync.EnterWriteLock();
         try
         {
             RemoveObjectInternal(index, obj.Key, metadata);
-            SaveIndex(type, index);
+            SaveIndex(entityName, index);
         }
         finally
         {
@@ -565,13 +573,14 @@ public sealed class SearchIndexManager
         if (type == null || id == 0)
             return;
 
-        var metadata = GetOrCreateTypeMetadata(type);
-        var index = _indexes.GetOrAdd(type, LoadIndex);
+        var entityName = EntityNameFromType(type);
+        var metadata = GetOrCreateTypeMetadata(entityName);
+        var index = _indexes.GetOrAdd(entityName, LoadIndex);
         index.Sync.EnterWriteLock();
         try
         {
             RemoveObjectInternal(index, id, metadata);
-            SaveIndex(type, index);
+            SaveIndex(entityName, index);
         }
         finally
         {
@@ -594,7 +603,8 @@ public sealed class SearchIndexManager
             return Array.Empty<uint>();
 
         EnsureBuilt(type, loadAll);
-        var index = _indexes.GetOrAdd(type, LoadIndex);
+        var entityName = EntityNameFromType(type);
+        var index = _indexes.GetOrAdd(entityName, LoadIndex);
         var results = new HashSet<uint>(8);
         index.Sync.EnterReadLock();
         try
@@ -625,8 +635,9 @@ public sealed class SearchIndexManager
             return Array.Empty<uint>();
 
         EnsureBuilt(type, loadAll);
-        var index = _indexes.GetOrAdd(type, LoadIndex);
-        var metadata = GetOrCreateTypeMetadata(type);
+        var entityName = EntityNameFromType(type);
+        var index = _indexes.GetOrAdd(entityName, LoadIndex);
+        var metadata = GetOrCreateTypeMetadata(entityName);
         
         // Determine which index to use
         IndexKind useKind;
@@ -762,17 +773,17 @@ public sealed class SearchIndexManager
         return results;
     }
 
-    private IndexData LoadIndex(Type type)
+    private IndexData LoadIndex(string entityName)
     {
         var index = new IndexData();
-        var path = GetIndexPath(type);
+        var path = GetIndexPath(entityName);
         if (!File.Exists(path))
             return index;
 
         try
         {
             // Decrypt if encrypted, passthrough if plaintext (backward compatible)
-            var fileContext = $"searchindex:{type.Name}";
+            var fileContext = $"searchindex:{entityName}";
             var decrypted = EncryptedFileIO.ReadDecrypted(path, fileContext);
 
             using var stream = new MemoryStream(decrypted);
@@ -788,7 +799,7 @@ public sealed class SearchIndexManager
             }
             if (version != 2)
             {
-                _logger?.LogError($"Unknown index version {version} for {type.Name}. Will rebuild.", new InvalidDataException($"Version {version}"));
+                _logger?.LogError($"Unknown index version {version} for {entityName}. Will rebuild.", new InvalidDataException($"Version {version}"));
                 index.IsBuilt = false; // Force rebuild on next EnsureBuilt
                 return index;
             }
@@ -828,7 +839,7 @@ public sealed class SearchIndexManager
             }
 
             // Rebuild secondary index structures from loaded tokens (#1174)
-            var metadata = GetOrCreateTypeMetadata(type);
+            var metadata = GetOrCreateTypeMetadata(entityName);
 
             if (metadata.IndexKinds.Contains(IndexKind.BTree))
             {
@@ -858,18 +869,18 @@ public sealed class SearchIndexManager
         }
         catch (Exception ex)
         {
-            _logger?.LogError($"Failed to load index for {type.Name}.", ex);
+            _logger?.LogError($"Failed to load index for {entityName}.", ex);
         }
 
         return index;
     }
 
-    private void SaveIndex(Type type, IndexData index)
+    private void SaveIndex(string entityName, IndexData index)
     {
         try
         {
             // Use binary format for faster saving and smaller file size
-            var path = GetIndexPath(type);
+            var path = GetIndexPath(entityName);
             var tempPath = path + ".tmp";
 
             byte[] plainBytes;
@@ -908,7 +919,7 @@ public sealed class SearchIndexManager
             }
 
             // Encrypt at rest when BMW_WAL_ENCRYPTION_KEY is configured
-            var fileContext = $"searchindex:{type.Name}";
+            var fileContext = $"searchindex:{entityName}";
             EncryptedFileIO.WriteEncrypted(tempPath, plainBytes, fileContext);
 
             // Atomic replace using overwrite parameter (available in .NET 6+)
@@ -916,7 +927,7 @@ public sealed class SearchIndexManager
         }
         catch (Exception ex)
         {
-            _logger?.LogError($"Failed to save index for {type.Name}.", ex);
+            _logger?.LogError($"Failed to save index for {entityName}.", ex);
         }
     }
 
@@ -934,7 +945,7 @@ public sealed class SearchIndexManager
             return;
         
         // Get metadata to determine which index types to build
-        var metadata = GetOrCreateTypeMetadata(allObjects[0].GetType());
+        var metadata = GetOrCreateTypeMetadata(allObjects[0].EntityTypeName);
         
         // Clear other index types
         if (metadata.IndexKinds.Contains(IndexKind.BTree))
@@ -993,8 +1004,7 @@ public sealed class SearchIndexManager
     private HashSet<string> BuildTokens(BaseDataObject obj, IndexData index)
     {
         var tokens = new HashSet<string>(8, StringComparer.OrdinalIgnoreCase);
-        var type = obj.GetType();
-        var metadata = GetOrCreateTypeMetadata(type);
+        var metadata = GetOrCreateTypeMetadata(obj.EntityTypeName);
 
         for (int i = 0; i < metadata.IndexedFields.Length; i++)
         {
@@ -1260,8 +1270,8 @@ public sealed class SearchIndexManager
             || type == typeof(sbyte);
     }
 
-    private string GetIndexPath(Type type)
-        => Path.Combine(_indexRoot, $"{type.Name}.idx");
+    private string GetIndexPath(string entityName)
+        => Path.Combine(_indexRoot, $"{entityName}.idx");
 
     // ===== BTree Index Methods =====
     private void InitializeBTreeIndex(IndexData index)
@@ -1601,7 +1611,8 @@ public sealed class SearchIndexManager
     public IReadOnlyCollection<uint> TraverseGraph(Type type, uint startId, int maxHops, Func<IEnumerable<BaseDataObject>> loadAll, string? edgeType = null)
     {
         EnsureBuilt(type, loadAll);
-        var index = _indexes.GetOrAdd(type, LoadIndex);
+        var entityName = EntityNameFromType(type);
+        var index = _indexes.GetOrAdd(entityName, LoadIndex);
         index.Sync.EnterReadLock();
         try
         {
@@ -1620,7 +1631,8 @@ public sealed class SearchIndexManager
     public IReadOnlyCollection<uint> GetNeighbours(Type type, uint nodeId, Func<IEnumerable<BaseDataObject>> loadAll)
     {
         EnsureBuilt(type, loadAll);
-        var index = _indexes.GetOrAdd(type, LoadIndex);
+        var entityName = EntityNameFromType(type);
+        var index = _indexes.GetOrAdd(entityName, LoadIndex);
         index.Sync.EnterReadLock();
         try
         {
@@ -1644,7 +1656,8 @@ public sealed class SearchIndexManager
     public IReadOnlyCollection<uint> GetReverseNeighbours(Type type, uint nodeId, Func<IEnumerable<BaseDataObject>> loadAll)
     {
         EnsureBuilt(type, loadAll);
-        var index = _indexes.GetOrAdd(type, LoadIndex);
+        var entityName = EntityNameFromType(type);
+        var index = _indexes.GetOrAdd(entityName, LoadIndex);
         index.Sync.EnterReadLock();
         try
         {
@@ -1738,7 +1751,8 @@ public sealed class SearchIndexManager
     public IReadOnlyCollection<uint> SearchRadius(Type type, double centerLat, double centerLng, double radiusKm, Func<IEnumerable<BaseDataObject>> loadAll)
     {
         EnsureBuilt(type, loadAll);
-        var index = _indexes.GetOrAdd(type, LoadIndex);
+        var entityName = EntityNameFromType(type);
+        var index = _indexes.GetOrAdd(entityName, LoadIndex);
         index.Sync.EnterReadLock();
         try
         {
@@ -1757,7 +1771,8 @@ public sealed class SearchIndexManager
     public IReadOnlyCollection<uint> SearchBoundingBox(Type type, double minLat, double maxLat, double minLng, double maxLng, Func<IEnumerable<BaseDataObject>> loadAll)
     {
         EnsureBuilt(type, loadAll);
-        var index = _indexes.GetOrAdd(type, LoadIndex);
+        var entityName = EntityNameFromType(type);
+        var index = _indexes.GetOrAdd(entityName, LoadIndex);
         index.Sync.EnterReadLock();
         try
         {
@@ -1776,7 +1791,8 @@ public sealed class SearchIndexManager
     public IReadOnlyList<(uint Id, double DistanceKm)> SearchNearest(Type type, double centerLat, double centerLng, int count, Func<IEnumerable<BaseDataObject>> loadAll)
     {
         EnsureBuilt(type, loadAll);
-        var index = _indexes.GetOrAdd(type, LoadIndex);
+        var entityName = EntityNameFromType(type);
+        var index = _indexes.GetOrAdd(entityName, LoadIndex);
         index.Sync.EnterReadLock();
         try
         {

@@ -85,7 +85,7 @@ public sealed class WalCompactor
             }
             catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
             {
-                Debug.WriteLine($"WalCompactor: sweep failed: {ex.GetType().Name}: {ex.Message}");
+                Debug.WriteLine($"WalCompactor: sweep failed: {ex.Message}");
             }
 
             try { await Task.Delay(SweepInterval, token).ConfigureAwait(false); }
