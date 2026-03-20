@@ -1,4 +1,3 @@
-using System.Text.Json;
 using BareMetalWeb.Rendering.Models;
 
 namespace BareMetalWeb.Data;
@@ -64,22 +63,13 @@ public sealed class DashboardDefinition : BaseDataObject
     [System.Text.Json.Serialization.JsonIgnore]
     public List<DashboardTile> Tiles
     {
-        get => DeserializeTiles(TilesJson);
-        set => TilesJson = JsonSerializer.Serialize(value ?? new List<DashboardTile>(), BmwDataJsonContext.Default.ListDashboardTile);
+        get => BmwManualJson.DeserializeDashboardTiles(TilesJson);
+        set => TilesJson = BmwManualJson.SerializeDashboardTiles(value ?? new List<DashboardTile>());
     }
 
     private static List<DashboardTile> DeserializeTiles(string json)
     {
-        try
-        {
-            return string.IsNullOrWhiteSpace(json)
-                ? new List<DashboardTile>()
-                : JsonSerializer.Deserialize(json, BmwDataJsonContext.Default.ListDashboardTile) ?? new List<DashboardTile>();
-        }
-        catch
-        {
-            return new List<DashboardTile>();
-        }
+        return BmwManualJson.DeserializeDashboardTiles(json);
     }
 
     public override string ToString() => Name;

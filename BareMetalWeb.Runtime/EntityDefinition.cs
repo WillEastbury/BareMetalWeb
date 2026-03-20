@@ -137,5 +137,13 @@ public class EntityDefinition : BaseDataObject
         set => _values[Ord_FormLayout] = value;
     }
 
+    /// <summary>
+    /// When true, registers a GET-based ingress route (<c>/api/{slug}/_ingest?text=…</c>
+    /// and <c>/queryinput/{slug}?text=…</c>) that creates a record by populating
+    /// the field marked <see cref="FieldDefinition.IsIngressTarget"/>.
+    /// </summary>
+    [DataField(Label = "Enable GET Ingress", Order = 12)]
+    public bool EnableGetIngress { get; set; } = false;
+
     public override string ToString() => Name;
 }

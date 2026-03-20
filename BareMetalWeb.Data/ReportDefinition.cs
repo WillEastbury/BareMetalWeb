@@ -1,4 +1,3 @@
-using System.Text.Json;
 using BareMetalWeb.Rendering.Models;
 
 namespace BareMetalWeb.Data;
@@ -118,42 +117,28 @@ public sealed class ReportDefinition : BaseDataObject
     [System.Text.Json.Serialization.JsonIgnore]
     public List<ReportJoin> Joins
     {
-        get => DeserializeList(JoinsJson, BmwDataJsonContext.Default.ListReportJoin);
-        set => JoinsJson = JsonSerializer.Serialize(value ?? new List<ReportJoin>(), BmwDataJsonContext.Default.ListReportJoin);
+        get => BmwManualJson.DeserializeReportJoins(JoinsJson);
+        set => JoinsJson = BmwManualJson.SerializeReportJoins(value ?? new List<ReportJoin>());
     }
 
     [System.Text.Json.Serialization.JsonIgnore]
     public List<ReportColumn> Columns
     {
-        get => DeserializeList(ColumnsJson, BmwDataJsonContext.Default.ListReportColumn);
-        set => ColumnsJson = JsonSerializer.Serialize(value ?? new List<ReportColumn>(), BmwDataJsonContext.Default.ListReportColumn);
+        get => BmwManualJson.DeserializeReportColumns(ColumnsJson);
+        set => ColumnsJson = BmwManualJson.SerializeReportColumns(value ?? new List<ReportColumn>());
     }
 
     [System.Text.Json.Serialization.JsonIgnore]
     public List<ReportFilter> Filters
     {
-        get => DeserializeList(FiltersJson, BmwDataJsonContext.Default.ListReportFilter);
-        set => FiltersJson = JsonSerializer.Serialize(value ?? new List<ReportFilter>(), BmwDataJsonContext.Default.ListReportFilter);
+        get => BmwManualJson.DeserializeReportFilters(FiltersJson);
+        set => FiltersJson = BmwManualJson.SerializeReportFilters(value ?? new List<ReportFilter>());
     }
 
     [System.Text.Json.Serialization.JsonIgnore]
     public List<ReportParameter> Parameters
     {
-        get => DeserializeList(ParametersJson, BmwDataJsonContext.Default.ListReportParameter);
-        set => ParametersJson = JsonSerializer.Serialize(value ?? new List<ReportParameter>(), BmwDataJsonContext.Default.ListReportParameter);
-    }
-
-    private static List<T> DeserializeList<T>(string json, System.Text.Json.Serialization.Metadata.JsonTypeInfo<List<T>> typeInfo)
-    {
-        try
-        {
-            return string.IsNullOrWhiteSpace(json)
-                ? new List<T>()
-                : JsonSerializer.Deserialize(json, typeInfo) ?? new List<T>();
-        }
-        catch
-        {
-            return new List<T>();
-        }
+        get => BmwManualJson.DeserializeReportParameters(ParametersJson);
+        set => ParametersJson = BmwManualJson.SerializeReportParameters(value ?? new List<ReportParameter>());
     }
 }

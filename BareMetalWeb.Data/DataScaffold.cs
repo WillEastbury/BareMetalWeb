@@ -112,7 +112,8 @@ public sealed record DataEntityMetadata(
     string? DefaultSortField = null,
     SortDirection DefaultSortDirection = SortDirection.Asc,
     IReadOnlyList<DataFieldMetadata>? DocumentRelationFields = null,
-    IReadOnlyList<ValidationRuleAttribute>? EntityValidationRules = null
+    IReadOnlyList<ValidationRuleAttribute>? EntityValidationRules = null,
+    bool EnableGetIngress = false
 )
 {
     private DataFieldMetadata[]? _listFields;

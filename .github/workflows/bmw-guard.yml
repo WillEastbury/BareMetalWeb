@@ -1,0 +1,45 @@
+# ────────────────────────────────────────────────────────────────────────────────
+# BMW Guard — Forbidden API Scanner
+#
+# Scans all C# source files for forbidden APIs, patterns, and architectural
+# smells that violate BareMetalWeb design principles:
+#   • No reflection (System.Reflection, typeof, GetType, Activator)
+#   • No JSON serialization (System.Text.Json, JsonSerializer)
+#   • No dynamic keyword
+#   • No unnecessary abstraction (Service/Repository/Manager class patterns)
+#   • NuGet dependency audit (warning only)
+#
+# Runs on every PR and push to main.
+# ────────────────────────────────────────────────────────────────────────────────
+name: "0 · BMW Guard — Forbidden API Scanner"
+
+run-name: "0 · BMW Guard — Forbidden API Scanner"
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: bmw-guard-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  bmw-guard:
+    name: BMW Guard scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run BMW Guard
+        run: |
+          chmod +x tools/bmw-guard.sh
+          ./tools/bmw-guard.sh

@@ -37,6 +37,7 @@ public sealed class RuntimeEntityModel
         int version,
         string schemaHash,
         string formLayout,
+        bool enableGetIngress,
         IReadOnlyList<RuntimeFieldModel> fields,
         IReadOnlyList<RuntimeIndexModel> indexes,
         IReadOnlyList<RuntimeActionModel> actions)
@@ -52,6 +53,7 @@ public sealed class RuntimeEntityModel
         Version = version;
         SchemaHash = schemaHash;
         FormLayout = formLayout;
+        EnableGetIngress = enableGetIngress;
         Fields = fields;
         Indexes = indexes;
         Actions = actions;
@@ -72,6 +74,9 @@ public sealed class RuntimeEntityModel
 
     /// <summary>Form layout: "Standard" or "Wizard".</summary>
     public string FormLayout { get; }
+
+    /// <summary>When true, a GET ingress route is registered for this entity.</summary>
+    public bool EnableGetIngress { get; }
 
     public IReadOnlyList<RuntimeFieldModel> Fields { get; }
     public IReadOnlyList<RuntimeIndexModel> Indexes { get; }
@@ -239,7 +244,8 @@ public sealed class RuntimeEntityModel
             Fields: fields,
             Handlers: handlers,
             Commands: commands,
-            DocumentRelationFields: docRelFields
+            DocumentRelationFields: docRelFields,
+            EnableGetIngress: EnableGetIngress
         );
     }
 }

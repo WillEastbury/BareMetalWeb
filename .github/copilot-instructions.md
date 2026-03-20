@@ -29,6 +29,7 @@ BareMetalWeb uses a multi-agent development model where autonomous agents resolv
 Before committing:
 - Run `dotnet build BareMetalWeb.sln`
 - Run `dotnet test BareMetalWeb.sln --no-build -v quiet`
+- Run `./tools/bmw-guard.sh` (forbidden API scanner — must pass before committing)
 - ARM64/proot environments must follow the runsettings guidance already present in the instructions
 
 ## 5. Commit Format
@@ -172,6 +173,44 @@ All code contributed to this project — whether by humans or AI agents — **MU
 - **No reflection on the hot path.** Reflection is only acceptable at startup for one-time metadata caching. Never use `Type.GetMethod()`, `Activator.CreateInstance()`, or similar in request processing.
 - **AOT and trim safe.** All code must be compatible with Native AOT compilation and IL trimming. No `dynamic`, no unconstrained `MakeGenericType`, no runtime code generation. Use `[DynamicallyAccessedMembers]` or source generators where needed.
 - **Use hardware acceleration where possible.** Leverage `Vector<T>`, `Vector128<T>`/`Vector256<T>`, `System.Numerics`, SIMD intrinsics, and hardware-accelerated APIs (`Crc32`, `AesGcm`, `SHA256.HashData`) for any compute-intensive operations (hashing, searching, serialisation, crypto).
+
+### NativeAOT + Trimming Constraints (HARD RULES — any violation is a BUG)
+
+This codebase targets NativeAOT + trimming. The following APIs are **BANNED** — any usage is a bug:
+
+| Banned API / Pattern | Why |
+|---|---|
+| `System.Reflection` (any usage beyond startup metadata caching) | Stripped by trimmer; not AOT-safe |
+| `Activator.CreateInstance` | Runtime type construction; not AOT-safe |
+| `Type.MakeGenericType` / `MethodInfo.MakeGenericMethod` | Runtime generic construction; not AOT-safe |
+| `dynamic` / DLR | Requires runtime code generation |
+| `System.Text.Json.JsonSerializer` (generic or non-generic) | Use `BmwJsonSerializer` or `BinaryObjectSerializer` instead |
+| `System.Reflection.Emit` | Runtime IL generation; not available in NativeAOT |
+| `AppDomain.GetAssemblies()` / assembly scanning | Not trim-safe; types resolved by string name will be stripped |
+| Runtime type discovery or construction | Use `DataRecord` and the metadata services instead |
+
+**ALLOWED PATTERNS ONLY:**
+
+- Closed generics known at compile time
+- Static generic methods where `T` is known at the call site
+- `Span<T>`, `Memory<T>`, and blittable structs preferred
+- `switch` / dictionary dispatch instead of reflection
+- Pre-compiled delegates cached at startup (one-time reflection during initialization is tolerated but discouraged)
+
+**DESIGN PRINCIPLE:**
+
+All behaviour must be resolvable at compile time. Metadata may describe behaviour, but must not construct types dynamically.
+
+**ALTERNATIVES:**
+
+If a solution would normally use reflection or `JsonSerializer`, use:
+- `BmwJsonSerializer` — manual JSON writing via `Utf8JsonWriter`, metadata-driven
+- `BinaryObjectSerializer` — custom binary format, metadata-driven, pre-registered known types
+- `DataRecord` + `DataEntityMetadata` — ordinal-based field access with pre-compiled delegates
+
+**FAIL FAST:** If a requested design cannot be implemented without violating these constraints, say so explicitly instead of working around them.
+
+> See `docs/AOT_TRIMMING_CONSTRAINTS.md` for the full reference document and `docs/violations/` for tracked violations.
 
 ### Security & Privacy
 - **No OWASP vulnerabilities.** Code must be free of injection (SQL, command, header, log), XSS, CSRF, path traversal, insecure deserialisation, broken access control, and all other OWASP Top 10 categories.
@@ -388,15 +427,24 @@ When making code changes, you **MUST** update the corresponding architecture doc
    - Any failures must be pre-existing and unrelated to your changes (document these)
    - Alternative: Use helper script `./run-tests.sh` (includes build)
 
-3. **If tests fail due to your changes**: You MUST fix them before committing
+3. **MUST run BMW Guard**: `./tools/bmw-guard.sh`
+   - The BMW Guard scans all C# source files for forbidden APIs and architectural violations
+   - Your changes MUST NOT introduce new violations of the forbidden patterns
+   - The guard checks for: reflection (`System.Reflection`, `typeof(`, `GetType(`, `Activator.CreateInstance`), JSON serialization (`System.Text.Json`, `JsonSerializer`), `dynamic` keyword, and architectural smells (Service/Repository/Manager class patterns)
+   - This runs as a CI gate in GitHub Actions — if it fails, your PR will be blocked
 
-4. **If build fails**: You MUST fix compilation errors before committing
+4. **If tests fail due to your changes**: You MUST fix them before committing
+
+5. **If build fails**: You MUST fix compilation errors before committing
+
+6. **If BMW Guard fails due to your changes**: You MUST remove the forbidden API usage before committing
 
 **Test Commands:**
 - Full build: `dotnet build BareMetalWeb.sln`
 - Full test suite: `dotnet test BareMetalWeb.sln --no-build -v quiet`
 - Specific project: `dotnet test BareMetalWeb.Core.Tests/ --no-build -v quiet`
 - Helper script: `./run-tests.sh` (builds and tests in one step)
+- BMW Guard: `./tools/bmw-guard.sh` (forbidden API scanner)
 
 **ARM64 / proot Test Runner Fix:**
 This environment runs under proot on ARM64 (Termux). The vstest runner's `DotnetHostHelper` fails to detect the dotnet muxer because the process appears as `libproot-loader.so` instead of `dotnet`. This causes `"Could not find 'dotnet' host for the 'ARM64' architecture"` errors.

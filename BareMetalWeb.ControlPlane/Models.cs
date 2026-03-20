@@ -1,14 +1,12 @@
 namespace BareMetalWeb.ControlPlane;
 
-using System.Text.Json.Serialization;
-
 // ── Deployment ring ──────────────────────────────────────────────────────────
 
 /// <summary>
 /// Staged deployment ring that determines which runtime version an agent receives.
 /// Rings are ordered from fastest-moving (Testing) to most stable (Main).
+/// Serialized as a string manually via ControlPlaneJson — no attribute-based conversion.
 /// </summary>
-[JsonConverter(typeof(JsonStringEnumConverter<DeploymentRing>))]
 public enum DeploymentRing
 {
     Testing = 0,

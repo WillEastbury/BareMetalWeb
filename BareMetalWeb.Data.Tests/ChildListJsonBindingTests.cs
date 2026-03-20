@@ -182,6 +182,33 @@ public class ChildListJsonBindingTests : IDisposable
     }
 
     [Fact]
+    public void ApplyValuesFromJson_Order_With_Rows_No_Error()
+    {
+        Assert.True(DataScaffold.TryGetEntity("orders", out var metadata));
+
+        var instance = metadata.Handlers.Create();
+        var json = """
+        {
+            "OrderNumber": "ORD-001",
+            "CustomerId": "cust-1",
+            "OrderDate": "2025-01-15",
+            "Status": "Open",
+            "CurrencyId": "GBP",
+            "OrderRows": [
+                { "ProductId": "prod-1", "Quantity": 2, "UnitPrice": 15.00 }
+            ]
+        }
+        """;
+
+        var doc = JsonDocToDict(json);
+        var errors = DataScaffold.ApplyValuesFromJson(metadata, instance, doc, forCreate: true, allowMissing: true);
+
+        // Should NOT contain "Order Rows is invalid."
+        Assert.DoesNotContain(errors, e => e.Contains("Order Rows", System.StringComparison.OrdinalIgnoreCase));
+        Assert.Equal("ORD-001", metadata.FindField("OrderNumber")!.GetValueFn(instance));
+    }
+
+    [Fact]
     public void TryConvertJson_ListString_Still_Works()
     {
         // Ensure we didn't break List<string> handling
@@ -231,5 +258,14 @@ public class ChildListJsonBindingTests : IDisposable
 
         public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
         { Delete<T>(key); return ValueTask.CompletedTask; }
+    }
+
+    private static Dictionary<string, JsonElement> JsonDocToDict(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var dict = new Dictionary<string, JsonElement>();
+        foreach (var prop in doc.RootElement.EnumerateObject())
+            dict[prop.Name] = prop.Value.Clone();
+        return dict;
     }
 }

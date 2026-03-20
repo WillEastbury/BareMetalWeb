@@ -406,7 +406,7 @@ public class LookupApiHandlerTests : IDisposable
         _testStore.Save(new Product { Key = 1, Name = "Widget" });
         _testStore.Save(new Product { Key = 2, Name = "Gadget" });
 
-        var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { ids = new[] { "1", "2" } });
+        var context = CreatePostHttpContext("/api/_lookup/products/_batch", "{\"ids\":[\"1\",\"2\"]}");
 
         // Act
         await _server.RequestHandler(context.ToBmw());
@@ -425,7 +425,7 @@ public class LookupApiHandlerTests : IDisposable
         // Arrange
         _testStore.Save(new Product { Key = 1, Name = "Widget" });
 
-        var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { ids = new[] { "1", "999" } });
+        var context = CreatePostHttpContext("/api/_lookup/products/_batch", "{\"ids\":[\"1\",\"999\"]}");
 
         // Act
         await _server.RequestHandler(context.ToBmw());
@@ -442,7 +442,7 @@ public class LookupApiHandlerTests : IDisposable
     public async Task BatchGetEntities_ReturnsEmptyResults_WhenIdsArrayIsEmpty()
     {
         // Arrange
-        var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { ids = Array.Empty<string>() });
+        var context = CreatePostHttpContext("/api/_lookup/products/_batch", "{\"ids\":[]}");
 
         // Act
         await _server.RequestHandler(context.ToBmw());
@@ -457,7 +457,7 @@ public class LookupApiHandlerTests : IDisposable
     public async Task BatchGetEntities_Returns400_WhenBodyMissingIdsProperty()
     {
         // Arrange
-        var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { something = "else" });
+        var context = CreatePostHttpContext("/api/_lookup/products/_batch", "{\"something\":\"else\"}");
 
         // Act
         await _server.RequestHandler(context.ToBmw());
@@ -470,7 +470,7 @@ public class LookupApiHandlerTests : IDisposable
     public async Task BatchGetEntities_Returns404_ForUnknownEntityType()
     {
         // Arrange
-        var context = CreatePostHttpContext("/api/_lookup/nonexistent-type/_batch", new { ids = new[] { "1" } });
+        var context = CreatePostHttpContext("/api/_lookup/nonexistent-type/_batch", "{\"ids\":[\"1\"]}");
 
         // Act
         await _server.RequestHandler(context.ToBmw());
@@ -485,7 +485,7 @@ public class LookupApiHandlerTests : IDisposable
         // Arrange
         _testStore.Save(new Product { Key = 1, Name = "Widget" });
 
-        var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { ids = new[] { "1", "1", "1" } });
+        var context = CreatePostHttpContext("/api/_lookup/products/_batch", "{\"ids\":[\"1\",\"1\",\"1\"]}");
 
         // Act
         await _server.RequestHandler(context.ToBmw());
@@ -707,7 +707,7 @@ public class LookupApiHandlerTests : IDisposable
         var order = new Order { Key = 401, OrderNumber = "ORD-004", CustomerId = "400", Status = "Open" };
         _testStore.Save(order);
 
-        var context = CreatePostHttpContext("/api/_lookup/orders/_batch?traverseRelationships=true", new { ids = new[] { "401" } });
+        var context = CreatePostHttpContext("/api/_lookup/orders/_batch?traverseRelationships=true", "{\"ids\":[\"401\"]}");
 
         // Act
         await _server.RequestHandler(context.ToBmw());
@@ -761,10 +761,10 @@ public class LookupApiHandlerTests : IDisposable
         return context;
     }
 
-    private HttpContext CreatePostHttpContext(string path, object body)
+    private HttpContext CreatePostHttpContext(string path, string jsonBody)
     {
         var context = CreateHttpContext("POST", path);
-        var json = JsonSerializer.SerializeToUtf8Bytes(body);
+        var json = Encoding.UTF8.GetBytes(jsonBody);
         context.Request.Body = new MemoryStream(json);
         context.Request.ContentType = "application/json";
         context.Request.ContentLength = json.Length;

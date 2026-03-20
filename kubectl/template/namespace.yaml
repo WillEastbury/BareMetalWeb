@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${TENANT_NAME}
+  labels:
+    app.kubernetes.io/part-of: baremetalweb
+    baremetalweb/tenant: ${TENANT_NAME}

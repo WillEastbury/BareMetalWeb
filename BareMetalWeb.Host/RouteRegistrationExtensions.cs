@@ -145,6 +145,11 @@ public static class RouteRegistrationExtensions
                     await context.Response.WriteAsync("{\"status\":\"not_ready\",\"reason\":\"Server is still initializing\"}");
                 }
             }));
+
+        // GET ingress HTML form — user-facing page for entities with EnableGetIngress
+        host.RegisterRoute("GET /queryinput/{type}", new RouteHandlerData(
+            pageInfoFactory.RawPage("Public", false),
+            async context => await HandleGetIngest(context, json: false)));
     }
 
     /// <summary>
@@ -928,6 +933,11 @@ public static class RouteRegistrationExtensions
                     JsonWriterHelper.WriteValue(w, new Dictionary<string, object?> { ["nodes"] = nodes, ["links"] = links });
                 }
             }));
+
+        // GET ingress — must precede /api/{type}/{id} to avoid '_ingest' matching {id}
+        host.RegisterRoute("GET /api/{type}/_ingest", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            async context => await HandleGetIngest(context, json: true)));
 
         // List and create
         host.RegisterRoute("GET /api/{type}", new RouteHandlerData(
@@ -4337,5 +4347,131 @@ public static class RouteRegistrationExtensions
                 }
                 await context.Response.Body.WriteAsync(ms.ToArray()).ConfigureAwait(false);
             }));
+    }
+
+    // ── GET ingress handler ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Shared handler for <c>GET /api/{type}/_ingest?text=…</c> (JSON response)
+    /// and <c>GET /queryinput/{type}?text=…</c> (HTML form response).
+    /// Creates a record on the target entity using the metadata-flagged ingress field.
+    /// </summary>
+    private static async Task HandleGetIngest(BmwContext context, bool json)
+    {
+        var slug = GetRouteParam(context, "type") ?? string.Empty;
+        var registry = RuntimeEntityRegistry.Current;
+        var walProvider = DataStoreProvider.PrimaryProvider as WalDataProvider;
+
+        if (walProvider == null)
+        {
+            context.Response.StatusCode = 503;
+            if (json) await context.Response.WriteAsync("{\"ok\":false,\"error\":\"Storage unavailable\"}");
+            else      await context.Response.WriteAsync("Storage unavailable.");
+            return;
+        }
+
+        if (!registry.TryGet(slug, out var model) || !model.EnableGetIngress)
+        {
+            context.Response.StatusCode = 404;
+            if (json) await context.Response.WriteAsync("{\"ok\":false,\"error\":\"Entity not found or ingress not enabled\"}");
+            else      await context.Response.WriteAsync("Entity not found or GET ingress not enabled.");
+            return;
+        }
+
+        // Find the ingress-target field
+        int targetOrd = -1;
+        string targetName = "";
+        foreach (var f in model.Fields)
+        {
+            if (f.IsIngressTarget)
+            {
+                targetOrd = f.Ordinal;
+                targetName = f.Name;
+                break;
+            }
+        }
+
+        if (targetOrd < 0)
+        {
+            context.Response.StatusCode = 400;
+            if (json) await context.Response.WriteAsync("{\"ok\":false,\"error\":\"No ingress target field configured\"}");
+            else      await context.Response.WriteAsync("No ingress target field is configured for this entity.");
+            return;
+        }
+
+        var text = context.HttpRequest.Query.ContainsKey("text")
+            ? context.HttpRequest.Query["text"].ToString()
+            : null;
+
+        // If text was provided, create the record
+        uint recordKey = 0;
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            var schema = EntitySchemaFactory.FromModel(model);
+            var record = schema.CreateRecord();
+            record.EntityTypeName = model.Name;
+            record.SetValue(targetOrd, text);
+            walProvider.SaveRecord(record, schema);
+            recordKey = record.Key;
+        }
+
+        if (json)
+        {
+            context.Response.ContentType = "application/json";
+            await using var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions);
+            w.WriteStartObject();
+
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                w.WriteBoolean("ok", true);
+                w.WriteNumber("id", recordKey);
+            }
+            else
+            {
+                w.WriteBoolean("ok", false);
+                w.WriteString("error", "Query parameter 'text' is required");
+            }
+
+            w.WriteEndObject();
+        }
+        else
+        {
+            var entityLabel = WebUtility.HtmlEncode(model.Name);
+            var fieldLabel = WebUtility.HtmlEncode(targetName);
+            var sb = new StringBuilder(1024);
+            sb.Append("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
+            sb.Append("<title>").Append(entityLabel).Append(" — Quick Input</title><style>");
+            sb.Append("*{margin:0;padding:0;box-sizing:border-box}");
+            sb.Append("body{font-family:system-ui,-apple-system,sans-serif;background:#f4f6f9;color:#333}");
+            sb.Append("header{background:#1a1a2e;color:#fff;padding:16px 24px;font-size:1.4em;font-weight:600}");
+            sb.Append(".container{max-width:600px;margin:24px auto;padding:0 16px}");
+            sb.Append("form{display:flex;gap:8px;margin-bottom:24px}");
+            sb.Append("input[type=text]{flex:1;padding:10px 14px;border:1px solid #ccc;border-radius:6px;font-size:1em}");
+            sb.Append("button{padding:10px 20px;background:#4361ee;color:#fff;border:none;border-radius:6px;font-size:1em;cursor:pointer}");
+            sb.Append("button:hover{background:#3a56d4}");
+            sb.Append(".msg{padding:12px 16px;border-radius:6px;margin-bottom:16px;font-size:.95em}");
+            sb.Append(".msg-ok{background:#e8f5e9;color:#2e7d32}.msg-err{background:#fce4ec;color:#c62828}");
+            sb.Append("footer{text-align:center;padding:24px;color:#999;font-size:.85em}");
+            sb.Append("</style></head><body>");
+            sb.Append("<header>&#9998; ").Append(entityLabel).Append(" — Quick Input</header>");
+            sb.Append("<div class=\"container\">");
+
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                sb.Append("<div class=\"msg msg-ok\">&#10003; Saved to <b>")
+                  .Append(fieldLabel).Append("</b> (id ").Append(recordKey).Append(")</div>");
+            }
+
+            sb.Append("<form method=\"get\" action=\"/queryinput/")
+              .Append(WebUtility.HtmlEncode(slug)).Append("\">");
+            sb.Append("<input type=\"text\" name=\"text\" placeholder=\"Enter ").Append(fieldLabel).Append("...\" value=\"\" autofocus>");
+            sb.Append("<button type=\"submit\">Submit</button>");
+            sb.Append("</form>");
+
+            sb.Append("</div><footer>BareMetalWeb &middot; ").Append(entityLabel).Append("</footer></body></html>");
+
+            context.Response.ContentType = "text/html";
+            await context.Response.WriteAsync(sb.ToString());
+        }
     }
 }

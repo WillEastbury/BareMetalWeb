@@ -1,4 +1,3 @@
-using System.Text.Json;
 using BareMetalWeb.Rendering.Models;
 
 namespace BareMetalWeb.Data;
@@ -125,43 +124,29 @@ public sealed class ViewDefinition : BaseDataObject
     [System.Text.Json.Serialization.JsonIgnore]
     public List<ViewProjection> Projections
     {
-        get => DeserializeList(ProjectionsJson, BmwDataJsonContext.Default.ListViewProjection);
-        set => ProjectionsJson = JsonSerializer.Serialize(value ?? new List<ViewProjection>(), BmwDataJsonContext.Default.ListViewProjection);
+        get => BmwManualJson.DeserializeViewProjections(ProjectionsJson);
+        set => ProjectionsJson = BmwManualJson.SerializeViewProjections(value ?? new List<ViewProjection>());
     }
 
     [System.Text.Json.Serialization.JsonIgnore]
     public List<ViewJoinDefinition> Joins
     {
-        get => DeserializeList(JoinsJson, BmwDataJsonContext.Default.ListViewJoinDefinition);
-        set => JoinsJson = JsonSerializer.Serialize(value ?? new List<ViewJoinDefinition>(), BmwDataJsonContext.Default.ListViewJoinDefinition);
+        get => BmwManualJson.DeserializeViewJoins(JoinsJson);
+        set => JoinsJson = BmwManualJson.SerializeViewJoins(value ?? new List<ViewJoinDefinition>());
     }
 
     [System.Text.Json.Serialization.JsonIgnore]
     public List<ViewFilterDefinition> Filters
     {
-        get => DeserializeList(FiltersJson, BmwDataJsonContext.Default.ListViewFilterDefinition);
-        set => FiltersJson = JsonSerializer.Serialize(value ?? new List<ViewFilterDefinition>(), BmwDataJsonContext.Default.ListViewFilterDefinition);
+        get => BmwManualJson.DeserializeViewFilters(FiltersJson);
+        set => FiltersJson = BmwManualJson.SerializeViewFilters(value ?? new List<ViewFilterDefinition>());
     }
 
     [System.Text.Json.Serialization.JsonIgnore]
     public List<ViewSortDefinition> Sorts
     {
-        get => DeserializeList(SortsJson, BmwDataJsonContext.Default.ListViewSortDefinition);
-        set => SortsJson = JsonSerializer.Serialize(value ?? new List<ViewSortDefinition>(), BmwDataJsonContext.Default.ListViewSortDefinition);
-    }
-
-    private static List<T> DeserializeList<T>(string json, System.Text.Json.Serialization.Metadata.JsonTypeInfo<List<T>> typeInfo)
-    {
-        try
-        {
-            return string.IsNullOrWhiteSpace(json)
-                ? new List<T>()
-                : JsonSerializer.Deserialize(json, typeInfo) ?? new List<T>();
-        }
-        catch
-        {
-            return new List<T>();
-        }
+        get => BmwManualJson.DeserializeViewSorts(SortsJson);
+        set => SortsJson = BmwManualJson.SerializeViewSorts(value ?? new List<ViewSortDefinition>());
     }
 }
 

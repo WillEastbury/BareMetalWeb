@@ -1,9 +1,51 @@
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using BareMetalWeb.ControlPlane;
 
 namespace BareMetalWeb.Agent;
+
+// ── Manual JSON helpers for agent state file (camelCase) ─────────────────────
+
+internal static class AgentJson
+{
+    internal static NodeIdentity? DeserializeNodeIdentity(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        using var doc = JsonDocument.Parse(json);
+        var r = doc.RootElement;
+        var ringStr = r.TryGetProperty("ring", out var rv) ? rv.GetString() : null;
+        Enum.TryParse<DeploymentRing>(ringStr, true, out var ring);
+        return new NodeIdentity
+        {
+            NodeId = Str(r, "nodeId"),
+            ServicePrincipal = Str(r, "servicePrincipal"),
+            Secret = Str(r, "secret"),
+            ClusterEndpoint = Str(r, "clusterEndpoint"),
+            CertFingerprint = Str(r, "certFingerprint"),
+            Ring = ring,
+        };
+    }
+
+    internal static string SerializeNodeIdentity(NodeIdentity node)
+    {
+        var buf = new System.Buffers.ArrayBufferWriter<byte>(256);
+        using var w = new Utf8JsonWriter(buf, new JsonWriterOptions { Indented = true });
+        w.WriteStartObject();
+        w.WriteString("nodeId", node.NodeId);
+        w.WriteString("servicePrincipal", node.ServicePrincipal);
+        w.WriteString("secret", node.Secret);
+        w.WriteString("clusterEndpoint", node.ClusterEndpoint);
+        w.WriteString("certFingerprint", node.CertFingerprint);
+        w.WriteString("ring", node.Ring.ToString());
+        w.WriteEndObject();
+        w.Flush();
+        return Encoding.UTF8.GetString(buf.WrittenSpan);
+    }
+
+    private static string Str(JsonElement el, string name)
+        => el.TryGetProperty(name, out var v) ? v.GetString() ?? "" : "";
+}
 
 /// <summary>
 /// Configuration for the bootstrap deployment agent.
@@ -106,7 +148,7 @@ internal sealed class AgentConfig
             try
             {
                 var json = File.ReadAllText(cfg.StateFile);
-                cfg.Node = JsonSerializer.Deserialize(json, AgentJsonContext.Default.NodeIdentity);
+                cfg.Node = AgentJson.DeserializeNodeIdentity(json);
             }
             catch (Exception ex)
             {
@@ -139,10 +181,3 @@ internal sealed class AgentConfig
         : "/opt/bmw";
 }
 
-[JsonSerializable(typeof(NodeIdentity))]
-[JsonSerializable(typeof(NodeRegistrationRequest))]
-[JsonSerializable(typeof(NodeAttestationRequest))]
-[JsonSourceGenerationOptions(
-    WriteIndented = true,
-    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
-internal partial class AgentJsonContext : JsonSerializerContext { }

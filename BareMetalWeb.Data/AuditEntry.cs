@@ -132,10 +132,10 @@ public sealed class AuditEntry : BaseDataObject
     {
         get
         {
-            try { return string.IsNullOrEmpty(FieldChangesJson) ? new() : System.Text.Json.JsonSerializer.Deserialize(FieldChangesJson, BmwDataJsonContext.Default.ListFieldChange) ?? new(); }
+            try { return BmwManualJson.DeserializeFieldChanges(FieldChangesJson); }
             catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"AuditEntry.FieldChanges deserialization failed: {ex.Message}"); return new(); }
         }
-        set { FieldChangesJson = System.Text.Json.JsonSerializer.Serialize(value ?? new List<FieldChange>(), BmwDataJsonContext.Default.ListFieldChange); }
+        set { FieldChangesJson = BmwManualJson.SerializeFieldChanges(value ?? new List<FieldChange>()); }
     }
 
     /// <summary>

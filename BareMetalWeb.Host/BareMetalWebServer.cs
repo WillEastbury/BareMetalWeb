@@ -536,6 +536,10 @@ public class BareMetalWebServer : IBareWebHost
             _backgroundTasks.Add(("WalCompactor", compactionTask));
         }
 
+        // Deployment target upgrade watcher
+        var deployWatcherTask = new DeploymentWatcherService(BufferedLogger).RunAsync(cts.Token);
+        _backgroundTasks.Add(("DeploymentWatcher", deployWatcherTask));
+
         // Control plane telemetry streaming
         if (ControlPlane is not null)
         {

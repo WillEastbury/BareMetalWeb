@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Core;
@@ -38,7 +37,7 @@ public static class SampleGalleryService
             using var stream = assembly.GetManifestResourceStream(resourceName);
             if (stream == null) continue;
 
-            var pkg = JsonSerializer.Deserialize(stream, SamplePackageJsonContext.Default.SamplePackage);
+            var pkg = SamplePackageJson.Deserialize(stream);
             if (pkg != null)
                 packages.Add(pkg);
         }
@@ -70,7 +69,7 @@ public static class SampleGalleryService
         using var stream = assembly.GetManifestResourceStream(resourceName);
         if (stream == null) return null;
 
-        return JsonSerializer.Deserialize(stream, SamplePackageJsonContext.Default.SamplePackage);
+        return SamplePackageJson.Deserialize(stream);
     }
 
     // ── Deployment ───────────────────────────────────────────────────────────
