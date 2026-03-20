@@ -173,6 +173,44 @@ All code contributed to this project — whether by humans or AI agents — **MU
 - **AOT and trim safe.** All code must be compatible with Native AOT compilation and IL trimming. No `dynamic`, no unconstrained `MakeGenericType`, no runtime code generation. Use `[DynamicallyAccessedMembers]` or source generators where needed.
 - **Use hardware acceleration where possible.** Leverage `Vector<T>`, `Vector128<T>`/`Vector256<T>`, `System.Numerics`, SIMD intrinsics, and hardware-accelerated APIs (`Crc32`, `AesGcm`, `SHA256.HashData`) for any compute-intensive operations (hashing, searching, serialisation, crypto).
 
+### NativeAOT + Trimming Constraints (HARD RULES — any violation is a BUG)
+
+This codebase targets NativeAOT + trimming. The following APIs are **BANNED** — any usage is a bug:
+
+| Banned API / Pattern | Why |
+|---|---|
+| `System.Reflection` (any usage beyond startup metadata caching) | Stripped by trimmer; not AOT-safe |
+| `Activator.CreateInstance` | Runtime type construction; not AOT-safe |
+| `Type.MakeGenericType` / `MethodInfo.MakeGenericMethod` | Runtime generic construction; not AOT-safe |
+| `dynamic` / DLR | Requires runtime code generation |
+| `System.Text.Json.JsonSerializer` (generic or non-generic) | Use `BmwJsonSerializer` or `BinaryObjectSerializer` instead |
+| `System.Reflection.Emit` | Runtime IL generation; not available in NativeAOT |
+| `AppDomain.GetAssemblies()` / assembly scanning | Not trim-safe; types resolved by string name will be stripped |
+| Runtime type discovery or construction | Use `DataRecord` and the metadata services instead |
+
+**ALLOWED PATTERNS ONLY:**
+
+- Closed generics known at compile time
+- Static generic methods where `T` is known at the call site
+- `Span<T>`, `Memory<T>`, and blittable structs preferred
+- `switch` / dictionary dispatch instead of reflection
+- Pre-compiled delegates cached at startup (one-time reflection during initialization is tolerated but discouraged)
+
+**DESIGN PRINCIPLE:**
+
+All behaviour must be resolvable at compile time. Metadata may describe behaviour, but must not construct types dynamically.
+
+**ALTERNATIVES:**
+
+If a solution would normally use reflection or `JsonSerializer`, use:
+- `BmwJsonSerializer` — manual JSON writing via `Utf8JsonWriter`, metadata-driven
+- `BinaryObjectSerializer` — custom binary format, metadata-driven, pre-registered known types
+- `DataRecord` + `DataEntityMetadata` — ordinal-based field access with pre-compiled delegates
+
+**FAIL FAST:** If a requested design cannot be implemented without violating these constraints, say so explicitly instead of working around them.
+
+> See `docs/AOT_TRIMMING_CONSTRAINTS.md` for the full reference document and `docs/violations/` for tracked violations.
+
 ### Security & Privacy
 - **No OWASP vulnerabilities.** Code must be free of injection (SQL, command, header, log), XSS, CSRF, path traversal, insecure deserialisation, broken access control, and all other OWASP Top 10 categories.
 - **No bounds-checking exploits or buffer overruns.** Always validate indices, lengths, and offsets before accessing buffers. Use `Span<T>` slicing (which throws on out-of-range) rather than raw pointer arithmetic. Never trust user-supplied lengths.
