@@ -58,7 +58,7 @@ during codebase scans. Each file corresponds to a tracked violation. Violations 
 - **Resolved:** 5 (IDs 2, 3, 7, 8, 9)
 - **Open — Critical:** 1 (ID 1)
 - **Open — High:** 2 (IDs 4, 5)
-- **Open — Medium:** 8 (IDs 6, 10, 11, 12, 13, 14, 15, 17, 18)
+- **Open — Medium:** 9 (IDs 6, 10, 11, 12, 13, 14, 15, 17, 18)
 - **Open — Low:** 1 (ID 16)
 
 ---

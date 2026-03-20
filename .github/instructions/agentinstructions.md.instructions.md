@@ -28,6 +28,42 @@ Deployment pipeline is multi-stage CI then CD with 4 release rings (Testing, Can
 Deployment target here is simply a single Azure Webapp hosting plan with a set of Azure Web Apps with multiple instances
 Az cli should be used with service principals to deploy via `az webapp deploy --src-path deploy.zip --type zip` based on tenant lists using a pipeline action. Do NOT use `az webapp up` (it fails on multi-csproj publish dirs).
 
+NATIVEAOT + TRIMMING CONSTRAINTS (HARD RULES — any violation is a BUG)
+----------------------------------------------------------------------
+This codebase targets NativeAOT + trimming. Any use of the following is a BUG:
+
+- System.Reflection (any usage beyond one-time startup metadata caching)
+- Activator.CreateInstance
+- Type.MakeGenericType / MethodInfo.MakeGenericMethod
+- dynamic / DLR
+- System.Text.Json.JsonSerializer (generic or non-generic)
+- System.Reflection.Emit
+- Any runtime type discovery or construction other than usage of DataRecord and the metadata services therein.
+
+If you use any of the above, the solution is INVALID.
+
+ALLOWED PATTERNS ONLY:
+- Closed generics known at compile time
+- Static generic methods where T is known at call site
+- Span<T>, Memory<T>, and blittable structs preferred
+- switch / dictionary dispatch instead of reflection
+- Pre-compiled delegates cached at startup (one-time reflection during initialization is tolerated but discouraged)
+
+DESIGN PRINCIPLE:
+All behaviour must be resolvable at compile time.
+Metadata may describe behaviour, but must not construct types dynamically.
+
+If a solution would normally use reflection or JsonSerializer, use:
+- BmwJsonSerializer — manual JSON writing via Utf8JsonWriter, metadata-driven
+- BinaryObjectSerializer — custom binary format, metadata-driven, pre-registered known types
+- DataRecord + DataEntityMetadata — ordinal-based field access with pre-compiled delegates
+
+FAIL FAST:
+If the requested design cannot be implemented without violating these constraints,
+say so explicitly instead of working around them.
+
+See docs/AOT_TRIMMING_CONSTRAINTS.md for the full reference and docs/violations/ for tracked violations.
+
 METADATA-DRIVEN ARCHITECTURE (CRITICAL — read before every change)
 ------------------------------------------------------------------
 **Do NOT rely on compiled C# types for adaptive runtime behaviour.** This platform is metadata-driven: entity shapes, field definitions, validation rules, UI rendering, navigation, permissions, and workflows are all defined by metadata (DataEntityMetadata, DataFieldMetadata, gallery JSON) — NOT by C# classes, generics, or compile-time type systems.
