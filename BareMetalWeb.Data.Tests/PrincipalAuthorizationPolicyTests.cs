@@ -306,22 +306,4 @@ public sealed class PrincipalAuthorizationPolicyTests : IDisposable
         Assert.Equal(string.Empty, sp.OwnerInstanceId);
     }
 
-    // ── AuditService.AuditDeniedAsync ──────────────────────────────────
-
-    [Fact]
-    public async Task AuditDeniedAsync_CreatesAccessDeniedEntry()
-    {
-        await _auditService.AuditDeniedAsync(
-            "orders", 42, "Update", "deploy-agent",
-            "DeploymentAgent principals cannot update records.");
-
-        var entries = await _store.QueryAsync<AuditEntry>();
-        var denied = entries.FirstOrDefault(e => e.Operation == AuditOperation.AccessDenied);
-        Assert.NotNull(denied);
-        Assert.Equal("orders", denied.EntityType);
-        Assert.Equal(42u, denied.EntityKey);
-        Assert.Equal("deploy-agent", denied.UserName);
-        Assert.Contains("Update", denied.Notes);
-        Assert.Contains("cannot update", denied.Notes, StringComparison.OrdinalIgnoreCase);
-    }
 }

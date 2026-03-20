@@ -36,10 +36,10 @@ public class WalDataRecordTests : IDisposable
     {
         var record = _schema.CreateRecord();
         record.Key = 1;
-        record.SetValue(0, "Sprocket");
-        record.SetValue(1, 9.99m);
-        record.SetValue(2, true);
-        record.SetValue(3, "Hardware");
+        record.SetField(_schema, "Name", "Sprocket");
+        record.SetField(_schema, "Price", 9.99m);
+        record.SetField(_schema, "Active", true);
+        record.SetField(_schema, "Category", "Hardware");
 
         _provider.SaveRecord(record, _schema);
 
@@ -47,10 +47,10 @@ public class WalDataRecordTests : IDisposable
         Assert.NotNull(loaded);
         Assert.Equal(1u, loaded.Key);
         Assert.Equal("Widget", loaded.EntityTypeName);
-        Assert.Equal("Sprocket", loaded.GetValue(0));
-        Assert.Equal(9.99m, loaded.GetValue(1));
-        Assert.Equal(true, loaded.GetValue(2));
-        Assert.Equal("Hardware", loaded.GetValue(3));
+        Assert.Equal("Sprocket", loaded.GetField(_schema, "Name"));
+        Assert.Equal(9.99m, loaded.GetField(_schema, "Price"));
+        Assert.Equal(true, loaded.GetField(_schema, "Active"));
+        Assert.Equal("Hardware", loaded.GetField(_schema, "Category"));
     }
 
     [Fact]
@@ -58,7 +58,7 @@ public class WalDataRecordTests : IDisposable
     {
         var record = _schema.CreateRecord();
         record.Key = 2;
-        record.SetValue(0, "Gear");
+        record.SetField(_schema, "Name", "Gear");
 
         _provider.SaveRecord(record, _schema);
 
@@ -74,16 +74,16 @@ public class WalDataRecordTests : IDisposable
     {
         var record = _schema.CreateRecord();
         record.Key = 3;
-        record.SetValue(0, "Original");
+        record.SetField(_schema, "Name", "Original");
         _provider.SaveRecord(record, _schema);
 
         var updated = _schema.CreateRecord();
         updated.Key = 3;
-        updated.SetValue(0, "Updated");
+        updated.SetField(_schema, "Name", "Updated");
         _provider.SaveRecord(updated, _schema);
 
         var reloaded = _provider.LoadRecord(3, _schema)!;
-        Assert.Equal("Updated", reloaded.GetValue(0));
+        Assert.Equal("Updated", reloaded.GetField(_schema, "Name"));
         Assert.Equal(3u, reloaded.Key);
     }
 
@@ -128,9 +128,9 @@ public class WalDataRecordTests : IDisposable
         query.Sorts.Add(new SortClause { Field = "Name", Direction = SortDirection.Asc });
 
         var sorted = _provider.QueryRecords(_schema, query).ToList();
-        Assert.Equal("Alpha", sorted[0].GetValue(0));
-        Assert.Equal("Beta", sorted[1].GetValue(0));
-        Assert.Equal("Gamma", sorted[2].GetValue(0));
+        Assert.Equal("Alpha", sorted[0].GetField(_schema, "Name"));
+        Assert.Equal("Beta", sorted[1].GetField(_schema, "Name"));
+        Assert.Equal("Gamma", sorted[2].GetField(_schema, "Name"));
     }
 
     [Fact]
@@ -170,7 +170,7 @@ public class WalDataRecordTests : IDisposable
     {
         var record = _schema.CreateRecord();
         record.Key = 10;
-        record.SetValue(0, "ToDelete");
+        record.SetField(_schema, "Name", "ToDelete");
         _provider.SaveRecord(record, _schema);
 
         Assert.NotNull(_provider.LoadRecord(10, _schema));
@@ -203,7 +203,7 @@ public class WalDataRecordTests : IDisposable
     {
         var record = _schema.CreateRecord();
         record.Key = 20;
-        record.SetValue(0, "Cached");
+        record.SetField(_schema, "Name", "Cached");
         _provider.SaveRecord(record, _schema);
 
         var first = _provider.LoadRecord(20, _schema);
@@ -218,19 +218,19 @@ public class WalDataRecordTests : IDisposable
     {
         var record = _schema.CreateRecord();
         record.Key = 21;
-        record.SetValue(0, "V1");
+        record.SetField(_schema, "Name", "V1");
         _provider.SaveRecord(record, _schema);
 
         var cached = _provider.LoadRecord(21, _schema)!;
-        Assert.Equal("V1", cached.GetValue(0));
+        Assert.Equal("V1", cached.GetField(_schema, "Name"));
 
         var updated = _schema.CreateRecord();
         updated.Key = 21;
-        updated.SetValue(0, "V2");
+        updated.SetField(_schema, "Name", "V2");
         _provider.SaveRecord(updated, _schema);
 
         var fresh = _provider.LoadRecord(21, _schema)!;
-        Assert.Equal("V2", fresh.GetValue(0));
+        Assert.Equal("V2", fresh.GetField(_schema, "Name"));
         Assert.NotSame(cached, fresh);
     }
 
@@ -241,14 +241,14 @@ public class WalDataRecordTests : IDisposable
     {
         var record = _schema.CreateRecord();
         record.Key = 30;
-        record.SetValue(0, "Async");
-        record.SetValue(3, "AsyncCat");
+        record.SetField(_schema, "Name", "Async");
+        record.SetField(_schema, "Category", "AsyncCat");
 
         await _provider.SaveRecordAsync(record, _schema);
 
         var loaded = await _provider.LoadRecordAsync(30, _schema);
         Assert.NotNull(loaded);
-        Assert.Equal("Async", loaded!.GetValue(0));
+        Assert.Equal("Async", loaded!.GetField(_schema, "Name"));
 
         var all = await _provider.QueryRecordsAsync(_schema);
         Assert.Single(all);
@@ -265,15 +265,15 @@ public class WalDataRecordTests : IDisposable
     private void SaveTestRecords()
     {
         var r1 = _schema.CreateRecord(); r1.Key = 1;
-        r1.SetValue(0, "Alpha"); r1.SetValue(1, 10m); r1.SetValue(2, true); r1.SetValue(3, "Electronics");
+        r1.SetField(_schema, "Name", "Alpha"); r1.SetField(_schema, "Price", 10m); r1.SetField(_schema, "Active", true); r1.SetField(_schema, "Category", "Electronics");
         _provider.SaveRecord(r1, _schema);
 
         var r2 = _schema.CreateRecord(); r2.Key = 2;
-        r2.SetValue(0, "Beta"); r2.SetValue(1, 20m); r2.SetValue(2, false); r2.SetValue(3, "Electronics");
+        r2.SetField(_schema, "Name", "Beta"); r2.SetField(_schema, "Price", 20m); r2.SetField(_schema, "Active", false); r2.SetField(_schema, "Category", "Electronics");
         _provider.SaveRecord(r2, _schema);
 
         var r3 = _schema.CreateRecord(); r3.Key = 3;
-        r3.SetValue(0, "Gamma"); r3.SetValue(1, 30m); r3.SetValue(2, true); r3.SetValue(3, "Tools");
+        r3.SetField(_schema, "Name", "Gamma"); r3.SetField(_schema, "Price", 30m); r3.SetField(_schema, "Active", true); r3.SetField(_schema, "Category", "Tools");
         _provider.SaveRecord(r3, _schema);
     }
 }

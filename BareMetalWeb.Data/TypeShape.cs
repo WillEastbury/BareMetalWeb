@@ -33,7 +33,4 @@ namespace BareMetalWeb.Data;
         public Dictionary<string, MemberAccessor> MemberMap { get; set; }
         public MemberSignature[] MemberSignatures { get; set; }
         public uint SignatureHash { get; set; }
-        public int BlittableSize { get; set; }
-        public Action<object?, byte[]>? BlittableWrite { get; set; }
-        public Func<byte[], object>? BlittableRead { get; set; }
     }

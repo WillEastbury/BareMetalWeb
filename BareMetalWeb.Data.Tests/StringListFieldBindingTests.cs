@@ -19,11 +19,44 @@ public class StringListFieldBindingTests
     [DataEntity("TagsTestEntities")]
     private class TagsTestEntity : BaseDataObject
     {
+        private const int Ord_Name = BaseFieldCount + 0;
+        private const int Ord_Tags = BaseFieldCount + 1;
+        internal new const int TotalFieldCount = BaseFieldCount + 2;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("Name", Ord_Name),
+            new FieldSlot("Tags", Ord_Tags),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public TagsTestEntity() : base(TotalFieldCount) { }
+        public TagsTestEntity(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+
         [DataField(Label = "Tags", Order = 1)]
-        public List<string> Tags { get; set; } = new();
+        public List<string> Tags
+        {
+            get => (List<string>?)_values[Ord_Tags] ?? new();
+            set => _values[Ord_Tags] = value;
+        }
+
+
 
         [DataField(Label = "Name", Order = 2)]
-        public string Name { get; set; } = string.Empty;
+        public string Name
+        {
+            get => (string?)_values[Ord_Name] ?? string.Empty;
+            set => _values[Ord_Name] = value;
+        }
     }
 
     private static DataEntityMetadata GetMeta()

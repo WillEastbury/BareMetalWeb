@@ -35,24 +35,98 @@ public class ReportQueryTests : IDisposable
     [DataEntity("Test Customers", Slug = "test-customers")]
     public class TestCustomer : BaseDataObject
     {
+        private const int Ord_Discount = BaseFieldCount + 0;
+        private const int Ord_Name = BaseFieldCount + 1;
+        internal new const int TotalFieldCount = BaseFieldCount + 2;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("Discount", Ord_Discount),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("Name", Ord_Name),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public TestCustomer() : base(TotalFieldCount) { }
+        public TestCustomer(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+
         [DataField(Label = "Name")]
-        public string Name { get; set; } = string.Empty;
+        public string Name
+        {
+            get => (string?)_values[Ord_Name] ?? string.Empty;
+            set => _values[Ord_Name] = value;
+        }
+
+
 
         [DataField(Label = "Discount")]
-        public decimal Discount { get; set; }
+        public decimal Discount
+        {
+            get => (decimal)(_values[Ord_Discount] ?? 0m);
+            set => _values[Ord_Discount] = value;
+        }
     }
 
-    [DataEntity("Test Orders", Slug = "test-orders")]
-    public class TestOrder : BaseDataObject
+    [DataEntity("Report Test Orders", Slug = "report-test-orders")]
+    public class ReportTestOrder : BaseDataObject
     {
+        private const int Ord_Amount = BaseFieldCount + 0;
+        private const int Ord_CustomerId = BaseFieldCount + 1;
+        private const int Ord_Status = BaseFieldCount + 2;
+        internal new const int TotalFieldCount = BaseFieldCount + 3;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("Amount", Ord_Amount),
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("CustomerId", Ord_CustomerId),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("Status", Ord_Status),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public ReportTestOrder() : base(TotalFieldCount) { }
+        public ReportTestOrder(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+
         [DataField(Label = "Customer Id")]
-        public string CustomerId { get; set; } = string.Empty;
+        public string CustomerId
+        {
+            get => (string?)_values[Ord_CustomerId] ?? string.Empty;
+            set => _values[Ord_CustomerId] = value;
+        }
+
+
 
         [DataField(Label = "Amount")]
-        public decimal Amount { get; set; }
+        public decimal Amount
+        {
+            get => (decimal)(_values[Ord_Amount] ?? 0m);
+            set => _values[Ord_Amount] = value;
+        }
+
+
 
         [DataField(Label = "Status")]
-        public string Status { get; set; } = "Open";
+        public string Status
+        {
+            get => (string?)_values[Ord_Status] ?? string.Empty;
+            set => _values[Ord_Status] = value;
+        }
     }
 
     // ── ReportQuery builder tests ────────────────────────────────────────────
@@ -154,16 +228,16 @@ public class ReportQueryTests : IDisposable
     private void RegisterAndSeedTestEntities()
     {
         DataScaffold.RegisterEntity<TestCustomer>();
-        DataScaffold.RegisterEntity<TestOrder>();
+        DataScaffold.RegisterEntity<ReportTestOrder>();
 
         var c1 = new TestCustomer { Key = 1, Name = "Acme Corp", Discount = 10 };
         var c2 = new TestCustomer { Key = 2, Name = "Globex", Discount = 5 };
         _store.Save(c1);
         _store.Save(c2);
 
-        _store.Save(new TestOrder { Key = 10, CustomerId = c1.Key.ToString(), Amount = 100m, Status = "Open" });
-        _store.Save(new TestOrder { Key = 11, CustomerId = c1.Key.ToString(), Amount = 200m, Status = "Completed" });
-        _store.Save(new TestOrder { Key = 12, CustomerId = c2.Key.ToString(), Amount = 50m, Status = "Open" });
+        _store.Save(new ReportTestOrder { Key = 10, CustomerId = c1.Key.ToString(), Amount = 100m, Status = "Open" });
+        _store.Save(new ReportTestOrder { Key = 11, CustomerId = c1.Key.ToString(), Amount = 200m, Status = "Completed" });
+        _store.Save(new ReportTestOrder { Key = 12, CustomerId = c2.Key.ToString(), Amount = 50m, Status = "Open" });
     }
 
     [Fact]
@@ -172,9 +246,9 @@ public class ReportQueryTests : IDisposable
         RegisterAndSeedTestEntities();
 
         var query = new ReportQuery()
-            .From("test-orders")
-            .SelectColumn("test-orders", "Amount", "Amount")
-            .SelectColumn("test-orders", "Status", "Status");
+            .From("report-test-orders")
+            .SelectColumn("report-test-orders", "Amount", "Amount")
+            .SelectColumn("report-test-orders", "Status", "Status");
 
         var executor = new ReportExecutor(_store);
         var result = await executor.ExecuteAsync(query);
@@ -191,9 +265,9 @@ public class ReportQueryTests : IDisposable
         RegisterAndSeedTestEntities();
 
         var query = new ReportQuery()
-            .From("test-orders")
-            .Join("test-orders", "CustomerId", "test-customers", "Key")
-            .SelectColumn("test-orders", "Amount", "Amount")
+            .From("report-test-orders")
+            .Join("report-test-orders", "CustomerId", "test-customers", "Key")
+            .SelectColumn("report-test-orders", "Amount", "Amount")
             .SelectColumn("test-customers", "Name", "Customer");
 
         var executor = new ReportExecutor(_store);
@@ -211,9 +285,9 @@ public class ReportQueryTests : IDisposable
         RegisterAndSeedTestEntities();
 
         var query = new ReportQuery()
-            .From("test-orders")
-            .SelectColumn("test-orders", "Status", "Status")
-            .Where("test-orders.Status", "=", "Open");
+            .From("report-test-orders")
+            .SelectColumn("report-test-orders", "Status", "Status")
+            .Where("report-test-orders.Status", "=", "Open");
 
         var executor = new ReportExecutor(_store);
         var result = await executor.ExecuteAsync(query);
@@ -245,9 +319,9 @@ public class ReportQueryTests : IDisposable
         RegisterAndSeedTestEntities();
 
         var query = new ReportQuery()
-            .From("test-orders")
-            .SelectColumn("test-orders", "Status", "Status")
-            .SelectColumn("test-orders", "Amount", "Total", aggregate: AggregateFunction.Sum);
+            .From("report-test-orders")
+            .SelectColumn("report-test-orders", "Status", "Status")
+            .SelectColumn("report-test-orders", "Amount", "Total", aggregate: AggregateFunction.Sum);
 
         var executor = new ReportExecutor(_store);
         var result = await executor.ExecuteAsync(query);
@@ -270,9 +344,9 @@ public class ReportQueryTests : IDisposable
         RegisterAndSeedTestEntities();
 
         var query = new ReportQuery()
-            .From("test-orders")
-            .SelectColumn("test-orders", "Status", "Status")
-            .SelectColumn("test-orders", "Key", "Count", aggregate: AggregateFunction.Count);
+            .From("report-test-orders")
+            .SelectColumn("report-test-orders", "Status", "Status")
+            .SelectColumn("report-test-orders", "Key", "Count", aggregate: AggregateFunction.Count);
 
         var executor = new ReportExecutor(_store);
         var result = await executor.ExecuteAsync(query);
@@ -405,17 +479,17 @@ public class ReportQueryTests : IDisposable
     public async Task ReportExecutor_IntermediateRowsCapped()
     {
         DataScaffold.RegisterEntity<TestCustomer>();
-        DataScaffold.RegisterEntity<TestOrder>();
+        DataScaffold.RegisterEntity<ReportTestOrder>();
 
         // Create one customer with many orders to test intermediate row capping
         var c1 = new TestCustomer { Key = 1, Name = "Big Corp" };
         _store.Save(c1);
         for (int i = 0; i < 200; i++)
-            _store.Save(new TestOrder { Key = (uint)(i + 1), CustomerId = c1.Key.ToString(), Amount = i, Status = "Open" });
+            _store.Save(new ReportTestOrder { Key = (uint)(i + 1), CustomerId = c1.Key.ToString(), Amount = i, Status = "Open" });
 
         var query = new ReportQuery()
             .From("test-customers")
-            .Join("test-customers", "Key", "test-orders", "CustomerId")
+            .Join("test-customers", "Key", "report-test-orders", "CustomerId")
             .SelectColumn("test-customers", "Name", "Name")
             .Limit(50);
 
@@ -442,13 +516,13 @@ public class ReportQueryTests : IDisposable
     {
         RegisterAndSeedTestEntities();
         // Add an order with no matching customer
-        _store.Save(new TestOrder { Key = 100, CustomerId = "ORPHAN", Amount = 999m, Status = "Orphan" });
+        _store.Save(new ReportTestOrder { Key = 100, CustomerId = "ORPHAN", Amount = 999m, Status = "Orphan" });
 
         var query = new ReportQuery()
             .From("test-customers")
-            .LeftJoin("test-customers", "Key", "test-orders", "CustomerId")
+            .LeftJoin("test-customers", "Key", "report-test-orders", "CustomerId")
             .SelectColumn("test-customers", "Name", "Customer")
-            .SelectColumn("test-orders", "Amount", "Amount");
+            .SelectColumn("report-test-orders", "Amount", "Amount");
 
         var executor = new ReportExecutor(_store);
         var result = await executor.ExecuteAsync(query);
@@ -463,19 +537,19 @@ public class ReportQueryTests : IDisposable
     public async Task ReportExecutor_LeftJoin_NullsForUnmatchedRight()
     {
         DataScaffold.RegisterEntity<TestCustomer>();
-        DataScaffold.RegisterEntity<TestOrder>();
+        DataScaffold.RegisterEntity<ReportTestOrder>();
 
         var c1 = new TestCustomer { Key = 1, Name = "Alice" };
         var c2 = new TestCustomer { Key = 2, Name = "Bob" }; // no orders
         _store.Save(c1);
         _store.Save(c2);
-        _store.Save(new TestOrder { Key = 10, CustomerId = c1.Key.ToString(), Amount = 100m, Status = "Open" });
+        _store.Save(new ReportTestOrder { Key = 10, CustomerId = c1.Key.ToString(), Amount = 100m, Status = "Open" });
 
         var query = new ReportQuery()
             .From("test-customers")
-            .LeftJoin("test-customers", "Key", "test-orders", "CustomerId")
+            .LeftJoin("test-customers", "Key", "report-test-orders", "CustomerId")
             .SelectColumn("test-customers", "Name", "Customer")
-            .SelectColumn("test-orders", "Status", "Status");
+            .SelectColumn("report-test-orders", "Status", "Status");
 
         var executor = new ReportExecutor(_store);
         var result = await executor.ExecuteAsync(query);
@@ -490,18 +564,18 @@ public class ReportQueryTests : IDisposable
     public async Task ReportExecutor_RightJoin_PreservesAllRightRows()
     {
         DataScaffold.RegisterEntity<TestCustomer>();
-        DataScaffold.RegisterEntity<TestOrder>();
+        DataScaffold.RegisterEntity<ReportTestOrder>();
 
         var c1 = new TestCustomer { Key = 1, Name = "Alice" };
         _store.Save(c1);
-        _store.Save(new TestOrder { Key = 10, CustomerId = c1.Key.ToString(), Amount = 100m, Status = "Matched" });
-        _store.Save(new TestOrder { Key = 11, CustomerId = "NOBODY", Amount = 50m, Status = "Orphan" });
+        _store.Save(new ReportTestOrder { Key = 10, CustomerId = c1.Key.ToString(), Amount = 100m, Status = "Matched" });
+        _store.Save(new ReportTestOrder { Key = 11, CustomerId = "NOBODY", Amount = 50m, Status = "Orphan" });
 
         var query = new ReportQuery()
             .From("test-customers")
-            .RightJoin("test-customers", "Key", "test-orders", "CustomerId")
+            .RightJoin("test-customers", "Key", "report-test-orders", "CustomerId")
             .SelectColumn("test-customers", "Name", "Customer")
-            .SelectColumn("test-orders", "Status", "Status");
+            .SelectColumn("report-test-orders", "Status", "Status");
 
         var executor = new ReportExecutor(_store);
         var result = await executor.ExecuteAsync(query);
@@ -515,20 +589,20 @@ public class ReportQueryTests : IDisposable
     public async Task ReportExecutor_FullOuterJoin_PreservesBothSides()
     {
         DataScaffold.RegisterEntity<TestCustomer>();
-        DataScaffold.RegisterEntity<TestOrder>();
+        DataScaffold.RegisterEntity<ReportTestOrder>();
 
         var c1 = new TestCustomer { Key = 1, Name = "Alice" };
         var c2 = new TestCustomer { Key = 2, Name = "Bob" }; // no orders
         _store.Save(c1);
         _store.Save(c2);
-        _store.Save(new TestOrder { Key = 10, CustomerId = c1.Key.ToString(), Amount = 100m, Status = "Matched" });
-        _store.Save(new TestOrder { Key = 11, CustomerId = "NOBODY", Amount = 50m, Status = "Orphan" });
+        _store.Save(new ReportTestOrder { Key = 10, CustomerId = c1.Key.ToString(), Amount = 100m, Status = "Matched" });
+        _store.Save(new ReportTestOrder { Key = 11, CustomerId = "NOBODY", Amount = 50m, Status = "Orphan" });
 
         var query = new ReportQuery()
             .From("test-customers")
-            .FullOuterJoin("test-customers", "Key", "test-orders", "CustomerId")
+            .FullOuterJoin("test-customers", "Key", "report-test-orders", "CustomerId")
             .SelectColumn("test-customers", "Name", "Customer")
-            .SelectColumn("test-orders", "Status", "Status");
+            .SelectColumn("report-test-orders", "Status", "Status");
 
         var executor = new ReportExecutor(_store);
         var result = await executor.ExecuteAsync(query);
@@ -546,8 +620,8 @@ public class ReportQueryTests : IDisposable
     public void ReportQuery_JoinType_DefaultsToInner()
     {
         var query = new ReportQuery()
-            .From("test-orders")
-            .Join("test-orders", "CustomerId", "test-customers", "Id");
+            .From("report-test-orders")
+            .Join("report-test-orders", "CustomerId", "test-customers", "Id");
 
         Assert.Equal(JoinType.Inner, query.Joins[0].Type);
     }

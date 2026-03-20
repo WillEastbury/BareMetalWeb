@@ -17,26 +17,100 @@ public class QueryPlannerTests
     [DataEntity("QueryPlanner Test Products", Slug = "qp-products")]
     private class QueryPlannerTestProduct : BaseDataObject
     {
+        private const int Ord_Category = BaseFieldCount + 0;
+        private const int Ord_Name = BaseFieldCount + 1;
+        private const int Ord_Price = BaseFieldCount + 2;
+        internal new const int TotalFieldCount = BaseFieldCount + 3;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("Category", Ord_Category),
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("Name", Ord_Name),
+            new FieldSlot("Price", Ord_Price),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public QueryPlannerTestProduct() : base(TotalFieldCount) { }
+        public QueryPlannerTestProduct(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+
         [DataField(Label = "Name")]
         [DataIndex]
-        public string Name { get; set; } = string.Empty;
+        public string Name
+        {
+            get => (string?)_values[Ord_Name] ?? string.Empty;
+            set => _values[Ord_Name] = value;
+        }
+
+
 
         [DataField(Label = "Category")]
-        public string Category { get; set; } = string.Empty;
+        public string Category
+        {
+            get => (string?)_values[Ord_Category] ?? string.Empty;
+            set => _values[Ord_Category] = value;
+        }
+
+
 
         [DataField(Label = "Price")]
-        public decimal Price { get; set; }
+        public decimal Price
+        {
+            get => (decimal)(_values[Ord_Price] ?? 0m);
+            set => _values[Ord_Price] = value;
+        }
     }
 
     [DataEntity("QueryPlanner Test Orders", Slug = "qp-orders")]
     private class QueryPlannerTestOrder : BaseDataObject
     {
+        private const int Ord_ProductId = BaseFieldCount + 0;
+        private const int Ord_Status = BaseFieldCount + 1;
+        internal new const int TotalFieldCount = BaseFieldCount + 2;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("ProductId", Ord_ProductId),
+            new FieldSlot("Status", Ord_Status),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public QueryPlannerTestOrder() : base(TotalFieldCount) { }
+        public QueryPlannerTestOrder(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+
         [DataField(Label = "Product Id")]
         [DataIndex]
-        public string ProductId { get; set; } = string.Empty;
+        public string ProductId
+        {
+            get => (string?)_values[Ord_ProductId] ?? string.Empty;
+            set => _values[Ord_ProductId] = value;
+        }
+
+
 
         [DataField(Label = "Status")]
-        public string Status { get; set; } = string.Empty;
+        public string Status
+        {
+            get => (string?)_values[Ord_Status] ?? string.Empty;
+            set => _values[Ord_Status] = value;
+        }
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

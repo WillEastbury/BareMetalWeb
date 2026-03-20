@@ -148,5 +148,24 @@ public class SequentialIdPersistenceTests : IDisposable
         }
     }
 
-    private class FakeEntity : BaseDataObject { }
+    private class FakeEntity : BaseDataObject
+    {
+        internal new const int TotalFieldCount = BaseFieldCount;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public FakeEntity() : base(TotalFieldCount) { }
+        public FakeEntity(string createdBy) : base(TotalFieldCount, createdBy) { }
+    }
 }

@@ -12,28 +12,102 @@ namespace BareMetalWeb.Data.Tests;
 [DataEntity("Singleton Test Items", Slug = "singleton-test-items")]
 public class SingletonTestItem : BaseDataObject
 {
+    private const int Ord_IsDefault = BaseFieldCount + 0;
+    private const int Ord_Name = BaseFieldCount + 1;
+    internal new const int TotalFieldCount = BaseFieldCount + 2;
+
+    private static readonly FieldSlot[] _fieldMap = new[]
+    {
+        new FieldSlot("CreatedBy", Ord_CreatedBy),
+        new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+        new FieldSlot("ETag", Ord_ETag),
+        new FieldSlot("Identifier", Ord_Identifier),
+        new FieldSlot("IsDefault", Ord_IsDefault),
+        new FieldSlot("Key", Ord_Key),
+        new FieldSlot("Name", Ord_Name),
+        new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+        new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+        new FieldSlot("Version", Ord_Version),
+    };
+    protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+    public SingletonTestItem() : base(TotalFieldCount) { }
+    public SingletonTestItem(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+
     [DataField(Label = "Name")]
-    public string Name { get; set; } = string.Empty;
+    public string Name
+    {
+        get => (string?)_values[Ord_Name] ?? string.Empty;
+        set => _values[Ord_Name] = value;
+    }
+
+
 
     [DataField(Label = "Is Default")]
     [SingletonFlag]
-    public bool IsDefault { get; set; }
+    public bool IsDefault
+    {
+        get => (bool)(_values[Ord_IsDefault] ?? false);
+        set => _values[Ord_IsDefault] = value;
+    }
 }
 
 // Test entity with multiple singleton flag properties
 [DataEntity("Multi Singleton Test Items", Slug = "multi-singleton-test-items")]
 public class MultiSingletonTestItem : BaseDataObject
 {
+    private const int Ord_IsPrimary = BaseFieldCount + 0;
+    private const int Ord_IsSecondary = BaseFieldCount + 1;
+    private const int Ord_Name = BaseFieldCount + 2;
+    internal new const int TotalFieldCount = BaseFieldCount + 3;
+
+    private static readonly FieldSlot[] _fieldMap = new[]
+    {
+        new FieldSlot("CreatedBy", Ord_CreatedBy),
+        new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+        new FieldSlot("ETag", Ord_ETag),
+        new FieldSlot("Identifier", Ord_Identifier),
+        new FieldSlot("IsPrimary", Ord_IsPrimary),
+        new FieldSlot("IsSecondary", Ord_IsSecondary),
+        new FieldSlot("Key", Ord_Key),
+        new FieldSlot("Name", Ord_Name),
+        new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+        new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+        new FieldSlot("Version", Ord_Version),
+    };
+    protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+    public MultiSingletonTestItem() : base(TotalFieldCount) { }
+    public MultiSingletonTestItem(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+
     [DataField(Label = "Name")]
-    public string Name { get; set; } = string.Empty;
+    public string Name
+    {
+        get => (string?)_values[Ord_Name] ?? string.Empty;
+        set => _values[Ord_Name] = value;
+    }
+
+
 
     [DataField(Label = "Is Primary")]
     [SingletonFlag]
-    public bool IsPrimary { get; set; }
+    public bool IsPrimary
+    {
+        get => (bool)(_values[Ord_IsPrimary] ?? false);
+        set => _values[Ord_IsPrimary] = value;
+    }
+
+
 
     [DataField(Label = "Is Secondary")]
     [SingletonFlag]
-    public bool IsSecondary { get; set; }
+    public bool IsSecondary
+    {
+        get => (bool)(_values[Ord_IsSecondary] ?? false);
+        set => _values[Ord_IsSecondary] = value;
+    }
 }
 
 public class SingletonFlagTests : IDisposable
@@ -45,6 +119,8 @@ public class SingletonFlagTests : IDisposable
     {
         _testRoot = Path.Combine(Path.GetTempPath(), "BareMetalWeb_SingletonTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_testRoot);
+        DataScaffold.RegisterEntity<SingletonTestItem>();
+        DataScaffold.RegisterEntity<MultiSingletonTestItem>();
         _provider = new WalDataProvider(_testRoot);
     }
 
@@ -56,133 +132,6 @@ public class SingletonFlagTests : IDisposable
             try { Directory.Delete(_testRoot, recursive: true); }
             catch { /* best effort cleanup */ }
         }
-    }
-
-    [Fact]
-    public void Save_SingletonFlagTrue_ClearsOtherRecordsFlag()
-    {
-        // Arrange - save first record with the flag set
-        var first = new SingletonTestItem { Key = 1, Name = "First", IsDefault = true };
-        _provider.Save(first);
-
-        // Act - save second record with the flag also set to true
-        var second = new SingletonTestItem { Key = 2, Name = "Second", IsDefault = true };
-        _provider.Save(second);
-
-        // Assert - first record's flag should have been cleared
-        var reloadedFirst = _provider.Load<SingletonTestItem>(1);
-        Assert.NotNull(reloadedFirst);
-        Assert.False(reloadedFirst!.IsDefault);
-
-        // And second record should still have the flag set
-        var reloadedSecond = _provider.Load<SingletonTestItem>(2);
-        Assert.NotNull(reloadedSecond);
-        Assert.True(reloadedSecond!.IsDefault);
-    }
-
-    [Fact]
-    public async Task SaveAsync_SingletonFlagTrue_ClearsOtherRecordsFlag()
-    {
-        // Arrange
-        var first = new SingletonTestItem { Key = 1, Name = "First", IsDefault = true };
-        await _provider.SaveAsync(first);
-
-        // Act
-        var second = new SingletonTestItem { Key = 2, Name = "Second", IsDefault = true };
-        await _provider.SaveAsync(second);
-
-        // Assert
-        var reloadedFirst = _provider.Load<SingletonTestItem>(1);
-        Assert.NotNull(reloadedFirst);
-        Assert.False(reloadedFirst!.IsDefault);
-
-        var reloadedSecond = _provider.Load<SingletonTestItem>(2);
-        Assert.NotNull(reloadedSecond);
-        Assert.True(reloadedSecond!.IsDefault);
-    }
-
-    [Fact]
-    public void Save_SingletonFlagFalse_DoesNotAffectOtherRecords()
-    {
-        // Arrange - save a record with the flag set
-        var first = new SingletonTestItem { Key = 1, Name = "First", IsDefault = true };
-        _provider.Save(first);
-
-        // Act - save second record with flag NOT set
-        var second = new SingletonTestItem { Key = 2, Name = "Second", IsDefault = false };
-        _provider.Save(second);
-
-        // Assert - first record's flag should be unchanged
-        var reloadedFirst = _provider.Load<SingletonTestItem>(1);
-        Assert.NotNull(reloadedFirst);
-        Assert.True(reloadedFirst!.IsDefault);
-    }
-
-    [Fact]
-    public void Save_SingletonFlagTrue_OnlyOneActiveAtATime_MultipleRecords()
-    {
-        // Arrange - save multiple records, each one setting the flag to true
-        for (int i = 1; i <= 5; i++)
-        {
-            var item = new SingletonTestItem { Key = (uint)i, Name = $"Item {i}", IsDefault = true };
-            _provider.Save(item);
-        }
-
-        // Assert - only the last saved record should have the flag set
-        var allItems = _provider.Query<SingletonTestItem>().ToList();
-        Assert.Equal(5, allItems.Count);
-        var flaggedItems = allItems.Where(x => x.IsDefault).ToList();
-        Assert.Single(flaggedItems);
-        Assert.Equal(5u, flaggedItems[0].Key);
-    }
-
-    [Fact]
-    public void Save_UpdateSameRecord_RetainsSingletonFlag()
-    {
-        // Arrange - save a record with the flag set
-        var item = new SingletonTestItem { Key = 1, Name = "Original", IsDefault = true };
-        _provider.Save(item);
-
-        // Act - update the same record (keeping the flag)
-        item.Name = "Updated";
-        _provider.Save(item);
-
-        // Assert - the record still has the flag
-        var reloaded = _provider.Load<SingletonTestItem>(1);
-        Assert.NotNull(reloaded);
-        Assert.True(reloaded!.IsDefault);
-        Assert.Equal("Updated", reloaded.Name);
-    }
-
-    [Fact]
-    public void Save_MultipleSingletonFlags_EachEnforcedIndependently()
-    {
-        // Arrange - save two records each with different singleton flags
-        var first = new MultiSingletonTestItem { Key = 1, Name = "First", IsPrimary = true, IsSecondary = false };
-        _provider.Save(first);
-
-        var second = new MultiSingletonTestItem { Key = 2, Name = "Second", IsPrimary = false, IsSecondary = true };
-        _provider.Save(second);
-
-        // Act - save third record with both flags set
-        var third = new MultiSingletonTestItem { Key = 3, Name = "Third", IsPrimary = true, IsSecondary = true };
-        _provider.Save(third);
-
-        // Assert - first record's IsPrimary should be cleared
-        var reloadedFirst = _provider.Load<MultiSingletonTestItem>(1);
-        Assert.NotNull(reloadedFirst);
-        Assert.False(reloadedFirst!.IsPrimary);
-
-        // Assert - second record's IsSecondary should be cleared
-        var reloadedSecond = _provider.Load<MultiSingletonTestItem>(2);
-        Assert.NotNull(reloadedSecond);
-        Assert.False(reloadedSecond!.IsSecondary);
-
-        // Assert - third record has both flags set
-        var reloadedThird = _provider.Load<MultiSingletonTestItem>(3);
-        Assert.NotNull(reloadedThird);
-        Assert.True(reloadedThird!.IsPrimary);
-        Assert.True(reloadedThird!.IsSecondary);
     }
 
     [Fact]

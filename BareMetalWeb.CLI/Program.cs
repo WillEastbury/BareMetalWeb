@@ -1,6 +1,5 @@
 ﻿using System.Buffers;
 using System.Net;
-using System.Reflection;
 using System.Text;
 using System.Text.Json;
 
@@ -1126,10 +1125,7 @@ internal static class Program
     // --- version ---
     static int ShowVersion()
     {
-        var version = typeof(Program).Assembly
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-            ?? typeof(Program).Assembly.GetName().Version?.ToString()
-            ?? "unknown";
+        var version = BuildInfo.Version;
         Console.WriteLine($"metal version {version}");
         return 0;
     }

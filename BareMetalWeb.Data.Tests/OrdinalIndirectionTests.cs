@@ -29,10 +29,59 @@ public sealed class OrdinalIndirectionTests : IDisposable
     [DataEntity("OrdinalItems")]
     private sealed class OrdinalItem : BaseDataObject
     {
-        [DataField] public string Label { get; set; } = string.Empty;
-        [DataField] public int    Value { get; set; }
-        [DataField] public long   BigVal { get; set; }
-        [DataField] public double Score  { get; set; }
+        private const int Ord_BigVal = BaseFieldCount + 0;
+        private const int Ord_Label = BaseFieldCount + 1;
+        private const int Ord_Score = BaseFieldCount + 2;
+        private const int Ord_Value = BaseFieldCount + 3;
+        internal new const int TotalFieldCount = BaseFieldCount + 4;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("BigVal", Ord_BigVal),
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("Label", Ord_Label),
+            new FieldSlot("Score", Ord_Score),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Value", Ord_Value),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public OrdinalItem() : base(TotalFieldCount) { }
+        public OrdinalItem(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+        [DataField]
+        public string Label
+        {
+            get => (string?)_values[Ord_Label] ?? string.Empty;
+            set => _values[Ord_Label] = value;
+        }
+
+        [DataField]
+        public int Value
+        {
+            get => (int)(_values[Ord_Value] ?? 0);
+            set => _values[Ord_Value] = value;
+        }
+
+        [DataField]
+        public long BigVal
+        {
+            get => (long)(_values[Ord_BigVal] ?? 0L);
+            set => _values[Ord_BigVal] = value;
+        }
+
+        [DataField]
+        public double Score
+        {
+            get => (double)(_values[Ord_Score] ?? 0.0);
+            set => _values[Ord_Score] = value;
+        }
     }
 
     public OrdinalIndirectionTests()

@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Reflection;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Core;
@@ -18,19 +18,22 @@ public sealed class AuditService
 {
     private readonly IBufferedLogger? _logger;
 
-    // Cache of compiled property accessors per type — avoids per-call GetProperties/GetValue reflection
+    // Cache of compiled property accessors per type — uses DataScaffold metadata (AOT-safe)
     private static readonly ConcurrentDictionary<Type, (string Name, Func<object, object?> Getter)[]> _accessorCache = new();
 
     private static (string Name, Func<object, object?> Getter)[] GetCachedAccessors(Type type)
     {
         return _accessorCache.GetOrAdd(type, static t =>
         {
-            var props = t.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-            var list = new List<(string, Func<object, object?>)>(props.Length);
-            foreach (var p in props)
+            var meta = DataScaffold.GetEntityByType(t);
+            if (meta == null) return Array.Empty<(string, Func<object, object?>)>();
+
+            var layout = EntityLayoutCompiler.GetOrCompile(meta);
+            var list = new List<(string, Func<object, object?>)>(layout.Fields.Length);
+            foreach (var f in layout.Fields)
             {
-                if (!p.CanRead || !p.CanWrite) continue;
-                list.Add((p.Name, PropertyAccessorFactory.BuildGetter(p)));
+                if (f.Getter != null)
+                    list.Add((f.Name, f.Getter));
             }
             return list.ToArray();
         });

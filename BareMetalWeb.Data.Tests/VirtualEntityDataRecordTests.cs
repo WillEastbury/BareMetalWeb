@@ -67,7 +67,7 @@ public class VirtualEntityDataRecordTests : IDisposable
         var rec = (DataRecord)obj;
         Assert.Equal("Ticket", rec.EntityTypeName);
         Assert.NotNull(rec.Schema);
-        Assert.Equal(4, rec.FieldCount);
+        Assert.Equal(BaseDataObject.BaseFieldCount + 4, rec.FieldCount);
     }
 
     // ── CRUD round-trip via handlers ───────────────────────────────────────
@@ -78,10 +78,10 @@ public class VirtualEntityDataRecordTests : IDisposable
         var obj = _handlers.Create();
         var rec = (DataRecord)obj;
         rec.Key = 1;
-        rec.SetValue(0, "Fix login bug");
-        rec.SetValue(1, "Users cannot log in after password reset");
-        rec.SetValue(2, 1);
-        rec.SetValue(3, true);
+        rec.SetField(_schema, "Title", "Fix login bug");
+        rec.SetField(_schema, "Description", "Users cannot log in after password reset");
+        rec.SetField(_schema, "Priority", 1);
+        rec.SetField(_schema, "IsOpen", true);
 
         await _handlers.SaveAsync(rec, CancellationToken.None);
 
@@ -90,10 +90,10 @@ public class VirtualEntityDataRecordTests : IDisposable
         Assert.IsType<DataRecord>(loaded);
         var loadedRec = (DataRecord)loaded;
         Assert.Equal(1u, loadedRec.Key);
-        Assert.Equal("Fix login bug", loadedRec.GetValue(0));
-        Assert.Equal("Users cannot log in after password reset", loadedRec.GetValue(1));
-        Assert.Equal(1, loadedRec.GetValue(2));
-        Assert.Equal(true, loadedRec.GetValue(3));
+        Assert.Equal("Fix login bug", loadedRec.GetField(_schema, "Title"));
+        Assert.Equal("Users cannot log in after password reset", loadedRec.GetField(_schema, "Description"));
+        Assert.Equal(1, loadedRec.GetField(_schema, "Priority"));
+        Assert.Equal(true, loadedRec.GetField(_schema, "IsOpen"));
     }
 
     [Fact]
@@ -108,7 +108,7 @@ public class VirtualEntityDataRecordTests : IDisposable
     {
         var rec = (DataRecord)_handlers.Create();
         rec.Key = 10;
-        rec.SetValue(0, "To be deleted");
+        rec.SetField(_schema, "Title", "To be deleted");
         await _handlers.SaveAsync(rec, CancellationToken.None);
 
         await _handlers.DeleteAsync(10, CancellationToken.None);
@@ -126,9 +126,9 @@ public class VirtualEntityDataRecordTests : IDisposable
         {
             var rec = (DataRecord)_handlers.Create();
             rec.Key = i;
-            rec.SetValue(0, $"Ticket {i}");
-            rec.SetValue(2, (int)i);
-            rec.SetValue(3, true);
+            rec.SetField(_schema, "Title", $"Ticket {i}");
+            rec.SetField(_schema, "Priority", (int)i);
+            rec.SetField(_schema, "IsOpen", true);
             await _handlers.SaveAsync(rec, CancellationToken.None);
         }
 
@@ -144,11 +144,11 @@ public class VirtualEntityDataRecordTests : IDisposable
     public async Task Query_WithFilter_ReturnsMatching()
     {
         var open = (DataRecord)_handlers.Create();
-        open.Key = 1; open.SetValue(0, "Open ticket"); open.SetValue(3, true);
+        open.Key = 1; open.SetField(_schema, "Title", "Open ticket"); open.SetField(_schema, "IsOpen", true);
         await _handlers.SaveAsync(open, CancellationToken.None);
 
         var closed = (DataRecord)_handlers.Create();
-        closed.Key = 2; closed.SetValue(0, "Closed ticket"); closed.SetValue(3, false);
+        closed.Key = 2; closed.SetField(_schema, "Title", "Closed ticket"); closed.SetField(_schema, "IsOpen", false);
         await _handlers.SaveAsync(closed, CancellationToken.None);
 
         var query = new QueryDefinition();
@@ -159,33 +159,33 @@ public class VirtualEntityDataRecordTests : IDisposable
         Assert.Equal(1u, results[0].Key);
     }
 
-    // ── DynamicPropertyInfo ordinal access ─────────────────────────────────
+    // ── Ordinal-indexed field access ─────────────────────────────────
 
     [Fact]
-    public void DynamicPropertyInfo_GetSetValue_OnDataRecord()
+    public void OrdinalIndexed_GetSetValue_OnDataRecord()
     {
         var rec = _schema.CreateRecord();
         rec.Key = 1;
 
-        // Create DynamicPropertyInfo with ordinal (as RuntimeEntityModel does)
-        var prop = new DynamicPropertyInfo("Title", typeof(string), 0);
-        prop.SetValue(rec, "Hello World");
-        Assert.Equal("Hello World", prop.GetValue(rec));
+        // Direct ordinal access (as RuntimeEntityModel does)
+        int titleOrd = _schema.TryGetOrdinal("Title", out var tOrd) ? tOrd : -1;
+        rec.SetValue(titleOrd, "Hello World");
+        Assert.Equal("Hello World", rec.GetValue(titleOrd));
 
-        var prop2 = new DynamicPropertyInfo("Priority", typeof(int), 2);
-        prop2.SetValue(rec, 42);
-        Assert.Equal(42, prop2.GetValue(rec));
+        int priorityOrd = _schema.TryGetOrdinal("Priority", out var pOrd) ? pOrd : -1;
+        rec.SetValue(priorityOrd, 42);
+        Assert.Equal(42, rec.GetValue(priorityOrd));
     }
 
     [Fact]
-    public void DynamicPropertyInfo_FallsBackToSchema_WhenNoOrdinal()
+    public void NameBased_GetSetValue_ViaSchema()
     {
         var rec = _schema.CreateRecord();
-        rec.SetValue(0, "Test title");
+        int titleOrd = _schema.TryGetOrdinal("Title", out var tOrd) ? tOrd : -1;
+        rec.SetValue(titleOrd, "Test title");
 
-        // No ordinal — falls back to Schema.TryGetOrdinal
-        var prop = new DynamicPropertyInfo("Title", typeof(string));
-        Assert.Equal("Test title", prop.GetValue(rec));
+        // Name-based access via BaseDataObject.GetFieldByName
+        Assert.Equal("Test title", rec.GetFieldByName("Title"));
     }
 
     // ── DataRecord.Schema property ────────────────────────────────────────

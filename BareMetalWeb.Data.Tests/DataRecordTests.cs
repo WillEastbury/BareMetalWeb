@@ -21,7 +21,7 @@ public class DataRecordTests
         var record = new DataRecord(schema);
 
         Assert.Equal("TestEntity", record.EntityTypeName);
-        Assert.Equal(3, record.FieldCount);
+        Assert.Equal(BaseDataObject.BaseFieldCount + 3, record.FieldCount);
     }
 
     // ── Ordinal access (hot path) ──────────────────────────────────────────
@@ -42,9 +42,11 @@ public class DataRecordTests
     [Fact]
     public void GetValue_Unset_ReturnsNull()
     {
-        var record = new DataRecord(5);
-        Assert.Null(record.GetValue(0));
-        Assert.Null(record.GetValue(4));
+        var schema = BuildTestSchema();
+        var record = new DataRecord(schema);
+        // Schema fields are unset by default
+        Assert.Null(record.GetValue(BaseDataObject.BaseFieldCount + 0));
+        Assert.Null(record.GetValue(BaseDataObject.BaseFieldCount + 2));
     }
 
     [Fact]
@@ -132,33 +134,33 @@ public class DataRecordTests
     [Fact]
     public void Resize_PreservesExistingValues()
     {
-        var record = new DataRecord(3);
+        var record = new DataRecord(10);
         record.SetValue(0, "keep");
         record.SetValue(1, 42);
         record.SetValue(2, true);
 
-        record.Resize(6);
+        record.Resize(14);
 
-        Assert.Equal(6, record.FieldCount);
+        Assert.Equal(14, record.FieldCount);
         Assert.Equal("keep", record.GetValue(0));
         Assert.Equal(42, record.GetValue(1));
         Assert.Equal(true, record.GetValue(2));
-        Assert.Null(record.GetValue(3));
-        Assert.Null(record.GetValue(5));
+        Assert.Null(record.GetValue(10));
+        Assert.Null(record.GetValue(13));
     }
 
     [Fact]
     public void Resize_SmallerOrEqual_NoOp()
     {
-        var record = new DataRecord(5);
+        var record = new DataRecord(10);
         record.SetValue(0, "original");
 
-        record.Resize(3); // smaller — no-op
-        Assert.Equal(5, record.FieldCount);
+        record.Resize(5); // smaller — no-op
+        Assert.Equal(10, record.FieldCount);
         Assert.Equal("original", record.GetValue(0));
 
-        record.Resize(5); // equal — no-op
-        Assert.Equal(5, record.FieldCount);
+        record.Resize(10); // equal — no-op
+        Assert.Equal(10, record.FieldCount);
     }
 
     // ── BaseDataObject ─────────────────────────────────────────────────────

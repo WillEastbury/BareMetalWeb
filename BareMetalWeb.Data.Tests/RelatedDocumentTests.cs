@@ -15,21 +15,91 @@ public class RelatedDocumentTests
 
     private class SourceDoc : BaseDataObject
     {
-        public string Number { get; set; } = string.Empty;
-        public SourceDoc() : base("src") { }
+        private const int Ord_Number = BaseFieldCount + 0;
+        internal new const int TotalFieldCount = BaseFieldCount + 1;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("Number", Ord_Number),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public SourceDoc() : base(TotalFieldCount) { }
+        public SourceDoc(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+        public string Number
+        {
+            get => (string?)_values[Ord_Number] ?? string.Empty;
+            set => _values[Ord_Number] = value;
+        }
     }
 
     private class DerivedDoc : BaseDataObject
     {
+        private const int Ord_SourceDocId = BaseFieldCount + 0;
+        internal new const int TotalFieldCount = BaseFieldCount + 1;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("SourceDocId", Ord_SourceDocId),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public DerivedDoc() : base(TotalFieldCount) { }
+        public DerivedDoc(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+
         [RelatedDocument(typeof(SourceDoc), DisplayField = "Number")]
-        public string? SourceDocId { get; set; }
-        public DerivedDoc() : base("drv") { }
+        public string? SourceDocId
+        {
+            get => (string?)_values[Ord_SourceDocId];
+            set => _values[Ord_SourceDocId] = value;
+        }
     }
 
     private class PlainDoc : BaseDataObject
     {
-        public string Title { get; set; } = string.Empty;
-        public PlainDoc() : base("plain") { }
+        private const int Ord_Title = BaseFieldCount + 0;
+        internal new const int TotalFieldCount = BaseFieldCount + 1;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("Title", Ord_Title),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public PlainDoc() : base(TotalFieldCount) { }
+        public PlainDoc(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+        public string Title
+        {
+            get => (string?)_values[Ord_Title] ?? string.Empty;
+            set => _values[Ord_Title] = value;
+        }
     }
 
     // ── Attribute construction ────────────────────────────────────────────────

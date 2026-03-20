@@ -12,44 +12,112 @@ namespace BareMetalWeb.Data;
     Permissions = "admin", NavGroup = "Admin", NavOrder = 95)]
 public sealed class ViewDefinition : BaseDataObject
 {
-    public ViewDefinition() : base() { }
-    public ViewDefinition(string createdBy) : base(createdBy) { }
+    private const int Ord_ViewName = BaseFieldCount + 0;
+    private const int Ord_RootEntity = BaseFieldCount + 1;
+    private const int Ord_ProjectionsJson = BaseFieldCount + 2;
+    private const int Ord_JoinsJson = BaseFieldCount + 3;
+    private const int Ord_FiltersJson = BaseFieldCount + 4;
+    private const int Ord_SortsJson = BaseFieldCount + 5;
+    private const int Ord_Limit = BaseFieldCount + 6;
+    private const int Ord_Offset = BaseFieldCount + 7;
+    private const int Ord_Materialised = BaseFieldCount + 8;
+    internal new const int TotalFieldCount = BaseFieldCount + 9;
+    private static readonly FieldSlot[] _fieldMap = new[]
+    {
+        new FieldSlot("CreatedBy", Ord_CreatedBy),
+        new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+        new FieldSlot("ETag", Ord_ETag),
+        new FieldSlot("FiltersJson", Ord_FiltersJson),
+        new FieldSlot("Identifier", Ord_Identifier),
+        new FieldSlot("JoinsJson", Ord_JoinsJson),
+        new FieldSlot("Key", Ord_Key),
+        new FieldSlot("Limit", Ord_Limit),
+        new FieldSlot("Materialised", Ord_Materialised),
+        new FieldSlot("Offset", Ord_Offset),
+        new FieldSlot("ProjectionsJson", Ord_ProjectionsJson),
+        new FieldSlot("RootEntity", Ord_RootEntity),
+        new FieldSlot("SortsJson", Ord_SortsJson),
+        new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+        new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+        new FieldSlot("Version", Ord_Version),
+        new FieldSlot("ViewName", Ord_ViewName),
+    };
+    protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+    public ViewDefinition() : base(TotalFieldCount) { }
+    public ViewDefinition(string createdBy) : base(TotalFieldCount, createdBy) { }
 
     /// <summary>Unique human-readable name for this view.</summary>
     [DataField(Label = "View Name", Order = 1, Required = true, List = true)]
-    public string ViewName { get; set; } = string.Empty;
+    public string ViewName
+    {
+        get => (string?)_values[Ord_ViewName] ?? string.Empty;
+        set => _values[Ord_ViewName] = value;
+    }
 
     /// <summary>Slug of the root entity that drives the view scan.</summary>
     [DataField(Label = "Root Entity (slug)", Order = 2, Required = true, List = true)]
-    public string RootEntity { get; set; } = string.Empty;
+    public string RootEntity
+    {
+        get => (string?)_values[Ord_RootEntity] ?? string.Empty;
+        set => _values[Ord_RootEntity] = value;
+    }
 
     /// <summary>JSON-serialised list of <see cref="ViewProjection"/>.</summary>
     [DataField(Label = "Projections (JSON)", Order = 3, FieldType = FormFieldType.TextArea)]
-    public string ProjectionsJson { get; set; } = "[]";
+    public string ProjectionsJson
+    {
+        get => (string?)_values[Ord_ProjectionsJson] ?? "[]";
+        set => _values[Ord_ProjectionsJson] = value;
+    }
 
     /// <summary>JSON-serialised list of <see cref="ViewJoinDefinition"/>.</summary>
     [DataField(Label = "Joins (JSON)", Order = 4, FieldType = FormFieldType.TextArea)]
-    public string JoinsJson { get; set; } = "[]";
+    public string JoinsJson
+    {
+        get => (string?)_values[Ord_JoinsJson] ?? "[]";
+        set => _values[Ord_JoinsJson] = value;
+    }
 
     /// <summary>JSON-serialised list of <see cref="ViewFilterDefinition"/>.</summary>
     [DataField(Label = "Filters (JSON)", Order = 5, FieldType = FormFieldType.TextArea)]
-    public string FiltersJson { get; set; } = "[]";
+    public string FiltersJson
+    {
+        get => (string?)_values[Ord_FiltersJson] ?? "[]";
+        set => _values[Ord_FiltersJson] = value;
+    }
 
     /// <summary>JSON-serialised list of <see cref="ViewSortDefinition"/>.</summary>
     [DataField(Label = "Sorts (JSON)", Order = 6, FieldType = FormFieldType.TextArea)]
-    public string SortsJson { get; set; } = "[]";
+    public string SortsJson
+    {
+        get => (string?)_values[Ord_SortsJson] ?? "[]";
+        set => _values[Ord_SortsJson] = value;
+    }
 
     /// <summary>Maximum rows returned. Defaults to 10 000.</summary>
     [DataField(Label = "Limit", Order = 7)]
-    public int Limit { get; set; } = 10_000;
+    public int Limit
+    {
+        get => (int)(_values[Ord_Limit] ?? 10_000);
+        set => _values[Ord_Limit] = value;
+    }
 
     /// <summary>Number of rows to skip (for pagination).</summary>
     [DataField(Label = "Offset", Order = 8)]
-    public int Offset { get; set; }
+    public int Offset
+    {
+        get => (int)(_values[Ord_Offset] ?? 0);
+        set => _values[Ord_Offset] = value;
+    }
 
     /// <summary>When true the view result is cached as a materialised view and updated from the WAL.</summary>
     [DataField(Label = "Materialised", Order = 9, FieldType = FormFieldType.YesNo)]
-    public bool Materialised { get; set; }
+    public bool Materialised
+    {
+        get => _values[Ord_Materialised] is true;
+        set => _values[Ord_Materialised] = value;
+    }
 
     // ── Typed accessors (not persisted directly) ─────────────────────────────
 

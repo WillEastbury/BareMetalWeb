@@ -20,5 +20,4 @@ internal sealed class MemberSignatureFile
 {
     public string Name { get; set; } = string.Empty;
     public string TypeName { get; set; } = string.Empty;
-    public int? BlittableSize { get; set; }
 }

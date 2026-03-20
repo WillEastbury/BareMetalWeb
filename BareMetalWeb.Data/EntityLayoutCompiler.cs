@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Collections.Frozen;
-using System.Reflection;
 using BareMetalWeb.Core;
 
 namespace BareMetalWeb.Data;
@@ -38,8 +37,8 @@ public static class EntityLayoutCompiler
 
     /// <summary>
     /// Compile DataEntityMetadata → EntityLayout.
-    /// Maps all public read/write properties to FieldRuntime with dense ordinals,
-    /// fixed offsets, var indices, and codec IDs.
+    /// Maps all metadata fields + base properties to FieldRuntime with dense ordinals,
+    /// fixed offsets, var indices, and codec IDs. Zero reflection.
     /// </summary>
     public static EntityLayout Compile(DataEntityMetadata meta, out IReadOnlyList<string> warnings)
     {
@@ -48,90 +47,79 @@ public static class EntityLayoutCompiler
         foreach (var f in meta.Fields)
             metaFieldsByName[f.Name] = f;
 
-        var allProps = meta.Type
-            .GetProperties(BindingFlags.Public | BindingFlags.Instance);
-        var propList = new List<PropertyInfo>(allProps.Length);
-        foreach (var p in allProps)
-        {
-            if (p.CanRead && p.CanWrite)
-                propList.Add(p);
-        }
-        propList.Sort((a, b) => StringComparer.Ordinal.Compare(a.Name, b.Name));
-        var props = propList.ToArray();
+        // Build sorted list of (name, clrType, getter, setter, fieldMeta?) — base props + entity fields
+        var entries = new List<(string Name, Type ClrType, Func<object, object?> Getter, Action<object, object?> Setter, DataFieldMetadata? Meta)>();
 
-        if (props.Length == 0)
-            warns.Add($"Entity '{meta.Name}' has no public read/write properties.");
+        // Base properties
+        AddBaseEntry(entries, "CreatedBy", typeof(string), BaseDataObject.Ord_CreatedBy);
+        AddBaseEntry(entries, "CreatedOnUtc", typeof(DateTime), BaseDataObject.Ord_CreatedOnUtc);
+        AddBaseEntry(entries, "ETag", typeof(string), BaseDataObject.Ord_ETag);
+        AddBaseEntry(entries, "Identifier", typeof(IdentifierValue), BaseDataObject.Ord_Identifier);
+        AddBaseEntry(entries, "Key", typeof(uint), BaseDataObject.Ord_Key);
+        AddBaseEntry(entries, "UpdatedBy", typeof(string), BaseDataObject.Ord_UpdatedBy);
+        AddBaseEntry(entries, "UpdatedOnUtc", typeof(DateTime), BaseDataObject.Ord_UpdatedOnUtc);
+        AddBaseEntry(entries, "Version", typeof(uint), BaseDataObject.Ord_Version);
 
-        bool hasKey = false;
-        foreach (var p in props)
+        // Entity-specific fields from metadata
+        foreach (var fieldMeta in meta.Fields)
         {
-            if (p.Name == "Key" && p.PropertyType == typeof(uint))
-            {
-                hasKey = true;
-                break;
-            }
+            if (fieldMeta.StorageOrdinal < 0)
+                continue;
+            entries.Add((fieldMeta.Name, fieldMeta.ClrType, fieldMeta.GetValueFn, fieldMeta.SetValueFn, fieldMeta));
         }
+
+        entries.Sort((a, b) => StringComparer.Ordinal.Compare(a.Name, b.Name));
+
+        if (entries.Count == 0)
+            warns.Add($"Entity '{meta.Name}' has no properties.");
+
+        bool hasKey = entries.Any(e => e.Name == "Key" && e.ClrType == typeof(uint));
         if (!hasKey)
             warns.Add($"Entity '{meta.Name}' is missing a uint Key property.");
 
-        var fields = new FieldRuntime[props.Length];
-        var nameToOrd = new Dictionary<string, int>(props.Length, StringComparer.OrdinalIgnoreCase);
+        var fields = new FieldRuntime[entries.Count];
+        var nameToOrd = new Dictionary<string, int>(entries.Count, StringComparer.OrdinalIgnoreCase);
         int fixedOffset = 0;
         ushort varIndex = 0;
 
-        for (int i = 0; i < props.Length; i++)
+        for (int i = 0; i < entries.Count; i++)
         {
-            var prop = props[i];
-            var fieldType = ResolveFieldType(prop.PropertyType);
-            bool isNullable = IsNullableType(prop.PropertyType);
+            var entry = entries[i];
+            var fieldType = ResolveFieldType(entry.ClrType);
+            bool isNullable = IsNullableType(entry.ClrType);
             var codecId = CodecTable.CodecIdFor(fieldType);
             var codec = CodecTable.Get(codecId);
             int fixedSize = codec.FixedSize;
             bool isVar = fixedSize == 0;
 
-            // Build flags
             var flags = FieldFlags.None;
             if (isNullable) flags |= FieldFlags.Nullable;
-            if (metaFieldsByName.TryGetValue(prop.Name, out var fieldMeta))
+            if (entry.Meta is { } fm)
             {
-                if (fieldMeta.Required) flags |= FieldFlags.Required;
-                if (fieldMeta.ReadOnly) flags |= FieldFlags.ReadOnly;
-                if (fieldMeta.IsIndexed) flags |= FieldFlags.Indexed;
-                if (fieldMeta.Lookup is not null) flags |= FieldFlags.Lookup;
-                if (fieldMeta.Computed is not null) flags |= FieldFlags.Computed;
-            }
-
-            // Reuse compiled delegates from metadata where available
-            Func<object, object?> getter;
-            Action<object, object?> setter;
-            if (fieldMeta is not null)
-            {
-                getter = fieldMeta.GetValueFn;
-                setter = fieldMeta.SetValueFn;
-            }
-            else
-            {
-                getter = PropertyAccessorFactory.BuildGetter(prop);
-                setter = PropertyAccessorFactory.BuildSetter(prop);
+                if (fm.Required) flags |= FieldFlags.Required;
+                if (fm.ReadOnly) flags |= FieldFlags.ReadOnly;
+                if (fm.IsIndexed) flags |= FieldFlags.Indexed;
+                if (fm.Lookup is not null) flags |= FieldFlags.Lookup;
+                if (fm.Computed is not null) flags |= FieldFlags.Computed;
             }
 
             fields[i] = new FieldRuntime
             {
                 Ordinal = i,
-                Name = prop.Name,
-                NameHash = EntityLayout.Fnv1aHash(prop.Name),
+                Name = entry.Name,
+                NameHash = EntityLayout.Fnv1aHash(entry.Name),
                 Type = fieldType,
                 Flags = flags,
                 FixedSizeBytes = (ushort)(isVar ? 0 : fixedSize),
                 FixedOffset = isVar ? -1 : fixedOffset,
                 VarIndex = isVar ? varIndex : (ushort)0,
                 CodecId = codecId,
-                ClrType = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType,
-                Getter = getter,
-                Setter = setter,
+                ClrType = Nullable.GetUnderlyingType(entry.ClrType) ?? entry.ClrType,
+                Getter = entry.Getter,
+                Setter = entry.Setter,
             };
 
-            nameToOrd[prop.Name] = i;
+            nameToOrd[entry.Name] = i;
 
             if (isVar)
                 varIndex++;
@@ -216,4 +204,15 @@ public static class EntityLayoutCompiler
 
     private static bool IsNullableType(Type type)
         => !type.IsValueType || Nullable.GetUnderlyingType(type) is not null;
+
+    private static void AddBaseEntry(
+        List<(string Name, Type ClrType, Func<object, object?> Getter, Action<object, object?> Setter, DataFieldMetadata? Meta)> entries,
+        string name, Type clrType, int ordinal)
+    {
+        var ord = ordinal;
+        entries.Add((name, clrType,
+            obj => ((BaseDataObject)obj).GetFieldValue(ord),
+            (obj, val) => ((BaseDataObject)obj).SetFieldValue(ord, val),
+            null));
+    }
 }

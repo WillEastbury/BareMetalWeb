@@ -96,7 +96,6 @@ public sealed class RuntimeEntityModel
             var clrType = RuntimeEntityCompiler.MapClrType(f.FieldType, f.IsNullable, f.EnumValues);
             // Use schema's 0-based ordinal (not compiler's 1-based f.Ordinal)
             int schemaOrdinal = schema.TryGetOrdinal(f.Name, out var ord) ? ord : -1;
-            var prop = new DynamicPropertyInfo(f.Name, clrType, schemaOrdinal);
 
             DataLookupConfig? lookup = null;
             if (f.FieldType == Rendering.Models.FormFieldType.LookupList
@@ -135,7 +134,7 @@ public sealed class RuntimeEntityModel
             }
 
             fields.Add(new DataFieldMetadata(
-                Property: prop,
+                ClrType: clrType,
                 Name: f.Name,
                 Label: f.Label,
                 FieldType: f.FieldType,

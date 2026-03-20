@@ -2,7 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Reflection;
+using System.Diagnostics.CodeAnalysis;
 using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Core;
@@ -158,8 +158,8 @@ public static class ComputedFieldService
         return null;
     }
 
-    [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("Trimming", "IL2077",
-        Justification = "Fallback for plain POCO child types not registered with DataScaffold. Production entities use the metadata path above which is AOT-safe.")]
+    [UnconditionalSuppressMessage("Trimming", "IL2070",
+        Justification = "Fallback for non-entity POCO child types (e.g. order lines). Result is cached; runs once per (type, name).")]
     private static Func<object, object?>? GetCachedGetter(Type type, string name)
     {
         return _getterCache.GetOrAdd((type, name), static key =>
@@ -170,14 +170,17 @@ public static class ComputedFieldService
             {
                 var field = meta.FindField(key.Item2);
                 if (field != null) return field.GetValueFn;
-                // Covers base class properties (Key etc.) not in meta.Fields
                 return EntityLayoutCompiler.GetOrCompile(meta).FieldByName(key.Item2)?.Getter;
             }
 
-            // Fallback for POCO types not registered with DataScaffold (e.g. child collection item types).
-            // Result is cached so this only runs once per (type, name) pair.
-            var prop = key.Item1.GetProperty(key.Item2);
-            return prop != null ? PropertyAccessorFactory.BuildGetter(prop) : null;
+            // POCO child types: lookup via DataScaffold metadata (no reflection)
+            var childMeta = DataScaffold.GetEntityByType(key.Item1);
+            if (childMeta != null)
+            {
+                var childField = childMeta.FindField(key.Item2);
+                if (childField != null) return childField.GetValueFn;
+            }
+            return null;
         });
     }
 

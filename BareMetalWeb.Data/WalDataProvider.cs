@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Numerics;
-using System.Reflection;
+
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -1246,10 +1246,11 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             for (int i = 0; i < schema.FieldCount; i++)
             {
                 if (!schema.IsIndexed[i]) continue;
-                var newValue = record.GetValue(i)?.ToString() ?? string.Empty;
+                var ord = BaseDataObject.BaseFieldCount + i;
+                var newValue = record.GetValue(ord)?.ToString() ?? string.Empty;
                 if (oldRecord != null)
                 {
-                    var oldValue = oldRecord.GetValue(i)?.ToString() ?? string.Empty;
+                    var oldValue = oldRecord.GetValue(ord)?.ToString() ?? string.Empty;
                     if (string.Equals(oldValue, newValue, StringComparison.OrdinalIgnoreCase))
                         continue;
                     _indexStore.AppendEntry(entityName, schema.Names[i], oldValue, keyStr, 'D');
@@ -1438,7 +1439,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             for (int i = 0; i < schema.FieldCount; i++)
             {
                 if (!schema.IsIndexed[i]) continue;
-                var value = oldRecord.GetValue(i)?.ToString() ?? string.Empty;
+                var value = oldRecord.GetValue(BaseDataObject.BaseFieldCount + i)?.ToString() ?? string.Empty;
                 _indexStore.AppendEntry(entityName, schema.Names[i], value, keyStr, 'D');
             }
         }
@@ -1819,8 +1820,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             typeFolder, GetSchemaFilePattern(type), SearchOption.TopDirectoryOnly))
         {
             if (!TryParseSchemaVersion(type, Path.GetFileName(file), out var version)) continue;
-            var schemaFile = LoadSchemaFile(file);
-            if (schemaFile == null) continue;
+            var schemaFile = LoadSchemaFile(file, type.Name, version);            if (schemaFile == null) continue;
             schemaFile.Version    = version;
             cache.Versions[version]           = schemaFile;
             cache.HashToVersion[schemaFile.Hash] = version;
@@ -1850,8 +1850,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
         var filePath = GetSchemaFilePath(type, version);
         if (!File.Exists(filePath)) return null;
 
-        var schemaFile = LoadSchemaFile(filePath);
-        if (schemaFile == null) return null;
+        var schemaFile = LoadSchemaFile(filePath, type.Name, version);        if (schemaFile == null) return null;
 
         schemaFile.Version = version;
         lock (GetSchemaLock(type))
@@ -1863,12 +1862,11 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
         return schemaFile;
     }
 
-    private SchemaDefinitionFile? LoadSchemaFile(string path)
+    private SchemaDefinitionFile? LoadSchemaFile(string path, string typeName, int version)
     {
         try
         {
-            var fileName = Path.GetFileNameWithoutExtension(path);
-            var fileContext = $"schema:{fileName}";
+            var fileContext = $"schema:{typeName}:{version}";
             var bytes = EncryptedFileIO.ReadDecrypted(path, fileContext);
             return BmwManualJson.DeserializeSchemaFile(bytes);
         }
@@ -1918,7 +1916,6 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             {
                 Name          = m.Name,
                 TypeName      = m.TypeName,
-                BlittableSize = m.BlittableSize,
             });
         }
         return list;
@@ -2028,8 +2025,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
                 var m = members[i];
                 arr[i] = new MemberSignature(
                     m.Name, m.TypeName,
-                    AssumePublicMembers(_serializer.ResolveTypeName(m.TypeName)),
-                    m.BlittableSize);
+                    AssumePublicMembers(_serializer.ResolveTypeName(m.TypeName)));
             }
             return arr;
         });
@@ -2045,64 +2041,30 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
 
     // ── Singleton-flag enforcement ────────────────────────────────────────────
 
-    private void ClearSingletonFlagsOnOtherRecords<[System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicProperties)] T>(T obj) where T : BaseDataObject
+    private void ClearSingletonFlagsOnOtherRecords<T>(T obj) where T : BaseDataObject
     {
         var type = typeof(T);
-        // Use DataScaffold metadata (compiled delegates) instead of raw reflection
         var meta = DataScaffold.GetEntityByType(type);
-        if (meta != null)
+        if (meta == null) return; // Entity not registered — no singleton flags to enforce
+
+        var singletonFields = new List<DataFieldMetadata>();
+        foreach (var f in meta.Fields)
         {
-            var singletonFields = new List<DataFieldMetadata>();
-            foreach (var f in meta.Fields)
-            {
-                if (f.HasSingletonFlag && f.ClrType == typeof(bool) && true.Equals(f.GetValueFn(obj)))
-                    singletonFields.Add(f);
-            }
-
-            if (singletonFields.Count == 0) return;
-
-            foreach (var record in Query<T>())
-            {
-                if (record.Key == obj.Key) continue;
-                bool changed = false;
-                foreach (var f in singletonFields)
-                {
-                    if (true.Equals(f.GetValueFn(record)))
-                    {
-                        f.SetValueFn(record, false);
-                        changed = true;
-                    }
-                }
-                if (changed) Save(record);
-            }
-            return;
+            if (f.HasSingletonFlag && f.ClrType == typeof(bool) && true.Equals(f.GetValueFn(obj)))
+                singletonFields.Add(f);
         }
 
-        // Fallback for entities not registered with DataScaffold: use live reflection on the CLR type.
-        var props = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-        var singletonProps = new List<PropertyInfo>();
-        foreach (var p in props)
-        {
-            if (p.PropertyType == typeof(bool)
-                && p.GetCustomAttribute<SingletonFlagAttribute>() != null
-                && p.CanRead && p.CanWrite
-                && true.Equals(p.GetValue(obj)))
-            {
-                singletonProps.Add(p);
-            }
-        }
-
-        if (singletonProps.Count == 0) return;
+        if (singletonFields.Count == 0) return;
 
         foreach (var record in Query<T>())
         {
             if (record.Key == obj.Key) continue;
             bool changed = false;
-            foreach (var prop in singletonProps)
+            foreach (var f in singletonFields)
             {
-                if (true.Equals(prop.GetValue(record)))
+                if (true.Equals(f.GetValueFn(record)))
                 {
-                    prop.SetValue(record, false);
+                    f.SetValueFn(record, false);
                     changed = true;
                 }
             }

@@ -25,11 +25,68 @@ public sealed class ColumnStatisticsTests : IDisposable
     [DataEntity("StatItems")]
     private class StatItem : BaseDataObject
     {
-        [DataField] public int    IntVal    { get; set; }
-        [DataField] public long   LongVal   { get; set; }
-        [DataField] public double DoubleVal { get; set; }
-        [DataField] public float  FloatVal  { get; set; }
-        [DataField] public string StrVal    { get; set; } = "";
+        private const int Ord_DoubleVal = BaseFieldCount + 0;
+        private const int Ord_FloatVal = BaseFieldCount + 1;
+        private const int Ord_IntVal = BaseFieldCount + 2;
+        private const int Ord_LongVal = BaseFieldCount + 3;
+        private const int Ord_StrVal = BaseFieldCount + 4;
+        internal new const int TotalFieldCount = BaseFieldCount + 5;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("DoubleVal", Ord_DoubleVal),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("FloatVal", Ord_FloatVal),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("IntVal", Ord_IntVal),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("LongVal", Ord_LongVal),
+            new FieldSlot("StrVal", Ord_StrVal),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public StatItem() : base(TotalFieldCount) { }
+        public StatItem(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+        [DataField]
+        public int IntVal
+        {
+            get => (int)(_values[Ord_IntVal] ?? 0);
+            set => _values[Ord_IntVal] = value;
+        }
+
+        [DataField]
+        public long LongVal
+        {
+            get => (long)(_values[Ord_LongVal] ?? 0L);
+            set => _values[Ord_LongVal] = value;
+        }
+
+        [DataField]
+        public double DoubleVal
+        {
+            get => (double)(_values[Ord_DoubleVal] ?? 0.0);
+            set => _values[Ord_DoubleVal] = value;
+        }
+
+        [DataField]
+        public float FloatVal
+        {
+            get => (float)(_values[Ord_FloatVal] ?? 0f);
+            set => _values[Ord_FloatVal] = value;
+        }
+
+        [DataField]
+        public string StrVal
+        {
+            get => (string?)_values[Ord_StrVal] ?? string.Empty;
+            set => _values[Ord_StrVal] = value;
+        }
     }
 
     public ColumnStatisticsTests()

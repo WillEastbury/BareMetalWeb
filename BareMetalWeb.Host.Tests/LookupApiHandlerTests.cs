@@ -31,26 +31,134 @@ public class LookupApiHandlerTests : IDisposable
     [DataEntity("Products", Slug = "products")]
     private class Product : BaseDataObject
     {
-        [DataField(Label = "Name", Order = 1)] public string Name { get; set; } = "";
-        [DataField(Label = "Description", Order = 2)] public string Description { get; set; } = "";
-        [DataField(Label = "Sku", Order = 3)] public string Sku { get; set; } = "";
+        private const int Ord_Description = BaseFieldCount + 0;
+        private const int Ord_Name = BaseFieldCount + 1;
+        private const int Ord_Sku = BaseFieldCount + 2;
+        internal new const int TotalFieldCount = BaseFieldCount + 3;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("Description", Ord_Description),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("Name", Ord_Name),
+            new FieldSlot("Sku", Ord_Sku),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public Product() : base(TotalFieldCount) { }
+        public Product(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+        public string Name
+        {
+            get => (string?)_values[Ord_Name] ?? string.Empty;
+            set => _values[Ord_Name] = value;
+        }
+
+        public string Description
+        {
+            get => (string?)_values[Ord_Description] ?? string.Empty;
+            set => _values[Ord_Description] = value;
+        }
+
+        public string Sku
+        {
+            get => (string?)_values[Ord_Sku] ?? string.Empty;
+            set => _values[Ord_Sku] = value;
+        }
     }
 
     [DataEntity("Customers", Slug = "customers")]
     private class Customer : BaseDataObject
     {
-        [DataField(Label = "Name", Order = 1)] public string Name { get; set; } = "";
-        [DataField(Label = "Email", Order = 2)] public string Email { get; set; } = "";
+        private const int Ord_Email = BaseFieldCount + 0;
+        private const int Ord_Name = BaseFieldCount + 1;
+        internal new const int TotalFieldCount = BaseFieldCount + 2;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Email", Ord_Email),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("Name", Ord_Name),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public Customer() : base(TotalFieldCount) { }
+        public Customer(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+        public string Name
+        {
+            get => (string?)_values[Ord_Name] ?? string.Empty;
+            set => _values[Ord_Name] = value;
+        }
+
+        public string Email
+        {
+            get => (string?)_values[Ord_Email] ?? string.Empty;
+            set => _values[Ord_Email] = value;
+        }
     }
 
     [DataEntity("Orders", Slug = "orders")]
     private class Order : BaseDataObject
     {
-        [DataField(Label = "Order Number", Order = 1)] public string OrderNumber { get; set; } = "";
+        private const int Ord_CustomerId = BaseFieldCount + 0;
+        private const int Ord_OrderNumber = BaseFieldCount + 1;
+        private const int Ord_Status = BaseFieldCount + 2;
+        internal new const int TotalFieldCount = BaseFieldCount + 3;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("CustomerId", Ord_CustomerId),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("OrderNumber", Ord_OrderNumber),
+            new FieldSlot("Status", Ord_Status),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public Order() : base(TotalFieldCount) { }
+        public Order(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+        public string OrderNumber
+        {
+            get => (string?)_values[Ord_OrderNumber] ?? string.Empty;
+            set => _values[Ord_OrderNumber] = value;
+        }
+
+
         [DataField(Label = "Customer", Order = 2)]
         [DataLookup(typeof(Customer))]
-        public string CustomerId { get; set; } = "";
-        [DataField(Label = "Status", Order = 3)] public string Status { get; set; } = "";
+        public string CustomerId
+        {
+            get => (string?)_values[Ord_CustomerId] ?? string.Empty;
+            set => _values[Ord_CustomerId] = value;
+        }
+
+        public string Status
+        {
+            get => (string?)_values[Ord_Status] ?? string.Empty;
+            set => _values[Ord_Status] = value;
+        }
     }
 
     private readonly IDataObjectStore _originalStore;

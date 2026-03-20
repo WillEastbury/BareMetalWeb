@@ -13,11 +13,63 @@ public class DataQueryEvaluatorTests : IDisposable
     [DataEntity("TestItems")]
     private class TestItem : BaseDataObject
     {
-        [DataField] public string Name { get; set; } = string.Empty;
-        [DataField] public int Age { get; set; }
-        [DataField] public decimal Price { get; set; }
-        [DataField] public string? NullableField { get; set; }
-        [DataField] public List<string> Tags { get; set; } = new();
+        private const int Ord_Age = BaseFieldCount + 0;
+        private const int Ord_Name = BaseFieldCount + 1;
+        private const int Ord_NullableField = BaseFieldCount + 2;
+        private const int Ord_Price = BaseFieldCount + 3;
+        private const int Ord_Tags = BaseFieldCount + 4;
+        internal new const int TotalFieldCount = BaseFieldCount + 5;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("Age", Ord_Age),
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("Name", Ord_Name),
+            new FieldSlot("NullableField", Ord_NullableField),
+            new FieldSlot("Price", Ord_Price),
+            new FieldSlot("Tags", Ord_Tags),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public TestItem() : base(TotalFieldCount) { }
+        public TestItem(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+        public string Name
+        {
+            get => (string?)_values[Ord_Name] ?? string.Empty;
+            set => _values[Ord_Name] = value;
+        }
+
+        public int Age
+        {
+            get => (int)(_values[Ord_Age] ?? 0);
+            set => _values[Ord_Age] = value;
+        }
+
+        public decimal Price
+        {
+            get => (decimal)(_values[Ord_Price] ?? 0m);
+            set => _values[Ord_Price] = value;
+        }
+
+        public string? NullableField
+        {
+            get => (string?)_values[Ord_NullableField];
+            set => _values[Ord_NullableField] = value;
+        }
+
+        public List<string> Tags
+        {
+            get => (List<string>?)_values[Ord_Tags] ?? new();
+            set => _values[Ord_Tags] = value;
+        }
     }
 
     private readonly DataQueryEvaluator _evaluator = new();

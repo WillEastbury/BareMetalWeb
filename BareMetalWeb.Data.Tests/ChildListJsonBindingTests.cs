@@ -22,11 +22,68 @@ public class ChildListJsonBindingTests : IDisposable
     [DataEntity("Test Order Rows", Slug = "test-order-rows")]
     private class TestOrderRow : BaseDataObject
     {
-        [DataField(Label = "Product", Order = 1)] public string ProductId { get; set; } = "";
-        [DataField(Label = "Quantity", Order = 2)] public int Quantity { get; set; }
-        [DataField(Label = "Unit Price", Order = 3)] public decimal UnitPrice { get; set; }
-        [DataField(Label = "Notes", Order = 4)] public string Notes { get; set; } = "";
-        [DataField(Label = "Line Total", Order = 5)] public decimal LineTotal { get; set; }
+        private const int Ord_LineTotal = BaseFieldCount + 0;
+        private const int Ord_Notes = BaseFieldCount + 1;
+        private const int Ord_ProductId = BaseFieldCount + 2;
+        private const int Ord_Quantity = BaseFieldCount + 3;
+        private const int Ord_UnitPrice = BaseFieldCount + 4;
+        internal new const int TotalFieldCount = BaseFieldCount + 5;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("LineTotal", Ord_LineTotal),
+            new FieldSlot("Notes", Ord_Notes),
+            new FieldSlot("ProductId", Ord_ProductId),
+            new FieldSlot("Quantity", Ord_Quantity),
+            new FieldSlot("UnitPrice", Ord_UnitPrice),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public TestOrderRow() : base(TotalFieldCount) { }
+        public TestOrderRow(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+        [DataField]
+        public string ProductId
+        {
+            get => (string?)_values[Ord_ProductId] ?? string.Empty;
+            set => _values[Ord_ProductId] = value;
+        }
+
+        [DataField]
+        public int Quantity
+        {
+            get => (int)(_values[Ord_Quantity] ?? 0);
+            set => _values[Ord_Quantity] = value;
+        }
+
+        [DataField]
+        public decimal UnitPrice
+        {
+            get => (decimal)(_values[Ord_UnitPrice] ?? 0m);
+            set => _values[Ord_UnitPrice] = value;
+        }
+
+        [DataField]
+        public string Notes
+        {
+            get => (string?)_values[Ord_Notes] ?? string.Empty;
+            set => _values[Ord_Notes] = value;
+        }
+
+        [DataField]
+        public decimal LineTotal
+        {
+            get => (decimal)(_values[Ord_LineTotal] ?? 0m);
+            set => _values[Ord_LineTotal] = value;
+        }
     }
 
     public ChildListJsonBindingTests()

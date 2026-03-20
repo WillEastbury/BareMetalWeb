@@ -1,5 +1,4 @@
 using System.Net;
-using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -1302,7 +1301,7 @@ public static class RouteRegistrationExtensions
                         ["name"] = m.Name,
                         ["slug"] = m.Slug,
                         ["typeName"] = m.Type.Name,
-                        ["assembly"] = m.Type.Assembly.GetName().Name,
+                        ["assembly"] = BuildInfo.AssemblyName,
                         ["showOnNav"] = m.ShowOnNav,
                         ["navGroup"] = m.NavGroup,
                         ["fieldCount"] = m.Fields.Count
