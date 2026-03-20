@@ -231,8 +231,7 @@ public sealed class TransactionCommitEngine
         }
         else
         {
-            clone = (BaseDataObject)System.Runtime.CompilerServices.RuntimeHelpers
-                .GetUninitializedObject(source.GetType());
+            clone = (BaseDataObject)meta.Handlers.Create();
         }
 
         clone.Key = source.Key;

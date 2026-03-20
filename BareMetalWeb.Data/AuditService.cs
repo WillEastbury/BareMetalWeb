@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text.Json;
 using System.Threading;
@@ -17,27 +16,6 @@ namespace BareMetalWeb.Data;
 public sealed class AuditService
 {
     private readonly IBufferedLogger? _logger;
-
-    // Cache of compiled property accessors per type — uses DataScaffold metadata (AOT-safe)
-    private static readonly ConcurrentDictionary<Type, (string Name, Func<object, object?> Getter)[]> _accessorCache = new();
-
-    private static (string Name, Func<object, object?> Getter)[] GetCachedAccessors(Type type)
-    {
-        return _accessorCache.GetOrAdd(type, static t =>
-        {
-            var meta = DataScaffold.GetEntityByType(t);
-            if (meta == null) return Array.Empty<(string, Func<object, object?>)>();
-
-            var layout = EntityLayoutCompiler.GetOrCompile(meta);
-            var list = new List<(string, Func<object, object?>)>(layout.Fields.Length);
-            foreach (var f in layout.Fields)
-            {
-                if (f.Getter != null)
-                    list.Add((f.Name, f.Getter));
-            }
-            return list.ToArray();
-        });
-    }
 
     /// <summary>
     /// When true, audit saves are awaited directly instead of fire-and-forget.
@@ -315,32 +293,6 @@ public sealed class AuditService
                 }
             }
             return changes;
-        }
-
-        // Fallback for unregistered types — uses cached compiled delegates
-        foreach (var (name, getter) in GetCachedAccessors(type))
-        {
-            if (skipFields.Contains(name))
-                continue;
-
-            try
-            {
-                var oldValue = getter(oldEntity);
-                var newValue = getter(newEntity);
-
-                if (!AreEqual(oldValue, newValue))
-                {
-                    changes.Add(new FieldChange(
-                        name,
-                        SerializeValue(oldValue),
-                        SerializeValue(newValue)
-                    ));
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogError($"Failed to detect change for property {name}: {ex.Message}", ex);
-            }
         }
 
         return changes;

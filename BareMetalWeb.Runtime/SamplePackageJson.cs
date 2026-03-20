@@ -77,13 +77,13 @@ public static class SamplePackageJson
         var meta = DataScaffold.GetEntityByType(typeof(T));
         var list = new List<T>(arr.GetArrayLength());
 
-        // Build property setter cache when DataScaffold metadata is unavailable (e.g. unit tests)
-        Dictionary<string, (System.Reflection.PropertyInfo Prop, Type ClrType)>? propCache = null;
+        // Auto-register entity if metadata is missing (e.g. unit tests)
         if (meta == null)
         {
-            propCache = new(StringComparer.OrdinalIgnoreCase);
-            foreach (var p in typeof(T).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
-                if (p.CanWrite) propCache[p.Name] = (p, p.PropertyType);
+            DataScaffold.RegisterEntity<T>();
+            meta = DataScaffold.GetEntityByType(typeof(T));
+            if (meta == null)
+                throw new InvalidOperationException($"Failed to register entity metadata for {typeof(T).Name}.");
         }
 
         foreach (var el in arr.EnumerateArray())
@@ -93,18 +93,10 @@ public static class SamplePackageJson
 
             foreach (var prop in el.EnumerateObject())
             {
-                if (meta != null)
-                {
-                    var field = meta.FindField(prop.Name);
-                    if (field == null) continue;
-                    if (DataScaffold.TryConvertJson(prop.Value, field.ClrType, out var converted))
-                        field.SetValueFn(entity, converted);
-                }
-                else if (propCache!.TryGetValue(prop.Name, out var pi))
-                {
-                    if (DataScaffold.TryConvertJson(prop.Value, pi.ClrType, out var converted))
-                        pi.Prop.SetValue(entity, converted);
-                }
+                var field = meta.FindField(prop.Name);
+                if (field == null) continue;
+                if (DataScaffold.TryConvertJson(prop.Value, field.ClrType, out var converted))
+                    field.SetValueFn(entity, converted);
             }
 
             list.Add(entity);

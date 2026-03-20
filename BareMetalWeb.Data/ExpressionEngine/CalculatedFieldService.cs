@@ -396,9 +396,17 @@ public static class CalculatedFieldService
             if (targetType == typeof(byte)) return (byte)0;
             if (targetType == typeof(short)) return (short)0;
             if (targetType == typeof(TimeSpan)) return TimeSpan.Zero;
+            if (targetType == typeof(ushort)) return (ushort)0;
+            if (targetType == typeof(ulong)) return 0UL;
+            if (targetType == typeof(sbyte)) return (sbyte)0;
+            if (targetType == typeof(char)) return '\0';
+            if (targetType == typeof(DateOnly)) return default(DateOnly);
+            if (targetType == typeof(TimeOnly)) return default(TimeOnly);
+            if (targetType == typeof(IdentifierValue)) return default(IdentifierValue);
 
-            // Fallback for unknown value types — still needed for user-defined structs.
-            return RuntimeHelpers.GetUninitializedObject(targetType);
+            // All known value types are covered above.
+            throw new InvalidOperationException(
+                $"Unknown value type '{targetType.FullName}' in ConvertValue — add an explicit default above.");
         }
 
         var underlyingType = Nullable.GetUnderlyingType(targetType) ?? targetType;
