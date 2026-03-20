@@ -124,8 +124,8 @@ public class RouteRegistrationExtensionsTests : IDisposable
         // Arrange & Act
         _server.RegisterStaticRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
-        // Assert — /, /favicon.ico, /status, /statusRaw, /health, /healthz, /readyz
-        Assert.Equal(7, _server.routes.Count);
+        // Assert — /, /favicon.ico, /status, /statusRaw, /health, /healthz, /readyz, /queryinput/{type}
+        Assert.Equal(8, _server.routes.Count);
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -597,7 +597,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterApiRoutes(_routeHandlers, _pageInfoFactory);
 
         // Assert
-        Assert.Equal(27, _server.routes.Count);
+        Assert.Equal(28, _server.routes.Count);
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -797,7 +797,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         Assert.True(afterAdmin > afterMonitoring);
         Assert.True(afterLookup > afterAdmin);
         Assert.True(total > afterLookup);
-        Assert.Equal(staticCount + 20 + 6 + 13 + 5 + 27, total);
+        Assert.Equal(staticCount + 20 + 6 + 13 + 5 + 28, total);
     }
 
     [Fact]

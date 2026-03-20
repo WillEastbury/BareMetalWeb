@@ -294,6 +294,7 @@ public class ExportTests
         // Arrange — "orders" is a metadata-driven gallery entity with a ChildList "OrderRows"
         // whose ChildEntitySlug = "order-rows".  No CLR List<T> type exists; CLR type is string.
         _ = HostGalleryTestFixture.State;
+        HostGalleryTestFixture.ReRegisterVirtualEntities(); // restore after possible static-state pollution
         Assert.True(DataScaffold.TryGetEntity("orders", out var meta));
         var orderRowsField = meta!.Fields.FirstOrDefault(f => f.Name == "OrderRows");
         Assert.NotNull(orderRowsField);
