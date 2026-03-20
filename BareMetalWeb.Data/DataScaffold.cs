@@ -1895,8 +1895,10 @@ public static class DataScaffold
         if (effectiveType == typeof(byte)) return (byte)value == 0;
         if (effectiveType == typeof(short)) return (short)value == 0;
 
-        var defaultValue = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(effectiveType);
-        return Equals(value, defaultValue);
+        // All persistable value types are covered above.  For anything else,
+        // assume the value is non-default — safe because unknown value types
+        // cannot appear in the metadata-driven field system.
+        return false;
     }
 
     public static string? GetIdValue(BaseDataObject instance)
@@ -2811,7 +2813,7 @@ public static class DataScaffold
             var required = imageFieldAttribute?.Required
                 ?? fileFieldAttribute?.Required
                 ?? fieldAttribute?.Required
-                ?? (!IsNullable(prop) || !HasDefaultValue(type, prop));
+                ?? (!IsNullable(prop) || !HasDefaultValue(probe, prop));
             var order = imageFieldAttribute?.Order
                 ?? fileFieldAttribute?.Order
                 ?? fieldAttribute?.Order
@@ -3078,24 +3080,18 @@ public static class DataScaffold
             || nullability.WriteState == NullabilityState.Nullable;
     }
 
-    private static bool HasDefaultValue(Type declaringType, PropertyInfo property)
+    private static bool HasDefaultValue(object defaultInstance, PropertyInfo property)
     {
-        object? instance = null;
+        object? value;
         try
         {
-            instance = declaringType == typeof(DataRecord)
-                ? new DataRecord()
-                : System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(declaringType);
+            value = property.GetValue(defaultInstance);
         }
         catch
         {
             return false;
         }
 
-        if (instance is null)
-            return false;
-
-        var value = property.GetValue(instance);
         return !IsDefaultValue(value, property.PropertyType);
     }
 

@@ -41,6 +41,7 @@ public class EntityDefinition : BaseDataObject
         new FieldSlot("Slug", Ord_Slug),
         new FieldSlot("UpdatedBy", Ord_UpdatedBy),
         new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+        new FieldSlot("Version", Ord_Version),
     };
     protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
 

@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Runtime.CompilerServices;
 using BareMetalWeb.Core;
 
 namespace BareMetalWeb.Data.ExpressionEngine;
@@ -402,8 +401,10 @@ public static class CalculatedFieldService
             if (targetType == typeof(short)) return (short)0;
             if (targetType == typeof(TimeSpan)) return TimeSpan.Zero;
 
-            // Fallback for unknown value types — still needed for user-defined structs.
-            return RuntimeHelpers.GetUninitializedObject(targetType);
+            // All persistable value types are covered above. Unknown types cannot
+            // appear in the metadata-driven calculated field system.
+            throw new InvalidOperationException(
+                $"No default value known for type '{targetType.FullName}'. Add it to ConvertDefaultValue.");
         }
 
         var underlyingType = Nullable.GetUnderlyingType(targetType) ?? targetType;

@@ -86,6 +86,8 @@ BareMetalWeb is a minimalistic, high-performance web server built on bare-metal 
 - Everything built from scratch for brutal speed (0.1-0.15ms page renders)
 - Zero external dependencies beyond Kestrel/ASP.NET Core (used only for HTTP/SSL)
 
+For additional clarity, the development process itself explicitly enforces non-derivation constraints, including agent-level instructions designed to avoid reproducing or inheriting patterns from existing frameworks. If further evidence is required, those constraints are intentionally visible within the repository, reflecting the degree of care taken to ensure the system remains independently derived.
+
 ## Repository Structure
 
 - **BareMetalWeb.Host** - Main host application with routing and request handling
