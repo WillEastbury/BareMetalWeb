@@ -41,7 +41,7 @@ public class StringListFieldBindingTests
         // Arrange – JSON array (ideal case)
         var meta = GetMeta();
         var instance = new TagsTestEntity();
-        var json = ManualJsonHelper.ParseJsonElementDict(
+        var json = JsonDocToDict(
             "{\"Tags\":[\"test\",\"test2\"],\"Name\":\"Widget\"}");
 
         // Act
@@ -58,7 +58,7 @@ public class StringListFieldBindingTests
         // Arrange – VNext SPA sends textarea value as a plain newline-separated string
         var meta = GetMeta();
         var instance = new TagsTestEntity();
-        var json = ManualJsonHelper.ParseJsonElementDict(
+        var json = JsonDocToDict(
             "{\"Tags\":\"test\\ntest2\",\"Name\":\"Widget\"}");
 
         // Act
@@ -75,7 +75,7 @@ public class StringListFieldBindingTests
         // Arrange – JS array toString produces "test,test2"
         var meta = GetMeta();
         var instance = new TagsTestEntity();
-        var json = ManualJsonHelper.ParseJsonElementDict(
+        var json = JsonDocToDict(
             "{\"Tags\":\"test,test2\",\"Name\":\"Widget\"}");
 
         // Act
@@ -92,7 +92,7 @@ public class StringListFieldBindingTests
         // Arrange – when Tags is cleared and not required, VNext sends null
         var meta = GetMeta();
         var instance = new TagsTestEntity();
-        var json = ManualJsonHelper.ParseJsonElementDict(
+        var json = JsonDocToDict(
             "{\"Tags\":null,\"Name\":\"Widget\"}");
 
         // Act
@@ -123,5 +123,14 @@ public class StringListFieldBindingTests
         // Assert
         Assert.Empty(errors);
         Assert.Equal(new List<string> { "test", "test2" }, instance.Tags);
+    }
+
+    private static Dictionary<string, JsonElement> JsonDocToDict(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var dict = new Dictionary<string, JsonElement>();
+        foreach (var prop in doc.RootElement.EnumerateObject())
+            dict[prop.Name] = prop.Value.Clone();
+        return dict;
     }
 }

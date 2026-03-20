@@ -19,7 +19,7 @@ if (!File.Exists(stateFile))
     return 1;
 }
 
-var node = ReadNodeIdentity(File.ReadAllText(stateFile));
+var node = DeserializeNodeIdentity(File.ReadAllText(stateFile))!;
 
 Log("Agent started");
 Log($"Node: {node.NodeId} → {controlPlane}");
@@ -95,7 +95,7 @@ static async Task<RuntimeResponse> PollDesiredRuntime(NodeIdentity node, string 
     var json = await http.GetStringAsync(
         $"{controlPlane}/api/runtime/desired/{node.NodeId}");
 
-    return ReadRuntimeResponse(json);
+    return DeserializeRuntimeResponse(json)!;
 }
 
 static async Task DownloadRuntime(RuntimeResponse r, NodeIdentity node, string controlPlane)
@@ -179,33 +179,32 @@ static void Log(string msg)
     Console.WriteLine($"{DateTime.UtcNow:O} | {msg}");
 }
 
-// ── Manual JSON helpers (no JsonSerializer, no source generators) ──────────
+// ── Manual JSON deserialization (replaces JsonSerializer + source-gen) ────────
 
-static NodeIdentity ReadNodeIdentity(string json)
+static NodeIdentity DeserializeNodeIdentity(string json)
 {
     using var doc = JsonDocument.Parse(json);
     var r = doc.RootElement;
     return new NodeIdentity(
-        r.TryGetProperty("nodeId", out var nid) ? nid.GetString() ?? "" : "",
+        r.TryGetProperty("nodeId", out var ni) ? ni.GetString() ?? "" : "",
         r.TryGetProperty("servicePrincipal", out var sp) ? sp.GetString() ?? "" : "",
-        r.TryGetProperty("secret", out var sec) ? sec.GetString() ?? "" : "",
+        r.TryGetProperty("secret", out var s) ? s.GetString() ?? "" : "",
         r.TryGetProperty("clusterEndpoint", out var ce) ? ce.GetString() ?? "" : "",
         r.TryGetProperty("certFingerprint", out var cf) ? cf.GetString() ?? "" : ""
     );
 }
 
-static RuntimeResponse ReadRuntimeResponse(string json)
+static RuntimeResponse DeserializeRuntimeResponse(string json)
 {
     using var doc = JsonDocument.Parse(json);
     var r = doc.RootElement;
     return new RuntimeResponse(
         r.TryGetProperty("desiredVersion", out var dv) ? dv.GetString() : null,
-        r.TryGetProperty("sha256", out var sha) ? sha.GetString() : null,
+        r.TryGetProperty("sha256", out var sh) ? sh.GetString() : null,
         r.TryGetProperty("downloadUrl", out var du) ? du.GetString() : null,
-        r.TryGetProperty("pollSeconds", out var ps) && ps.TryGetInt32(out var pollVal) ? pollVal : 0
+        r.TryGetProperty("pollSeconds", out var ps) ? ps.GetInt32() : 0
     );
 }
 
 record NodeIdentity(string NodeId, string ServicePrincipal, string Secret, string ClusterEndpoint, string CertFingerprint);
-
 record RuntimeResponse(string? DesiredVersion, string? Sha256, string? DownloadUrl, int PollSeconds);

@@ -160,7 +160,7 @@ internal sealed class NodeRegistrationService
             if (!string.IsNullOrEmpty(dir))
                 Directory.CreateDirectory(dir);
 
-            var json    = AgentJsonHelper.SerializeNodeIdentity(identity);
+            var json    = AgentJson.SerializeNodeIdentity(identity);
             var tmpPath = _config.StateFile + ".tmp";
 
             // Atomic write: write to temp file then rename to avoid partial-write corruption

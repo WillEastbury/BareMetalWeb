@@ -4528,7 +4528,7 @@ public sealed class RouteHandlers : IRouteHandlers
             }
 
             // Fetch remote listings
-            var listings = await WebStoreClient.GetAsync<List<GalleryListing>>(
+            var listings = await WebStoreClient.GetGalleryListingsAsync(
                 "/api/data/GalleryTemplate").ConfigureAwait(false);
 
             if (listings is null || listings.Count == 0)
@@ -4634,13 +4634,13 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        // Deserialize using the AOT-safe context
+        // Deserialize using manual JSON reader (no JsonSerializer)
         SamplePackage? pkg;
         try
         {
-            pkg = SamplePackageReader.ReadSamplePackage(packageJson);
+            pkg = SamplePackageJson.Deserialize(packageJson);
         }
-        catch (JsonException ex)
+        catch (Exception ex)
         {
             _logger?.LogError($"Webstore|deserialize-failed|{packageSlug}", ex);
             await BuildPageHandler(ctx =>

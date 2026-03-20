@@ -7,7 +7,6 @@ using System.IO;
 using System.Numerics;
 using System.Reflection;
 using System.Text;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Core;
@@ -1871,7 +1870,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             var fileName = Path.GetFileNameWithoutExtension(path);
             var fileContext = $"schema:{fileName}";
             var bytes = EncryptedFileIO.ReadDecrypted(path, fileContext);
-            return ManualJsonHelper.DeserializeObject(bytes, ManualJsonHelper.ReadSchemaDefinitionFile);
+            return BmwManualJson.DeserializeSchemaFile(bytes);
         }
         catch (Exception ex)
         {
@@ -1883,7 +1882,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
     private void SaveSchemaFile(Type type, SchemaDefinitionFile schema)
     {
         var path  = GetSchemaFilePath(type, schema.Version);
-        var bytes = ManualJsonHelper.SerializeObjectToUtf8(schema, ManualJsonHelper.WriteSchemaDefinitionFile);
+        var bytes = BmwManualJson.SerializeSchemaFile(schema);
         var fileContext = $"schema:{type.Name}:{schema.Version}";
         EncryptedFileIO.WriteEncrypted(path, bytes, fileContext);
     }

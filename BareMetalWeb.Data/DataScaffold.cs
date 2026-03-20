@@ -90,7 +90,8 @@ public sealed record DataEntityMetadata(
     IReadOnlyList<RemoteCommandMetadata> Commands,
     string? DefaultSortField = null,
     SortDirection DefaultSortDirection = SortDirection.Asc,
-    IReadOnlyList<DataFieldMetadata>? DocumentRelationFields = null
+    IReadOnlyList<DataFieldMetadata>? DocumentRelationFields = null,
+    bool EnableGetIngress = false
 )
 {
     private DataFieldMetadata[]? _listFields;

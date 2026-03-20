@@ -171,5 +171,14 @@ public class FieldDefinition : BaseDataObject
     [DataField(Label = "Column Span", Order = 38)]
     public int ColumnSpan { get; set; } = 12;
 
+    /// <summary>
+    /// Marks this field as the target for the GET ingress endpoint.
+    /// When the parent entity has <see cref="EntityDefinition.EnableGetIngress"/> = true,
+    /// the <c>text</c> query-string parameter is written to this field.
+    /// Only one field per entity should have this set.
+    /// </summary>
+    [DataField(Label = "Is Ingress Target", Order = 39)]
+    public bool IsIngressTarget { get; set; } = false;
+
     public override string ToString() => $"{Name} ({Type})";
 }

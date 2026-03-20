@@ -37,7 +37,7 @@ public static class SampleGalleryService
             using var stream = assembly.GetManifestResourceStream(resourceName);
             if (stream == null) continue;
 
-            var pkg = SamplePackageReader.ReadSamplePackage(stream);
+            var pkg = SamplePackageJson.Deserialize(stream);
             if (pkg != null)
                 packages.Add(pkg);
         }
@@ -69,7 +69,7 @@ public static class SampleGalleryService
         using var stream = assembly.GetManifestResourceStream(resourceName);
         if (stream == null) return null;
 
-        return SamplePackageReader.ReadSamplePackage(stream);
+        return SamplePackageJson.Deserialize(stream);
     }
 
     // ── Deployment ───────────────────────────────────────────────────────────

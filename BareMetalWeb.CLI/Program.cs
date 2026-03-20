@@ -1,9 +1,191 @@
-﻿using System.Net;
+﻿using System.Buffers;
+using System.Net;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
+
 namespace BareMetalWeb.CLI;
+
+// ── Manual JSON helpers (replaces JsonSerializer + source-gen context) ────────
+
+internal static class CliJson
+{
+    internal static string SerializeDict(Dictionary<string, string> dict)
+    {
+        var buf = new ArrayBufferWriter<byte>(256);
+        using var w = new Utf8JsonWriter(buf);
+        w.WriteStartObject();
+        foreach (var (k, v) in dict)
+            w.WriteString(k, v);
+        w.WriteEndObject();
+        w.Flush();
+        return Encoding.UTF8.GetString(buf.WrittenSpan);
+    }
+
+    internal static string SerializeSeedRequest(SeedRequest req)
+    {
+        var buf = new ArrayBufferWriter<byte>(256);
+        using var w = new Utf8JsonWriter(buf);
+        w.WriteStartObject();
+        w.WriteBoolean("clearExisting", req.ClearExisting);
+        w.WriteStartObject("entities");
+        foreach (var (k, v) in req.Entities)
+            w.WriteNumber(k, v);
+        w.WriteEndObject();
+        w.WriteEndObject();
+        w.Flush();
+        return Encoding.UTF8.GetString(buf.WrittenSpan);
+    }
+
+    internal static JobStatusResponse? DeserializeJobStatus(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        using var doc = JsonDocument.Parse(json);
+        var r = doc.RootElement;
+        return new JobStatusResponse
+        {
+            JobId = Str(r, "jobId"),
+            OperationName = Str(r, "operationName"),
+            Status = Str(r, "status"),
+            PercentComplete = r.TryGetProperty("percentComplete", out var pc) ? pc.GetInt32() : 0,
+            Description = StrOrNull(r, "description"),
+            Error = StrOrNull(r, "error"),
+            StatusUrl = StrOrNull(r, "statusUrl"),
+        };
+    }
+
+    internal static MetaEntity[]? DeserializeMetaEntities(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        if (root.ValueKind != JsonValueKind.Array) return null;
+        var list = new MetaEntity[root.GetArrayLength()];
+        int i = 0;
+        foreach (var el in root.EnumerateArray())
+        {
+            list[i++] = new MetaEntity
+            {
+                Name = Str(el, "name"),
+                Slug = Str(el, "slug"),
+                Permissions = Str(el, "permissions"),
+                ShowOnNav = el.TryGetProperty("showOnNav", out var sn) && sn.GetBoolean(),
+                NavGroup = StrOrNull(el, "navGroup"),
+                NavOrder = el.TryGetProperty("navOrder", out var no) ? no.GetInt32() : 0,
+                ViewType = StrOrNull(el, "viewType"),
+                ParentField = StrOrNull(el, "parentField"),
+                Fields = DeserializeFields(el),
+                Commands = DeserializeCommands(el),
+            };
+        }
+        return list;
+    }
+
+    internal static BmwConfig DeserializeConfig(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var r = doc.RootElement;
+        return new BmwConfig
+        {
+            Url = Str(r, "url"),
+            ApiKey = Str(r, "apiKey"),
+        };
+    }
+
+    internal static string SerializeConfig(BmwConfig cfg)
+    {
+        var buf = new ArrayBufferWriter<byte>(128);
+        using var w = new Utf8JsonWriter(buf, new JsonWriterOptions { Indented = true });
+        w.WriteStartObject();
+        w.WriteString("url", cfg.Url);
+        w.WriteString("apiKey", cfg.ApiKey);
+        w.WriteEndObject();
+        w.Flush();
+        return Encoding.UTF8.GetString(buf.WrittenSpan);
+    }
+
+    internal static string PrettyPrint(string body)
+    {
+        using var doc = JsonDocument.Parse(body);
+        var buf = new ArrayBufferWriter<byte>(body.Length + 256);
+        using var w = new Utf8JsonWriter(buf, new JsonWriterOptions { Indented = true });
+        doc.RootElement.WriteTo(w);
+        w.Flush();
+        return Encoding.UTF8.GetString(buf.WrittenSpan);
+    }
+
+    private static MetaField[] DeserializeFields(JsonElement parent)
+    {
+        if (!parent.TryGetProperty("fields", out var arr) || arr.ValueKind != JsonValueKind.Array)
+            return [];
+        var list = new MetaField[arr.GetArrayLength()];
+        int i = 0;
+        foreach (var el in arr.EnumerateArray())
+        {
+            list[i++] = new MetaField
+            {
+                Name = Str(el, "name"),
+                Label = Str(el, "label"),
+                Type = Str(el, "type"),
+                Order = el.TryGetProperty("order", out var o) ? o.GetInt32() : 0,
+                Required = el.TryGetProperty("required", out var rq) && rq.GetBoolean(),
+                List = el.TryGetProperty("list", out var li) && li.GetBoolean(),
+                View = el.TryGetProperty("view", out var vi) && vi.GetBoolean(),
+                Edit = el.TryGetProperty("edit", out var ed) && ed.GetBoolean(),
+                Create = el.TryGetProperty("create", out var cr) && cr.GetBoolean(),
+                ReadOnly = el.TryGetProperty("readOnly", out var ro) && ro.GetBoolean(),
+                Lookup = DeserializeLookup(el),
+            };
+        }
+        return list;
+    }
+
+    private static MetaLookup? DeserializeLookup(JsonElement parent)
+    {
+        if (!parent.TryGetProperty("lookup", out var el) || el.ValueKind != JsonValueKind.Object)
+            return null;
+        return new MetaLookup
+        {
+            TargetSlug = StrOrNull(el, "targetSlug"),
+            TargetName = StrOrNull(el, "targetName"),
+            ValueField = StrOrNull(el, "valueField"),
+            DisplayField = StrOrNull(el, "displayField"),
+            QueryField = StrOrNull(el, "queryField"),
+            QueryOperator = StrOrNull(el, "queryOperator"),
+            QueryValue = StrOrNull(el, "queryValue"),
+            SortField = StrOrNull(el, "sortField"),
+            SortDirection = StrOrNull(el, "sortDirection"),
+        };
+    }
+
+    private static MetaCommand[] DeserializeCommands(JsonElement parent)
+    {
+        if (!parent.TryGetProperty("commands", out var arr) || arr.ValueKind != JsonValueKind.Array)
+            return [];
+        var list = new MetaCommand[arr.GetArrayLength()];
+        int i = 0;
+        foreach (var el in arr.EnumerateArray())
+        {
+            list[i++] = new MetaCommand
+            {
+                Name = Str(el, "name"),
+                Label = Str(el, "label"),
+                Icon = StrOrNull(el, "icon"),
+                ConfirmMessage = StrOrNull(el, "confirmMessage"),
+                Destructive = el.TryGetProperty("destructive", out var d) && d.GetBoolean(),
+                Permission = StrOrNull(el, "permission"),
+                Order = el.TryGetProperty("order", out var o) ? o.GetInt32() : 0,
+            };
+        }
+        return list;
+    }
+
+    private static string Str(JsonElement el, string name)
+        => el.TryGetProperty(name, out var v) ? v.GetString() ?? "" : "";
+
+    private static string? StrOrNull(JsonElement el, string name)
+        => el.TryGetProperty(name, out var v) ? v.GetString() : null;
+}
 
 internal sealed class BmwConfig
 {
@@ -13,72 +195,72 @@ internal sealed class BmwConfig
 
 internal sealed class MetaEntity
 {
-    [JsonPropertyName("name")] public string Name { get; set; } = "";
-    [JsonPropertyName("slug")] public string Slug { get; set; } = "";
-    [JsonPropertyName("permissions")] public string Permissions { get; set; } = "";
-    [JsonPropertyName("showOnNav")] public bool ShowOnNav { get; set; }
-    [JsonPropertyName("navGroup")] public string? NavGroup { get; set; }
-    [JsonPropertyName("navOrder")] public int NavOrder { get; set; }
-    [JsonPropertyName("viewType")] public string? ViewType { get; set; }
-    [JsonPropertyName("fields")] public MetaField[] Fields { get; set; } = [];
-    [JsonPropertyName("commands")] public MetaCommand[] Commands { get; set; } = [];
-    [JsonPropertyName("parentField")] public string? ParentField { get; set; }
+public string Name { get; set; } = "";
+public string Slug { get; set; } = "";
+public string Permissions { get; set; } = "";
+public bool ShowOnNav { get; set; }
+public string? NavGroup { get; set; }
+public int NavOrder { get; set; }
+public string? ViewType { get; set; }
+public MetaField[] Fields { get; set; } = [];
+public MetaCommand[] Commands { get; set; } = [];
+public string? ParentField { get; set; }
 }
 
 internal sealed class MetaField
 {
-    [JsonPropertyName("name")] public string Name { get; set; } = "";
-    [JsonPropertyName("label")] public string Label { get; set; } = "";
-    [JsonPropertyName("type")] public string Type { get; set; } = "";
-    [JsonPropertyName("order")] public int Order { get; set; }
-    [JsonPropertyName("required")] public bool Required { get; set; }
-    [JsonPropertyName("list")] public bool List { get; set; }
-    [JsonPropertyName("view")] public bool View { get; set; }
-    [JsonPropertyName("edit")] public bool Edit { get; set; }
-    [JsonPropertyName("create")] public bool Create { get; set; }
-    [JsonPropertyName("readOnly")] public bool ReadOnly { get; set; }
-    [JsonPropertyName("lookup")] public MetaLookup? Lookup { get; set; }
+public string Name { get; set; } = "";
+public string Label { get; set; } = "";
+public string Type { get; set; } = "";
+public int Order { get; set; }
+public bool Required { get; set; }
+public bool List { get; set; }
+public bool View { get; set; }
+public bool Edit { get; set; }
+public bool Create { get; set; }
+public bool ReadOnly { get; set; }
+public MetaLookup? Lookup { get; set; }
 }
 
 internal sealed class MetaLookup
 {
-    [JsonPropertyName("targetSlug")] public string? TargetSlug { get; set; }
-    [JsonPropertyName("targetName")] public string? TargetName { get; set; }
-    [JsonPropertyName("valueField")] public string? ValueField { get; set; }
-    [JsonPropertyName("displayField")] public string? DisplayField { get; set; }
-    [JsonPropertyName("queryField")] public string? QueryField { get; set; }
-    [JsonPropertyName("queryOperator")] public string? QueryOperator { get; set; }
-    [JsonPropertyName("queryValue")] public string? QueryValue { get; set; }
-    [JsonPropertyName("sortField")] public string? SortField { get; set; }
-    [JsonPropertyName("sortDirection")] public string? SortDirection { get; set; }
+public string? TargetSlug { get; set; }
+public string? TargetName { get; set; }
+public string? ValueField { get; set; }
+public string? DisplayField { get; set; }
+public string? QueryField { get; set; }
+public string? QueryOperator { get; set; }
+public string? QueryValue { get; set; }
+public string? SortField { get; set; }
+public string? SortDirection { get; set; }
 }
 
 internal sealed class MetaCommand
 {
-    [JsonPropertyName("name")] public string Name { get; set; } = "";
-    [JsonPropertyName("label")] public string Label { get; set; } = "";
-    [JsonPropertyName("icon")] public string? Icon { get; set; }
-    [JsonPropertyName("confirmMessage")] public string? ConfirmMessage { get; set; }
-    [JsonPropertyName("destructive")] public bool Destructive { get; set; }
-    [JsonPropertyName("permission")] public string? Permission { get; set; }
-    [JsonPropertyName("order")] public int Order { get; set; }
+public string Name { get; set; } = "";
+public string Label { get; set; } = "";
+public string? Icon { get; set; }
+public string? ConfirmMessage { get; set; }
+public bool Destructive { get; set; }
+public string? Permission { get; set; }
+public int Order { get; set; }
 }
 
 internal sealed class SeedRequest
 {
-    [JsonPropertyName("clearExisting")] public bool ClearExisting { get; set; }
-    [JsonPropertyName("entities")] public Dictionary<string, int> Entities { get; set; } = new();
+public bool ClearExisting { get; set; }
+public Dictionary<string, int> Entities { get; set; } = new();
 }
 
 internal sealed class JobStatusResponse
 {
-    [JsonPropertyName("jobId")] public string JobId { get; set; } = "";
-    [JsonPropertyName("operationName")] public string OperationName { get; set; } = "";
-    [JsonPropertyName("status")] public string Status { get; set; } = "";
-    [JsonPropertyName("percentComplete")] public int PercentComplete { get; set; }
-    [JsonPropertyName("description")] public string? Description { get; set; }
-    [JsonPropertyName("error")] public string? Error { get; set; }
-    [JsonPropertyName("statusUrl")] public string? StatusUrl { get; set; }
+public string JobId { get; set; } = "";
+public string OperationName { get; set; } = "";
+public string Status { get; set; } = "";
+public int PercentComplete { get; set; }
+public string? Description { get; set; }
+public string? Error { get; set; }
+public string? StatusUrl { get; set; }
 }
 
 internal static class CliJsonHelper
@@ -463,7 +645,7 @@ internal static class Program
         while (DateTime.UtcNow < deadline)
         {
             await Task.Delay(interval * 1000);
-            var pollBody = CliJsonHelper.SerializeDictStringString(new Dictionary<string, string> { ["device_code"] = deviceCode });
+            var pollBody = CliJson.SerializeDict(new Dictionary<string, string> { ["device_code"] = deviceCode });
             var pollResp = await _http.PostAsync("/api/device/token", new StringContent(pollBody, Encoding.UTF8, "application/json"));
             var pollText = await pollResp.Content.ReadAsStringAsync();
             var pollDoc = JsonDocument.Parse(pollText);
@@ -577,8 +759,7 @@ internal static class Program
         var resp = await _http.GetAsync($"/api/{slug}");
         if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
         var body = await resp.Content.ReadAsStringAsync();
-        using var listDoc = JsonDocument.Parse(body);
-        var items = UnwrapItems(listDoc.RootElement.Clone());
+        using var _doc = JsonDocument.Parse(body); var items = UnwrapItems(_doc.RootElement);
         await PrintTable(slug, items);
         return 0;
     }
@@ -600,7 +781,7 @@ internal static class Program
         if (args.Length < 2) return Help(1, "Usage: metal create <type> key=value [key=value...]");
         var slug = args[0];
         var obj = ParseKeyValues(args[1..]);
-        var json = CliJsonHelper.SerializeDictStringString(obj);
+        var json = CliJson.SerializeDict(obj);
         var resp = await PostWithCsrf($"/api/{slug}",
             new StringContent(json, Encoding.UTF8, "application/json"));
         if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
@@ -616,7 +797,7 @@ internal static class Program
         if (args.Length < 3) return Help(1, "Usage: metal update <type> <id> key=value [key=value...]");
         var slug = args[0]; var id = args[1];
         var obj = ParseKeyValues(args[2..]);
-        var json = CliJsonHelper.SerializeDictStringString(obj);
+        var json = CliJson.SerializeDict(obj);
         var req = new HttpRequestMessage(HttpMethod.Patch, $"/api/{slug}/{id}")
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json")
@@ -657,8 +838,7 @@ internal static class Program
         var resp = await _http.GetAsync($"/api/{slug}{qs}");
         if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
         var body = await resp.Content.ReadAsStringAsync();
-        using var queryDoc = JsonDocument.Parse(body);
-        var items = UnwrapItems(queryDoc.RootElement.Clone());
+        using var _doc = JsonDocument.Parse(body); var items = UnwrapItems(_doc.RootElement);
         await PrintTable(slug, items);
         return 0;
     }
@@ -684,8 +864,7 @@ internal static class Program
         var resp = await _http.GetAsync($"/api/{slug}{qs}");
         if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
         var body = await resp.Content.ReadAsStringAsync();
-        using var firstDoc = JsonDocument.Parse(body);
-        var items = UnwrapItems(firstDoc.RootElement.Clone());
+        using var _doc = JsonDocument.Parse(body); var items = UnwrapItems(_doc.RootElement);
         if (items.ValueKind == JsonValueKind.Array && items.GetArrayLength() == 0)
         {
             Console.WriteLine("No results.");
@@ -709,8 +888,7 @@ internal static class Program
         var resp = await _http.GetAsync($"/api/_lookup/{slug}{qs}");
         if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
         var body = await resp.Content.ReadAsStringAsync();
-        using var lookupDoc = JsonDocument.Parse(body);
-        var items = UnwrapItems(lookupDoc.RootElement.Clone());
+        using var _doc = JsonDocument.Parse(body); var items = UnwrapItems(_doc.RootElement);
         await PrintTable(slug, items);
         return 0;
     }
@@ -757,7 +935,7 @@ internal static class Program
         if (args.Length < 3) return Help(1, "Usage: metal command <type> <id> <command> [key=value...]");
         var slug = args[0]; var id = args[1]; var command = args[2];
         var payload = args.Length > 3 ? ParseKeyValues(args[3..]) : new Dictionary<string, string>();
-        var json = CliJsonHelper.SerializeDictStringString(payload);
+        var json = CliJson.SerializeDict(payload);
         var resp = await PostWithCsrf($"/api/{slug}/{id}/_command/{command}",
             new StringContent(json, Encoding.UTF8, "application/json"));
         if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
@@ -863,7 +1041,7 @@ internal static class Program
         }
 
         var request = new SeedRequest { ClearExisting = clearExisting, Entities = entityCounts };
-        var json = CliJsonHelper.SerializeSeedRequest(request);
+        var json = CliJson.SerializeSeedRequest(request);
 
         Console.WriteLine($"Seeding {entityCounts.Count} entity type(s){(clearExisting ? " (clearing existing data first)" : "")}...");
 
@@ -882,7 +1060,7 @@ internal static class Program
         }
 
         var body = await resp.Content.ReadAsStringAsync();
-        var jobResp = CliJsonHelper.DeserializeJobStatusResponse(body);
+        var jobResp = CliJson.DeserializeJobStatus(body);
         if (jobResp == null || string.IsNullOrEmpty(jobResp.JobId))
         {
             Console.Error.WriteLine("Unexpected response from server - could not get job ID.");
@@ -908,7 +1086,7 @@ internal static class Program
                 return 1;
             }
             var pollBody = await pollResp.Content.ReadAsStringAsync();
-            var status = CliJsonHelper.DeserializeJobStatusResponse(pollBody);
+            var status = CliJson.DeserializeJobStatus(pollBody);
             if (status == null) break;
 
             if (status.PercentComplete != lastPercent)
@@ -974,7 +1152,7 @@ internal static class Program
         var resp = await _http.GetAsync("/meta/objects");
         if (!resp.IsSuccessStatusCode) { await PrintError(resp); return null; }
         var body = await resp.Content.ReadAsStringAsync();
-        _meta = CliJsonHelper.DeserializeMetaEntityArray(body);
+        _meta = CliJson.DeserializeMetaEntities(body);
         return _meta;
     }
 
@@ -1168,8 +1346,7 @@ internal static class Program
     {
         try
         {
-            var doc = JsonDocument.Parse(body);
-            Console.WriteLine(doc.RootElement.GetRawText());
+            Console.WriteLine(CliJson.PrettyPrint(body));
         }
         catch { Console.WriteLine(body); }
     }
@@ -1195,13 +1372,13 @@ internal static class Program
     {
         if (!File.Exists(ConfigPath)) return;
         var json = File.ReadAllText(ConfigPath);
-        _config = CliJsonHelper.DeserializeBmwConfig(json);
+        _config = CliJson.DeserializeConfig(json);
     }
 
     static void SaveConfig()
     {
         Directory.CreateDirectory(ConfigDir);
-        File.WriteAllText(ConfigPath, CliJsonHelper.SerializeBmwConfig(_config));
+        File.WriteAllText(ConfigPath, CliJson.SerializeConfig(_config));
     }
 
     static void SaveCookies()

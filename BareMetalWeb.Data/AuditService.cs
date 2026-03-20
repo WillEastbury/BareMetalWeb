@@ -2,7 +2,6 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Reflection;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Core;
@@ -115,7 +114,7 @@ public sealed class AuditService
             SetField(entry, meta, "Operation", AuditOperation.Update);
             SetField(entry, meta, "TimestampUtc", DateTime.UtcNow);
             SetField(entry, meta, "UserName", userName);
-            SetField(entry, meta, "FieldChangesJson", ManualJsonHelper.SerializeList(changes, ManualJsonHelper.WriteFieldChange));
+            SetField(entry, meta, "FieldChangesJson", BmwManualJson.SerializeFieldChanges(changes));
             SetField(entry, meta, "Notes", $"{changes.Count} field(s) changed");
 
             await SaveAuditEntryAsync(meta, entry, "update", cancellationToken).ConfigureAwait(false);

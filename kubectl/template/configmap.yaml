@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ${TENANT_NAME}-config
+  namespace: ${TENANT_NAME}
+  labels:
+    app.kubernetes.io/name: ${TENANT_NAME}
+    baremetalweb/tenant: ${TENANT_NAME}
+data:
+  PORT: "5232"
+
+  Metal.config: |
+    Data.Root|/app/Data
+    Kestrel.Http2Enabled|true
+    Kestrel.Http3Enabled|false
+    Kestrel.HttpsPort|5233
+    Kestrel.CertPath|/app/tls/tls.crt
+    Kestrel.MaxStreamsPerConnection|100
+    Kestrel.InitialConnectionWindowSize|131072
+    Kestrel.InitialStreamWindowSize|98304
+
+  appsettings.json: |
+    {
+      "Logging": {
+        "LogLevel": {
+          "Default": "Information",
+          "Microsoft.AspNetCore": "Warning"
+        }
+      },
+      "AllowedHosts": "*",
+      "StaticFiles": {
+        "Enabled": true,
+        "RequestPathPrefix": "/static",
+        "RootDirectory": "wwwroot/static",
+        "EnableCaching": true,
+        "CacheSeconds": 86400,
+        "AddETag": true,
+        "AddLastModified": true,
+        "AllowUnknownMime": false,
+        "DefaultMimeType": "application/octet-stream"
+      }
+    }

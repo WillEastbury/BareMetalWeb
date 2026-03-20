@@ -379,30 +379,38 @@ public sealed class SearchIndexManager
         GetOrCreateTypeMetadata(type);
     }
 
+    private static readonly TypeMetadata EmptyMetadata = new()
+    {
+        IndexedFields = Array.Empty<IndexedFieldAccessor>(),
+        IndexKinds = new HashSet<IndexKind>(0)
+    };
+
     private TypeMetadata GetOrCreateTypeMetadata(Type type)
     {
-        return _typeMetadata.GetOrAdd(type, t =>
-        {
-            var entityMeta = BareMetalWeb.Core.DataScaffold.GetEntityByType(t);
-            if (entityMeta == null)
-                return new TypeMetadata { IndexedFields = Array.Empty<IndexedFieldAccessor>(), IndexKinds = new HashSet<IndexKind>(0) };
+        if (_typeMetadata.TryGetValue(type, out var cached))
+            return cached;
 
-            var indexed = new List<IndexedFieldAccessor>();
-            var kinds = new HashSet<IndexKind>(4);
-            foreach (var f in entityMeta.Fields)
+        var entityMeta = BareMetalWeb.Core.DataScaffold.GetEntityByType(type);
+        if (entityMeta == null)
+            return EmptyMetadata; // Don't cache — entity may be registered later
+
+        var indexed = new List<IndexedFieldAccessor>();
+        var kinds = new HashSet<IndexKind>(4);
+        foreach (var f in entityMeta.Fields)
+        {
+            if (f.DataIndex != null)
             {
-                if (f.DataIndex != null)
-                {
-                    indexed.Add(new IndexedFieldAccessor(f.Name, f.ClrType, f.GetValueFn, f.DataIndex));
-                    kinds.Add(f.DataIndex.Kind);
-                }
+                indexed.Add(new IndexedFieldAccessor(f.Name, f.ClrType, f.GetValueFn, f.DataIndex));
+                kinds.Add(f.DataIndex.Kind);
             }
-            return new TypeMetadata
-            {
-                IndexedFields = indexed.ToArray(),
-                IndexKinds = kinds
-            };
-        });
+        }
+        var metadata = new TypeMetadata
+        {
+            IndexedFields = indexed.ToArray(),
+            IndexKinds = kinds
+        };
+        _typeMetadata.TryAdd(type, metadata);
+        return metadata;
     }
 
     public void EnsureBuilt(Type type, Func<IEnumerable<BaseDataObject>> loadAll)

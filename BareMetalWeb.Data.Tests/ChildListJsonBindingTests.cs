@@ -143,7 +143,7 @@ public class ChildListJsonBindingTests : IDisposable
         }
         """;
 
-        var doc = ManualJsonHelper.ParseJsonElementDict(json);
+        var doc = JsonDocToDict(json);
         var errors = DataScaffold.ApplyValuesFromJson(metadata, instance, doc, forCreate: true, allowMissing: true);
 
         // Should NOT contain "Order Rows is invalid."
@@ -201,5 +201,14 @@ public class ChildListJsonBindingTests : IDisposable
 
         public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
         { Delete<T>(key); return ValueTask.CompletedTask; }
+    }
+
+    private static Dictionary<string, JsonElement> JsonDocToDict(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var dict = new Dictionary<string, JsonElement>();
+        foreach (var prop in doc.RootElement.EnumerateObject())
+            dict[prop.Name] = prop.Value.Clone();
+        return dict;
     }
 }
