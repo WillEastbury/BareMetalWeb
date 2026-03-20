@@ -410,7 +410,17 @@ public sealed class DataQueryEvaluator : IDataQueryEvaluator
                 if (cmp == 0)
                 {
                     value = dataObject.GetFieldValue(fieldMap[mid].Ordinal);
-                    memberType = value?.GetType() ?? typeof(object);
+                    // Use schema CLR type when available; only fall back to typeof(object) for untyped slots
+                    var schema = dataObject.Schema;
+                    if (schema != null && fieldMap[mid].Ordinal >= BaseDataObject.BaseFieldCount)
+                    {
+                        int schemaIdx = fieldMap[mid].Ordinal - BaseDataObject.BaseFieldCount;
+                        memberType = schemaIdx < schema.ClrTypes.Length ? schema.ClrTypes[schemaIdx] : typeof(object);
+                    }
+                    else
+                    {
+                        memberType = typeof(object);
+                    }
                     return true;
                 }
                 if (cmp < 0) lo = mid + 1;
