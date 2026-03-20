@@ -29,6 +29,7 @@ BareMetalWeb uses a multi-agent development model where autonomous agents resolv
 Before committing:
 - Run `dotnet build BareMetalWeb.sln`
 - Run `dotnet test BareMetalWeb.sln --no-build -v quiet`
+- Run `./tools/bmw-guard.sh` (forbidden API scanner — must pass before committing)
 - ARM64/proot environments must follow the runsettings guidance already present in the instructions
 
 ## 5. Commit Format
@@ -388,15 +389,24 @@ When making code changes, you **MUST** update the corresponding architecture doc
    - Any failures must be pre-existing and unrelated to your changes (document these)
    - Alternative: Use helper script `./run-tests.sh` (includes build)
 
-3. **If tests fail due to your changes**: You MUST fix them before committing
+3. **MUST run BMW Guard**: `./tools/bmw-guard.sh`
+   - The BMW Guard scans all C# source files for forbidden APIs and architectural violations
+   - Your changes MUST NOT introduce new violations of the forbidden patterns
+   - The guard checks for: reflection (`System.Reflection`, `typeof(`, `GetType(`, `Activator.CreateInstance`), JSON serialization (`System.Text.Json`, `JsonSerializer`), `dynamic` keyword, and architectural smells (Service/Repository/Manager class patterns)
+   - This runs as a CI gate in GitHub Actions — if it fails, your PR will be blocked
 
-4. **If build fails**: You MUST fix compilation errors before committing
+4. **If tests fail due to your changes**: You MUST fix them before committing
+
+5. **If build fails**: You MUST fix compilation errors before committing
+
+6. **If BMW Guard fails due to your changes**: You MUST remove the forbidden API usage before committing
 
 **Test Commands:**
 - Full build: `dotnet build BareMetalWeb.sln`
 - Full test suite: `dotnet test BareMetalWeb.sln --no-build -v quiet`
 - Specific project: `dotnet test BareMetalWeb.Core.Tests/ --no-build -v quiet`
 - Helper script: `./run-tests.sh` (builds and tests in one step)
+- BMW Guard: `./tools/bmw-guard.sh` (forbidden API scanner)
 
 **ARM64 / proot Test Runner Fix:**
 This environment runs under proot on ARM64 (Termux). The vstest runner's `DotnetHostHelper` fails to detect the dotnet muxer because the process appears as `libproot-loader.so` instead of `dotnet`. This causes `"Could not find 'dotnet' host for the 'ARM64' architecture"` errors.
