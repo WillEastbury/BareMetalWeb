@@ -559,7 +559,8 @@ public sealed class MetadataWireSerializer
             return meta.Handlers.Create();
 
         throw new InvalidOperationException(
-            $"Cannot create instance of '{entityType.Name}': type is not registered in DataScaffold.");
+            $"Cannot create instance of '{entityType.Name}': type is not registered in DataScaffold. " +
+            "Call DataScaffold.RegisterEntity<T>() at startup to register the entity type.");
     }
 
     private static object? ReadFieldValue(ref SpanReader reader, FieldPlan fp, int depth)

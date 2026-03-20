@@ -83,6 +83,10 @@ public static class SamplePackageJson
             // reflection at startup — this is the accepted pattern for the metadata-driven architecture.
             DataScaffold.RegisterEntity<T>();
             meta = DataScaffold.GetEntityByType(typeof(T));
+            if (meta == null)
+                throw new InvalidOperationException(
+                    $"Type '{typeof(T).Name}' could not be registered in DataScaffold. " +
+                    "Ensure the type has [DataEntity] and [DataField] attributes.");
         }
 
         var list = new List<T>(arr.GetArrayLength());
@@ -92,15 +96,12 @@ public static class SamplePackageJson
             if (el.ValueKind != JsonValueKind.Object) continue;
             var entity = new T();
 
-            if (meta != null)
+            foreach (var prop in el.EnumerateObject())
             {
-                foreach (var prop in el.EnumerateObject())
-                {
-                    var field = meta.FindField(prop.Name);
-                    if (field == null) continue;
-                    if (DataScaffold.TryConvertJson(prop.Value, field.ClrType, out var converted))
-                        field.SetValueFn(entity, converted);
-                }
+                var field = meta.FindField(prop.Name);
+                if (field == null) continue;
+                if (DataScaffold.TryConvertJson(prop.Value, field.ClrType, out var converted))
+                    field.SetValueFn(entity, converted);
             }
 
             list.Add(entity);
