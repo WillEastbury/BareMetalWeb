@@ -212,6 +212,21 @@ If a solution would normally use reflection or `JsonSerializer`, use:
 
 > See `docs/AOT_TRIMMING_CONSTRAINTS.md` for the full reference document and `docs/violations/` for tracked violations.
 
+### Build-Enforced Constraints
+
+This project enforces strict constraints via automated checks.
+
+The following are forbidden and will fail the build:
+- `System.Reflection`
+- `System.Text.Json`
+- `dynamic`
+- `Activator.CreateInstance`
+
+Do not use them under any circumstances.
+
+The system is low-level, span-based, and allocation-sensitive.
+Avoid abstractions, patterns, and frameworks.
+
 ### Security & Privacy
 - **No OWASP vulnerabilities.** Code must be free of injection (SQL, command, header, log), XSS, CSRF, path traversal, insecure deserialisation, broken access control, and all other OWASP Top 10 categories.
 - **No bounds-checking exploits or buffer overruns.** Always validate indices, lengths, and offsets before accessing buffers. Use `Span<T>` slicing (which throws on out-of-range) rather than raw pointer arithmetic. Never trust user-supplied lengths.
