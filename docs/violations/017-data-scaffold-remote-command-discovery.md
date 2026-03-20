@@ -45,3 +45,9 @@ the methods, but the reflection scan itself is the issue.
 ## Affected Code Paths
 
 - `DataScaffold.RegisterRemoteCommands<T>()` — called once per entity type at startup
+
+## Resolution
+
+**Status:** ⚠️ MITIGATED
+
+The `RegisterEntity<T>()` method already constrains `T` with `[DynamicallyAccessedMembers(PublicProperties | PublicMethods | PublicParameterlessConstructor)]`, making the `Type.GetMethods()` call in RemoteCommand discovery linker-safe. The discovered methods are immediately compiled into typed `Delegate.CreateDelegate` invokers at startup, avoiding per-request reflection. This is acceptable as a startup-only operation.

@@ -46,3 +46,9 @@ at registration time for each field.
 
 - `AuditService.GetCachedAccessors()` — called on first audit operation per entity type
 - `AuditService.BuildAuditDelta()` — uses the cached accessors to diff old vs new entity state
+
+## Resolution
+
+**Status:** ✅ RESOLVED
+
+The `GetCachedAccessors` method and `_accessorCache` dictionary have been removed entirely. `DetectChanges<T>()` now uses only the DataScaffold metadata path. When `DataScaffold.GetEntityByType()` returns null, the method returns an empty change list instead of falling back to reflection. The `System.Reflection` and `System.Collections.Concurrent` using directives have been removed.

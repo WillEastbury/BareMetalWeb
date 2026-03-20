@@ -39,3 +39,9 @@ a descriptive error instead of silently falling back to reflection.
 ## Affected Code Paths
 
 - `SamplePackageJson.DeserializeSample<T>()` — fallback path when metadata is not registered
+
+## Resolution
+
+**Status:** ✅ RESOLVED
+
+The `typeof(T).GetProperties()` reflection fallback has been removed. When DataScaffold metadata is unavailable, `ReadEntityList<T>()` now auto-registers the entity type via `DataScaffold.RegisterEntity<T>()` before proceeding with metadata-driven deserialization. This eliminates the per-property `PropertyInfo.SetValue()` reflection path.

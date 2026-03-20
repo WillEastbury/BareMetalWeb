@@ -44,3 +44,9 @@ and reference it directly via the attribute value rather than reflection.
 - `BareMetalWebServer` constructor — reads version for display/logging
 - `ControlPlaneService` — reads version for health endpoint
 - CLI `Program.Main` — reads version for `--version` flag
+
+## Resolution
+
+**Status:** ✅ RESOLVED
+
+All three `Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()` call sites have been replaced with a compile-time constant `BuildVersion.Value`. A `Directory.Build.targets` file generates a `BuildVersion.g.cs` source file per project at build time, embedding the version as an `internal const string`. The `using System.Reflection` directives have been removed from all three files (BareMetalWebServer.cs, ControlPlaneService.cs, CLI/Program.cs).

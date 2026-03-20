@@ -39,3 +39,9 @@ properties via reflection. If the metadata is complete, `GetProperties()` is unn
 ## Affected Code Paths
 
 - `EntityLayoutCompiler.Compile()` — called once per entity type at startup
+
+## Resolution
+
+**Status:** ✅ RESOLVED
+
+The direct `meta.Type.GetProperties(BindingFlags.Public | BindingFlags.Instance)` call has been replaced with `meta.AllProperties`, which is a cached property on `DataEntityMetadata` that performs the same operation once and reuses the result. Since `DataEntityMetadata.Type` is annotated with `[DynamicallyAccessedMembers(PublicProperties | PublicMethods | PublicParameterlessConstructor)]`, this is now linker-safe.

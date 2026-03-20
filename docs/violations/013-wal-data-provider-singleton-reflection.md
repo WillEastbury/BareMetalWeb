@@ -47,3 +47,9 @@ instead of silently falling back to reflection.
 
 - `WalDataProvider.ClearSingletonFlagsOnOtherRecords()` — called during save operations
   for entities with singleton flag properties
+
+## Resolution
+
+**Status:** ✅ RESOLVED
+
+The entire reflection fallback block (lines 2081–2111) has been removed from `ClearSingletonFlagsOnOtherRecords<T>()`. The method now returns early when `DataScaffold.GetEntityByType()` returns null. All entity types used with singleton flags must now be registered in DataScaffold, which enforces the metadata-driven architecture.

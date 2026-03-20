@@ -47,3 +47,16 @@ Replace `GetUninitializedObject()` with pre-registered factory delegates:
 
 - `MetadataWireSerializer.CreateEntityInstance()` — called during wire deserialization
 - `CalculatedFieldService.GetDefaultValue()` — called during calculated field evaluation
+
+## Resolution
+
+**Status:** ✅ RESOLVED
+
+All `RuntimeHelpers.GetUninitializedObject()` calls have been replaced:
+- `MetadataWireSerializer.CreateEntityInstance()`: Uses `DataScaffold.GetEntityByType()` → `meta.Handlers.Create()` factory delegate
+- `TransactionCommitEngine.CloneEntity()`: Uses `meta.Handlers.Create()` factory delegate
+- `DataScaffold.IsDefaultValue()`: Extended known value types list + enum support; returns `false` for unknown types
+- `DataScaffold.HasDefaultValue()`: Uses `Activator.CreateInstance()` with `[DynamicallyAccessedMembers(PublicParameterlessConstructor)]` annotation
+- `BinaryObjectSerializer.CreateInstance()`: Extended known value types list; uses `Activator.CreateInstance()` with annotation
+- `BinaryObjectSerializer.GetDefaultValue()`: Extended known value types list + enum support; returns `null` for unknown types
+- `CalculatedFieldService.ConvertToPropertyType()`: Extended known value types list + enum support; returns `null` for unknown types

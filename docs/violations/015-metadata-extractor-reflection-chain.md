@@ -54,3 +54,9 @@ it should be annotated with `[DynamicallyAccessedMembers]` to guide the trimmer,
 - `MetadataExtractor.ExtractFromType()` — called during entity registration at startup
 - `MetadataExtractor.BuildFromMetadata()` — called to build entity definitions from metadata
 - `MetadataExtractor.ResolveEntitySlug()` — called to resolve entity slug from type
+
+## Resolution
+
+**Status:** ⚠️ MITIGATED
+
+Added `[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)]` annotation to the `type` parameter of `ExtractFromType()`, eliminating IL2070 trimmer warnings. In `BuildFromMetadata()`, `Enum.GetNames()` now prefers pre-registered `DataFieldMetadata.EnumValues` when available, falling back to `Enum.GetNames()` only when enum values aren't pre-cached in metadata. Added `using System.Diagnostics.CodeAnalysis` import.

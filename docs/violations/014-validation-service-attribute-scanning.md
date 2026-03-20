@@ -61,3 +61,9 @@ gallery-defined entities, validation rules are already in the gallery JSON.
 
 - `ValidationService.BuildValidationConfig()` — called during field registration
 - `ValidationService.GetEntityRules()` — called during entity registration
+
+## Resolution
+
+**Status:** ⚠️ MITIGATED
+
+Added `[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)]` annotation to the `entityType` parameter of `GetEntityRules()`. The existing `[RequiresUnreferencedCode]` annotation remains. This is startup-only attribute scanning that runs during entity registration, not in request paths.
