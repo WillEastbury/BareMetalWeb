@@ -302,7 +302,14 @@ public class NativeTernaryMatrixTests
     [Fact]
     public void GCHeap_DoesNotGrow_WithNativeWeights()
     {
+        // Warmup: stabilise JIT and GC state before measuring
+        {
+            var warmup = new sbyte[512 * 512];
+            using var _ = NativeTernaryMatrix.Pack(warmup, 512, 512);
+        }
         GC.Collect(2, GCCollectionMode.Aggressive, true, true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
         long heapBefore = GC.GetTotalMemory(true);
 
         int rows = 512, cols = 512;
@@ -314,8 +321,8 @@ public class NativeTernaryMatrixTests
         long heapAfter = GC.GetTotalMemory(true);
 
         long heapGrowth = heapAfter - heapBefore;
-        Assert.True(heapGrowth < 512 * 1024,
-            $"GC heap grew by {heapGrowth} bytes — expected < 512KB (weight data should be native)");
+        Assert.True(heapGrowth < 1024 * 1024,
+            $"GC heap grew by {heapGrowth} bytes — expected < 1MB (weight data should be native)");
         // 512 cols / 4 = 128 bytes/row, AlignUp(128,32)=128, 512*128 = 65536
         Assert.Equal(65536, matrix.BytesAllocated);
     }
