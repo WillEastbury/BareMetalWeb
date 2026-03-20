@@ -107,7 +107,7 @@ public class MoneyFieldBindingTests
             "{\"Price\":{\"amount\":250.00,\"currency\":\"GBP\"},\"Name\":\"Widget\"}");
 
         // Act
-        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json!, forCreate: true, allowMissing: false);
+        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json, forCreate: true, allowMissing: false);
 
         // Assert – amount extracted from object
         Assert.Empty(errors);
@@ -124,7 +124,7 @@ public class MoneyFieldBindingTests
             "{\"Price\":75.50,\"Name\":\"Widget\"}");
 
         // Act
-        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json!, forCreate: true, allowMissing: false);
+        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json, forCreate: true, allowMissing: false);
 
         // Assert
         Assert.Empty(errors);
@@ -141,7 +141,7 @@ public class MoneyFieldBindingTests
             "{\"Price\":{\"value\":100},\"Name\":\"Widget\"}");
 
         // Act
-        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json!, forCreate: true, allowMissing: false);
+        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json, forCreate: true, allowMissing: false);
 
         // Assert – error reported for the invalid Money field
         Assert.Contains(errors, e => e.Contains("Price"));

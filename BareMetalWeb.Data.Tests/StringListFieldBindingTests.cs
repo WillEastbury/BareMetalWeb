@@ -46,7 +46,7 @@ public class StringListFieldBindingTests
             "{\"Tags\":[\"test\",\"test2\"],\"Name\":\"Widget\"}");
 
         // Act
-        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json!, forCreate: true, allowMissing: false);
+        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json, forCreate: true, allowMissing: false);
 
         // Assert
         Assert.Empty(errors);
@@ -63,7 +63,7 @@ public class StringListFieldBindingTests
             "{\"Tags\":\"test\\ntest2\",\"Name\":\"Widget\"}");
 
         // Act
-        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json!, forCreate: true, allowMissing: false);
+        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json, forCreate: true, allowMissing: false);
 
         // Assert – must succeed and parse the tags
         Assert.Empty(errors);
@@ -80,7 +80,7 @@ public class StringListFieldBindingTests
             "{\"Tags\":\"test,test2\",\"Name\":\"Widget\"}");
 
         // Act
-        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json!, forCreate: true, allowMissing: false);
+        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json, forCreate: true, allowMissing: false);
 
         // Assert
         Assert.Empty(errors);
@@ -97,7 +97,7 @@ public class StringListFieldBindingTests
             "{\"Tags\":null,\"Name\":\"Widget\"}");
 
         // Act
-        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json!, forCreate: true, allowMissing: false);
+        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json, forCreate: true, allowMissing: false);
 
         // Assert – null produces an empty list, no error
         Assert.Empty(errors);

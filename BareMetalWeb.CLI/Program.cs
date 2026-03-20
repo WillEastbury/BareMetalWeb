@@ -263,6 +263,181 @@ public string? Error { get; set; }
 public string? StatusUrl { get; set; }
 }
 
+internal static class CliJsonHelper
+{
+    public static string SerializeDictStringString(Dictionary<string, string> dict)
+    {
+        using var ms = new MemoryStream();
+        using (var w = new Utf8JsonWriter(ms))
+        {
+            w.WriteStartObject();
+            foreach (var kvp in dict)
+            {
+                w.WriteString(kvp.Key, kvp.Value);
+            }
+            w.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(ms.GetBuffer(), 0, (int)ms.Length);
+    }
+
+    public static string SerializeSeedRequest(SeedRequest request)
+    {
+        using var ms = new MemoryStream();
+        using (var w = new Utf8JsonWriter(ms))
+        {
+            w.WriteStartObject();
+            w.WriteBoolean("clearExisting", request.ClearExisting);
+            w.WriteStartObject("entities");
+            foreach (var kvp in request.Entities)
+            {
+                w.WriteNumber(kvp.Key, kvp.Value);
+            }
+            w.WriteEndObject();
+            w.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(ms.GetBuffer(), 0, (int)ms.Length);
+    }
+
+    public static string SerializeBmwConfig(BmwConfig config)
+    {
+        using var ms = new MemoryStream();
+        using (var w = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = true }))
+        {
+            w.WriteStartObject();
+            w.WriteString("url", config.Url);
+            w.WriteString("apiKey", config.ApiKey);
+            w.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(ms.GetBuffer(), 0, (int)ms.Length);
+    }
+
+    public static JobStatusResponse DeserializeJobStatusResponse(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        return new JobStatusResponse
+        {
+            JobId = root.TryGetProperty("jobId", out var jid) ? jid.GetString() ?? "" : "",
+            OperationName = root.TryGetProperty("operationName", out var op) ? op.GetString() ?? "" : "",
+            Status = root.TryGetProperty("status", out var st) ? st.GetString() ?? "" : "",
+            PercentComplete = root.TryGetProperty("percentComplete", out var pc) ? pc.GetInt32() : 0,
+            Description = root.TryGetProperty("description", out var desc) ? desc.GetString() : null,
+            Error = root.TryGetProperty("error", out var err) ? err.GetString() : null,
+            StatusUrl = root.TryGetProperty("statusUrl", out var su) ? su.GetString() : null,
+        };
+    }
+
+    public static MetaEntity[] DeserializeMetaEntityArray(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        if (root.ValueKind != JsonValueKind.Array) return [];
+
+        var entities = new MetaEntity[root.GetArrayLength()];
+        int i = 0;
+        foreach (var el in root.EnumerateArray())
+        {
+            entities[i++] = ReadMetaEntity(el);
+        }
+        return entities;
+    }
+
+    public static BmwConfig DeserializeBmwConfig(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        return new BmwConfig
+        {
+            Url = root.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "",
+            ApiKey = root.TryGetProperty("apiKey", out var k) ? k.GetString() ?? "" : "",
+        };
+    }
+
+    private static MetaEntity ReadMetaEntity(JsonElement el)
+    {
+        var entity = new MetaEntity
+        {
+            Name = el.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "",
+            Slug = el.TryGetProperty("slug", out var s) ? s.GetString() ?? "" : "",
+            Permissions = el.TryGetProperty("permissions", out var p) ? p.GetString() ?? "" : "",
+            ShowOnNav = el.TryGetProperty("showOnNav", out var sn) && sn.GetBoolean(),
+            NavGroup = el.TryGetProperty("navGroup", out var ng) ? ng.GetString() : null,
+            NavOrder = el.TryGetProperty("navOrder", out var no) ? no.GetInt32() : 0,
+            ViewType = el.TryGetProperty("viewType", out var vt) ? vt.GetString() : null,
+            ParentField = el.TryGetProperty("parentField", out var pf) ? pf.GetString() : null,
+        };
+
+        if (el.TryGetProperty("fields", out var fields) && fields.ValueKind == JsonValueKind.Array)
+        {
+            var arr = new MetaField[fields.GetArrayLength()];
+            int fi = 0;
+            foreach (var f in fields.EnumerateArray())
+                arr[fi++] = ReadMetaField(f);
+            entity.Fields = arr;
+        }
+
+        if (el.TryGetProperty("commands", out var cmds) && cmds.ValueKind == JsonValueKind.Array)
+        {
+            var arr = new MetaCommand[cmds.GetArrayLength()];
+            int ci = 0;
+            foreach (var c in cmds.EnumerateArray())
+                arr[ci++] = ReadMetaCommand(c);
+            entity.Commands = arr;
+        }
+
+        return entity;
+    }
+
+    private static MetaField ReadMetaField(JsonElement el)
+    {
+        var field = new MetaField
+        {
+            Name = el.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "",
+            Label = el.TryGetProperty("label", out var l) ? l.GetString() ?? "" : "",
+            Type = el.TryGetProperty("type", out var t) ? t.GetString() ?? "" : "",
+            Order = el.TryGetProperty("order", out var o) ? o.GetInt32() : 0,
+            Required = el.TryGetProperty("required", out var r) && r.GetBoolean(),
+            List = el.TryGetProperty("list", out var li) && li.GetBoolean(),
+            View = el.TryGetProperty("view", out var v) && v.GetBoolean(),
+            Edit = el.TryGetProperty("edit", out var e) && e.GetBoolean(),
+            Create = el.TryGetProperty("create", out var c) && c.GetBoolean(),
+            ReadOnly = el.TryGetProperty("readOnly", out var ro) && ro.GetBoolean(),
+        };
+
+        if (el.TryGetProperty("lookup", out var lk) && lk.ValueKind == JsonValueKind.Object)
+        {
+            field.Lookup = new MetaLookup
+            {
+                TargetSlug = lk.TryGetProperty("targetSlug", out var ts) ? ts.GetString() : null,
+                TargetName = lk.TryGetProperty("targetName", out var tn) ? tn.GetString() : null,
+                ValueField = lk.TryGetProperty("valueField", out var vf) ? vf.GetString() : null,
+                DisplayField = lk.TryGetProperty("displayField", out var df) ? df.GetString() : null,
+                QueryField = lk.TryGetProperty("queryField", out var qf) ? qf.GetString() : null,
+                QueryOperator = lk.TryGetProperty("queryOperator", out var qo) ? qo.GetString() : null,
+                QueryValue = lk.TryGetProperty("queryValue", out var qv) ? qv.GetString() : null,
+                SortField = lk.TryGetProperty("sortField", out var sf) ? sf.GetString() : null,
+                SortDirection = lk.TryGetProperty("sortDirection", out var sd) ? sd.GetString() : null,
+            };
+        }
+
+        return field;
+    }
+
+    private static MetaCommand ReadMetaCommand(JsonElement el)
+    {
+        return new MetaCommand
+        {
+            Name = el.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "",
+            Label = el.TryGetProperty("label", out var l) ? l.GetString() ?? "" : "",
+            Icon = el.TryGetProperty("icon", out var ic) ? ic.GetString() : null,
+            ConfirmMessage = el.TryGetProperty("confirmMessage", out var cm) ? cm.GetString() : null,
+            Destructive = el.TryGetProperty("destructive", out var d) && d.GetBoolean(),
+            Permission = el.TryGetProperty("permission", out var p) ? p.GetString() : null,
+            Order = el.TryGetProperty("order", out var o) ? o.GetInt32() : 0,
+        };
+    }
+}
+
 internal static class Program
 {
     private static string ConfigDir => Path.Combine(
