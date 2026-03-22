@@ -25,6 +25,7 @@ public sealed class ColumnStatisticsTests : IDisposable
     [DataEntity("StatItems")]
     private class StatItem : BaseDataObject
     {
+        public override string EntityTypeName => "StatItems";
         private const int Ord_DoubleVal = BaseFieldCount + 0;
         private const int Ord_FloatVal = BaseFieldCount + 1;
         private const int Ord_IntVal = BaseFieldCount + 2;

@@ -11,6 +11,7 @@ namespace BareMetalWeb.Runtime;
 [DataEntity("Notification Channels", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1007)]
 public class NotificationDefinition : BaseDataObject
 {
+    public override string EntityTypeName => "Notification Channels";
     private const int Ord_Name = BaseFieldCount + 0;
     private const int Ord_ChannelType = BaseFieldCount + 1;
     private const int Ord_Host = BaseFieldCount + 2;

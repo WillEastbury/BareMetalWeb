@@ -533,6 +533,7 @@ public class ExpressionRelationshipTests
     [DataEntity("Order Line Test", Slug = "orderlinetest")]
     public class OrderLineEntity : BaseDataObject
     {
+        public override string EntityTypeName => "Order Line Test";
         private const int Ord_CustomerDiscount = BaseFieldCount + 0;
         private const int Ord_DiscountedPrice = BaseFieldCount + 1;
         private const int Ord_ProductId = BaseFieldCount + 2;

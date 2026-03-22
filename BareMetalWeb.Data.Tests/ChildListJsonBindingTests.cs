@@ -22,6 +22,7 @@ public class ChildListJsonBindingTests : IDisposable
     [DataEntity("Test Order Rows", Slug = "test-order-rows")]
     private class TestOrderRow : BaseDataObject
     {
+        public override string EntityTypeName => "Test Order Rows";
         private const int Ord_LineTotal = BaseFieldCount + 0;
         private const int Ord_Notes = BaseFieldCount + 1;
         private const int Ord_ProductId = BaseFieldCount + 2;

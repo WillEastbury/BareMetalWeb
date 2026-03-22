@@ -9,6 +9,7 @@ namespace BareMetalWeb.Runtime;
 [DataEntity("Index Definitions", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1002)]
 public class IndexDefinition : BaseDataObject
 {
+    public override string EntityTypeName => "Index Definitions";
     private const int Ord_EntityId = BaseFieldCount + 0;
     private const int Ord_FieldNames = BaseFieldCount + 1;
     private const int Ord_Type = BaseFieldCount + 2;

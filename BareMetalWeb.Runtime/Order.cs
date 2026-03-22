@@ -9,6 +9,7 @@ namespace BareMetalWeb.Runtime;
 [DataEntity("Orders", ShowOnNav = true, NavGroup = "Sales", NavOrder = 500)]
 public class Order : BaseDataObject
 {
+    public override string EntityTypeName => "Orders";
     private const int Ord_OrderNumber = BaseFieldCount + 0;
     private const int Ord_UserId = BaseFieldCount + 1;
     private const int Ord_Status = BaseFieldCount + 2;

@@ -13,6 +13,7 @@ public class DataQueryEvaluatorTests : IDisposable
     [DataEntity("TestItems")]
     private class TestItem : BaseDataObject
     {
+        public override string EntityTypeName => "TestItems";
         private const int Ord_Age = BaseFieldCount + 0;
         private const int Ord_Name = BaseFieldCount + 1;
         private const int Ord_NullableField = BaseFieldCount + 2;

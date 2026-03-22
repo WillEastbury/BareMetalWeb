@@ -19,6 +19,7 @@ public class StringListFieldBindingTests
     [DataEntity("TagsTestEntities")]
     private class TagsTestEntity : BaseDataObject
     {
+        public override string EntityTypeName => "TagsTestEntities";
         private const int Ord_Name = BaseFieldCount + 0;
         private const int Ord_Tags = BaseFieldCount + 1;
         internal new const int TotalFieldCount = BaseFieldCount + 2;

@@ -48,7 +48,7 @@ public class ToolRegistryTests
         var result = await registry.ExecuteAsync("bad-tool", new Dictionary<string, string>());
 
         Assert.False(result.Success);
-        Assert.Contains("InvalidOperationException", result.ErrorMessage);
+        Assert.Contains("boom", result.ErrorMessage);
     }
 
     [Fact]

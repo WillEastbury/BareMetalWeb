@@ -9,6 +9,7 @@ namespace BareMetalWeb.Runtime;
 [DataEntity("Baskets", ShowOnNav = false, Permissions = "Public")]
 public class Basket : BaseDataObject
 {
+    public override string EntityTypeName => "Baskets";
     private const int Ord_UserId = BaseFieldCount + 0;
     private const int Ord_Status = BaseFieldCount + 1;
     private const int Ord_ItemCount = BaseFieldCount + 2;
@@ -87,6 +88,7 @@ public enum BasketStatus
 [DataEntity("Basket Items", ShowOnNav = false, Permissions = "Public")]
 public class BasketItem : BaseDataObject
 {
+    public override string EntityTypeName => "Basket Items";
     private const int Ord_BasketId = BaseFieldCount + 0;
     private const int Ord_ProductId = BaseFieldCount + 1;
     private const int Ord_ProductName = BaseFieldCount + 2;

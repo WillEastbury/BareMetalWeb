@@ -12,6 +12,7 @@ namespace BareMetalWeb.Data.Tests;
 [DataEntity("Validated Entities", Slug = "validated-entities")]
 public class ValidatedEntity : BaseDataObject
 {
+    public override string EntityTypeName => "Validated Entities";
     private const int Ord_Name = BaseFieldCount + 0;
     private const int Ord_Email = BaseFieldCount + 1;
     private const int Ord_Website = BaseFieldCount + 2;
@@ -96,6 +97,7 @@ public class ValidatedEntity : BaseDataObject
 [ValidationRule("EndDate > StartDate", "End date must be after start date")]
 public class DateRangeEntity : BaseDataObject
 {
+    public override string EntityTypeName => "Date Range Entities";
     private const int Ord_StartDate = BaseFieldCount + 0;
     private const int Ord_EndDate = BaseFieldCount + 1;
     internal new const int TotalFieldCount = BaseFieldCount + 2;

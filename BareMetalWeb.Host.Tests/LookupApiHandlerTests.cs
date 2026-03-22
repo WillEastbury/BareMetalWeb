@@ -31,6 +31,7 @@ public class LookupApiHandlerTests : IDisposable
     [DataEntity("Products", Slug = "products")]
     private class Product : BaseDataObject
     {
+        public override string EntityTypeName => "Products";
         private const int Ord_Description = BaseFieldCount + 0;
         private const int Ord_Name = BaseFieldCount + 1;
         private const int Ord_Sku = BaseFieldCount + 2;
@@ -77,6 +78,7 @@ public class LookupApiHandlerTests : IDisposable
     [DataEntity("Customers", Slug = "customers")]
     private class Customer : BaseDataObject
     {
+        public override string EntityTypeName => "Customers";
         private const int Ord_Email = BaseFieldCount + 0;
         private const int Ord_Name = BaseFieldCount + 1;
         internal new const int TotalFieldCount = BaseFieldCount + 2;
@@ -115,6 +117,7 @@ public class LookupApiHandlerTests : IDisposable
     [DataEntity("Lookup Test Orders", Slug = "lookup-test-orders")]
     private class Order : BaseDataObject
     {
+        public override string EntityTypeName => "Lookup Test Orders";
         private const int Ord_CustomerId = BaseFieldCount + 0;
         private const int Ord_OrderNumber = BaseFieldCount + 1;
         private const int Ord_Status = BaseFieldCount + 2;

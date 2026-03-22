@@ -4,6 +4,7 @@ namespace BareMetalWeb.Data;
 
 public sealed class UserSession : BaseDataObject
 {
+    public override string EntityTypeName => "User Sessions";
     private const int Ord_UserId = BaseFieldCount + 0;
     private const int Ord_UserName = BaseFieldCount + 1;
     private const int Ord_DisplayName = BaseFieldCount + 2;

@@ -7,6 +7,7 @@ namespace BareMetalWeb.Data;
 [DataEntity("System Principals", ShowOnNav = false, NavGroup = "Admin", NavOrder = 20, Permissions = "admin")]
 public sealed class SystemPrincipal : User
 {
+    public override string EntityTypeName => "System Principals";
     private const int Ord_ApiKeyHashes = User.TotalFieldCount + 0;
     private const int Ord_OwnerInstanceId = User.TotalFieldCount + 1;
     private const int Ord_OwnerTenantId = User.TotalFieldCount + 2;

@@ -28,6 +28,7 @@ namespace BareMetalWeb.Runtime;
     IdGeneration = AutoIdStrategy.Sequential)]
 public class DomainEventSubscription : BaseDataObject
 {
+    public override string EntityTypeName => "Workflow Rules";
     private const int Ord_Name = BaseFieldCount + 0;
     private const int Ord_SourceEntity = BaseFieldCount + 1;
     private const int Ord_WatchField = BaseFieldCount + 2;

@@ -82,6 +82,7 @@ public sealed class AuditServiceTests : IDisposable
     [DataEntity("Audit Test Entity", Slug = "audit-test-entity")]
     public sealed class AuditTestEntity : BaseDataObject
     {
+        public override string EntityTypeName => "Audit Test Entity";
         private const int Ord_Name = BaseFieldCount + 0;
         private const int Ord_Value = BaseFieldCount + 1;
         internal new const int TotalFieldCount = BaseFieldCount + 2;

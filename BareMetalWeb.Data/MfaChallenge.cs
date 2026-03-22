@@ -4,6 +4,7 @@ namespace BareMetalWeb.Data;
 
 public sealed class MfaChallenge : BaseDataObject
 {
+    public override string EntityTypeName => "MFA Challenge";
     private const int Ord_UserId = BaseFieldCount + 0;
     private const int Ord_RememberMe = BaseFieldCount + 1;
     private const int Ord_ExpiresUtc = BaseFieldCount + 2;
