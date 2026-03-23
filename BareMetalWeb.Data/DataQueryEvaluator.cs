@@ -210,6 +210,19 @@ public sealed class DataQueryEvaluator : IDataQueryEvaluator
         if (memberValue is IEnumerable enumerable)
         {
             var elementType = GetEnumerableElementType(memberType);
+            // When memberType is object (no schema), infer element type from the collection value
+            if (elementType == typeof(object))
+            {
+                elementType = memberValue switch
+                {
+                    IList<string> => typeof(string),
+                    IList<int> => typeof(int),
+                    IList<decimal> => typeof(decimal),
+                    IList<double> => typeof(double),
+                    IList<long> => typeof(long),
+                    _ => typeof(object)
+                };
+            }
             var listValues = BuildInValues(targetValue, elementType);
             if (listValues.Count == 0)
                 return false;
@@ -417,10 +430,35 @@ public sealed class DataQueryEvaluator : IDataQueryEvaluator
                         int schemaIdx = fieldMap[mid].Ordinal - BaseDataObject.BaseFieldCount;
                         memberType = schemaIdx < schema.ClrTypes.Length ? schema.ClrTypes[schemaIdx] : typeof(object);
                     }
+                    else if (fieldMap[mid].Ordinal < BaseDataObject.BaseFieldCount)
+                    {
+                        // Well-known base field types — avoids GetType()
+                        memberType = fieldMap[mid].Ordinal switch
+                        {
+                            BaseDataObject.Ord_Key => typeof(uint),
+                            BaseDataObject.Ord_Identifier => typeof(string),
+                            BaseDataObject.Ord_CreatedOnUtc or BaseDataObject.Ord_UpdatedOnUtc => typeof(DateTime),
+                            BaseDataObject.Ord_CreatedBy or BaseDataObject.Ord_UpdatedBy or BaseDataObject.Ord_ETag => typeof(string),
+                            BaseDataObject.Ord_Version => typeof(int),
+                            _ => typeof(object)
+                        };
+                    }
                     else
                     {
-                        // No schema available — infer type from the stored value itself
-                        memberType = value?.GetType() ?? typeof(object);
+                        // Non-base field without schema — infer type from value via pattern match
+                        memberType = value switch
+                        {
+                            int => typeof(int),
+                            uint => typeof(uint),
+                            long => typeof(long),
+                            decimal => typeof(decimal),
+                            double => typeof(double),
+                            float => typeof(float),
+                            bool => typeof(bool),
+                            DateTime => typeof(DateTime),
+                            string => typeof(string),
+                            _ => typeof(object)
+                        };
                     }
                     return true;
                 }

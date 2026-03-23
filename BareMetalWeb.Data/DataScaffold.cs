@@ -597,18 +597,22 @@ public static class DataScaffold
         // Legacy single field filter support (backward compatibility)
         if (query.TryGetValue("field", out var fieldName) && query.TryGetValue("value", out var value) && !string.IsNullOrWhiteSpace(fieldName))
         {
-            var op = QueryOperator.Equals;
-            if (query.TryGetValue("op", out var opValue) && !string.IsNullOrWhiteSpace(opValue))
+            // Validate field name exists in entity schema to prevent injection
+            if (metadata.FindField(fieldName) != null)
             {
-                op = ParseOperator(opValue);
-            }
+                var op = QueryOperator.Equals;
+                if (query.TryGetValue("op", out var opValue) && !string.IsNullOrWhiteSpace(opValue))
+                {
+                    op = ParseOperator(opValue);
+                }
 
-            definition.Clauses.Add(new QueryClause
-            {
-                Field = fieldName,
-                Operator = op,
-                Value = value
-            });
+                definition.Clauses.Add(new QueryClause
+                {
+                    Field = fieldName,
+                    Operator = op,
+                    Value = value
+                });
+            }
         }
 
         if (query.TryGetValue("sort", out var sortField) && !string.IsNullOrWhiteSpace(sortField))
