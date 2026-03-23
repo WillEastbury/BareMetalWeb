@@ -24,7 +24,8 @@ public static class CsrfProtection
         {
             HttpOnly = true,
             Secure = context.Request.IsHttps,
-            SameSite = SameSiteMode.Lax
+            SameSite = SameSiteMode.Strict,
+            Expires = DateTimeOffset.UtcNow.AddHours(1)
         };
 
         context.SetCookie(CookieName, token, options);

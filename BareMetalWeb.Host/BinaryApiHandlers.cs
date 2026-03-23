@@ -644,6 +644,21 @@ public static class BinaryApiHandlers
             || ct.Contains(BinaryContentType, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Writes an HTTP 415 Unsupported Media Type response and returns false.
+    /// Call at the top of any JSON/binary handler that requires Content-Type validation.
+    /// </summary>
+    internal static async ValueTask<bool> RejectInvalidContentTypeAsync(BmwContext context)
+    {
+        if (HasValidApiContentType(context))
+            return false;
+
+        context.Response.StatusCode = StatusCodes.Status415UnsupportedMediaType;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync("{\"error\":\"Content-Type must be application/json.\"}").ConfigureAwait(false);
+        return true;
+    }
+
     /// <summary>Returns 413 if Content-Length exceeds the limit. Returns true if OK.</summary>
     internal static async ValueTask<bool> CheckBodySizeAsync(BmwContext context, long maxBytes = MaxRequestBodyBytes)
     {
