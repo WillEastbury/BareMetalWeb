@@ -18,6 +18,18 @@ public static class LookupApiHandlers
 {
     private static IBufferedLogger? _logger;
 
+    /// <summary>
+    /// Field names that must never be exposed in API responses.
+    /// Covers password hashes, MFA secrets, API key hashes, and related credentials.
+    /// </summary>
+    private static readonly HashSet<string> SensitiveFieldNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "PasswordHash", "PasswordSalt", "PasswordIterations",
+        "MfaSecret", "MfaSecretEncrypted", "MfaPendingSecret", "MfaPendingSecretEncrypted",
+        "MfaLastVerifiedStep", "MfaBackupCodeHashes", "MfaBackupCodesGeneratedUtc",
+        "ApiKeyHashes"
+    };
+
     /// <summary>Initialise with a logger for error diagnostics.</summary>
     public static void Init(IBufferedLogger? logger) => _logger = logger;
 
@@ -241,7 +253,8 @@ public static class LookupApiHandlers
             DataFieldMetadata? field = null;
             foreach (var f in meta.Fields)
             {
-                if (string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase) && f.View)
+                if (string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase) && f.View
+                    && !SensitiveFieldNames.Contains(f.Name))
                 {
                     field = f;
                     break;
@@ -554,6 +567,8 @@ public static class LookupApiHandlers
 
         foreach (var field in meta.ViewFields)
         {
+            if (SensitiveFieldNames.Contains(field.Name))
+                continue;
             var value = field.GetValueFn(entity);
             result[field.Name] = value;
         }

@@ -613,6 +613,7 @@ public static class RouteRegistrationExtensions
         IHtmlTemplate mainTemplate)
     {
         var raw = pageInfoFactory.RawPage("Public", false);
+        var authed = pageInfoFactory.RawPage("Authenticated", false);
         var adminOnly = pageInfoFactory.RawPage("admin", false);
         host.RegisterRoute("GET /api/_binary/_key", new RouteHandlerData(raw, BinaryApiHandlers.KeyHandler));
         host.RegisterRoute("GET /api/_binary/{type}/_schema", new RouteHandlerData(raw, BinaryApiHandlers.SchemaHandler));
@@ -621,7 +622,7 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("GET /api/_binary/{type}/_aggregations", new RouteHandlerData(raw, BinaryApiHandlers.AggregationDefsHandler));
         host.RegisterRoute("GET /api/_binary/{type}/_layout", new RouteHandlerData(raw, DeltaApiHandlers.LayoutHandler));
         host.RegisterRoute("GET /api/_binary/{type}/_actions", new RouteHandlerData(raw, ActionApiHandlers.ListActionsHandler));
-        host.RegisterRoute("POST /api/_binary/{type}/_action/{actionId}", new RouteHandlerData(raw, ActionApiHandlers.ExecuteActionHandler));
+        host.RegisterRoute("POST /api/_binary/{type}/_action/{actionId}", new RouteHandlerData(authed, ActionApiHandlers.ExecuteActionHandler));
         host.RegisterRoute("GET /api/_metrics", new RouteHandlerData(adminOnly, EngineMetricsHandler));
         host.RegisterRoute("POST /api/graphql", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), GraphQLHandler.HandleAsync));
         host.RegisterRoute("GET /api/_cluster", new RouteHandlerData(adminOnly, ClusterApiHandlers.ClusterStatusHandler));
@@ -634,12 +635,12 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("PUT /api/tenants/{id}/branding", new RouteHandlerData(adminOnly, TenantApiHandlers.UpdateBrandingHandler));
         host.RegisterRoute("PUT /api/tenants/{id}/quotas", new RouteHandlerData(adminOnly, TenantApiHandlers.UpdateQuotasHandler));
         host.RegisterRoute("GET /api/tenant/branding", new RouteHandlerData(raw, TenantApiHandlers.GetCurrentBrandingHandler));
-        host.RegisterRoute("POST /api/vector/search", new RouteHandlerData(raw, VectorApiHandlers.SearchHandler));
-        host.RegisterRoute("POST /api/vector/upsert", new RouteHandlerData(raw, VectorApiHandlers.UpsertHandler));
-        host.RegisterRoute("POST /api/vector/delete", new RouteHandlerData(raw, VectorApiHandlers.DeleteHandler));
+        host.RegisterRoute("POST /api/vector/search", new RouteHandlerData(authed, VectorApiHandlers.SearchHandler));
+        host.RegisterRoute("POST /api/vector/upsert", new RouteHandlerData(authed, VectorApiHandlers.UpsertHandler));
+        host.RegisterRoute("POST /api/vector/delete", new RouteHandlerData(authed, VectorApiHandlers.DeleteHandler));
         host.RegisterRoute("GET /api/vector/indexes", new RouteHandlerData(raw, VectorApiHandlers.ListIndexesHandler));
         host.RegisterRoute("POST /api/vector/register", new RouteHandlerData(adminOnly, VectorApiHandlers.RegisterHandler));
-        host.RegisterRoute("POST /api/agent/chat", new RouteHandlerData(raw, AgentApiHandlers.ChatHandler));
+        host.RegisterRoute("POST /api/agent/chat", new RouteHandlerData(authed, AgentApiHandlers.ChatHandler));
         host.RegisterRoute("GET /api/agent/metrics", new RouteHandlerData(raw, AgentApiHandlers.MetricsHandler));
         host.RegisterRoute("GET /ai/generate", new RouteHandlerData(raw, AgentApiHandlers.GenerateHandler));
         // Wire up metadata change → intelligence model invalidation
@@ -650,17 +651,17 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("GET /products", new RouteHandlerData(templated, routeHandlers.BuildPageHandler(ProductRenderer.ConfigureCategoryBrowseAsync)));
         host.RegisterRoute("GET /products/{category}", new RouteHandlerData(templated, routeHandlers.BuildPageHandler(ProductRenderer.ConfigureProductGridAsync)));
         host.RegisterRoute("GET /api/basket", new RouteHandlerData(raw, BasketApiHandlers.GetBasketHandler));
-        host.RegisterRoute("POST /api/basket/add", new RouteHandlerData(raw, BasketApiHandlers.AddItemHandler));
-        host.RegisterRoute("POST /api/basket/remove", new RouteHandlerData(raw, BasketApiHandlers.RemoveItemHandler));
-        host.RegisterRoute("POST /api/basket/clear", new RouteHandlerData(raw, BasketApiHandlers.ClearBasketHandler));
-        host.RegisterRoute("POST /api/checkout", new RouteHandlerData(raw, CheckoutApiHandlers.CheckoutHandler));
-        host.RegisterRoute("POST /api/checkout/confirm", new RouteHandlerData(raw, CheckoutApiHandlers.ConfirmPaymentHandler));
+        host.RegisterRoute("POST /api/basket/add", new RouteHandlerData(authed, BasketApiHandlers.AddItemHandler));
+        host.RegisterRoute("POST /api/basket/remove", new RouteHandlerData(authed, BasketApiHandlers.RemoveItemHandler));
+        host.RegisterRoute("POST /api/basket/clear", new RouteHandlerData(authed, BasketApiHandlers.ClearBasketHandler));
+        host.RegisterRoute("POST /api/checkout", new RouteHandlerData(authed, CheckoutApiHandlers.CheckoutHandler));
+        host.RegisterRoute("POST /api/checkout/confirm", new RouteHandlerData(authed, CheckoutApiHandlers.ConfirmPaymentHandler));
         host.RegisterRoute("GET /api/_binary/{type}/{id}", new RouteHandlerData(raw, BinaryApiHandlers.GetHandler));
         host.RegisterRoute("GET /api/_binary/{type}", new RouteHandlerData(raw, BinaryApiHandlers.ListHandler));
-        host.RegisterRoute("POST /api/_binary/{type}", new RouteHandlerData(raw, BinaryApiHandlers.CreateHandler));
-        host.RegisterRoute("PUT /api/_binary/{type}/{id}", new RouteHandlerData(raw, BinaryApiHandlers.UpdateHandler));
-        host.RegisterRoute("DELETE /api/_binary/{type}/{id}", new RouteHandlerData(raw, BinaryApiHandlers.DeleteHandler));
-        host.RegisterRoute("PATCH /api/_binary/{type}/{id}", new RouteHandlerData(raw, DeltaApiHandlers.DeltaHandler));
+        host.RegisterRoute("POST /api/_binary/{type}", new RouteHandlerData(authed, BinaryApiHandlers.CreateHandler));
+        host.RegisterRoute("PUT /api/_binary/{type}/{id}", new RouteHandlerData(authed, BinaryApiHandlers.UpdateHandler));
+        host.RegisterRoute("DELETE /api/_binary/{type}/{id}", new RouteHandlerData(authed, BinaryApiHandlers.DeleteHandler));
+        host.RegisterRoute("PATCH /api/_binary/{type}/{id}", new RouteHandlerData(authed, DeltaApiHandlers.DeltaHandler));
     }
 
     /// <summary>
