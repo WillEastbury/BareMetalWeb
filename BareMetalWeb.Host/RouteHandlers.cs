@@ -4050,6 +4050,9 @@ public sealed class RouteHandlers : IRouteHandlers
     /// </summary>
     public async ValueTask AdminSampleDataJsonHandler(BmwContext context)
     {
+        if (await BinaryApiHandlers.RejectInvalidContentTypeAsync(context).ConfigureAwait(false))
+            return;
+
         if (!CsrfProtection.ValidateApiToken(context))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -4219,6 +4222,9 @@ public sealed class RouteHandlers : IRouteHandlers
     /// </summary>
     public async ValueTask AdminWipeDataJsonHandler(BmwContext context)
     {
+        if (await BinaryApiHandlers.RejectInvalidContentTypeAsync(context).ConfigureAwait(false))
+            return;
+
         if (!CsrfProtection.ValidateApiToken(context))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;

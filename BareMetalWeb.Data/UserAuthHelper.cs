@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -285,13 +286,14 @@ public static class UserAuthHelper
 
     private static string EncodeApiKey(BaseDataObject record, DataEntityMetadata meta, string apiKey)
     {
-        var name = GetUserName(record, meta);
-        if (string.IsNullOrWhiteSpace(name))
-            name = GetDisplayName(record, meta);
-        if (string.IsNullOrWhiteSpace(name))
-            name = record.Key.ToString();
-        var payload = $"{name}:{apiKey}";
-        return Convert.ToBase64String(Encoding.UTF8.GetBytes(payload));
+        // Use HMAC-SHA256 keyed by the user's unique record ID with a domain-separation prefix.
+        // This avoids embedding the username in plaintext (the old approach used Base64("{username}:{apikey}"),
+        // which would leak the username if the pre-hash input were ever exposed).
+        var userId = Encoding.UTF8.GetBytes(record.Key.ToString());
+        var message = Encoding.UTF8.GetBytes("apikey:" + apiKey);
+        using var hmac = new HMACSHA256(userId);
+        var digest = hmac.ComputeHash(message);
+        return Convert.ToHexString(digest).ToLowerInvariant();
     }
 
     private static bool TryParseHashEntry(string entry, out string hash, out string salt, out int iterations)

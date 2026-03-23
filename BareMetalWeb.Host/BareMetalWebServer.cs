@@ -70,7 +70,7 @@ public class BareMetalWebServer : IBareWebHost
     public CancellationTokenSource cts { get; }
     public string[] CorsAllowedOrigins { get; set; } = Array.Empty<string>();
     public string[] CorsAllowedMethods { get; set; } = new[] { "GET", "POST", "PUT", "DELETE", "OPTIONS" };
-    public string[] CorsAllowedHeaders { get; set; } = new[] { "Content-Type", "Authorization" };
+    public string[] CorsAllowedHeaders { get; set; } = new[] { "Content-Type", "Authorization", "X-CSRF-Token" };
     public StaticFileConfigOptions StaticFiles { get; set; } = new();
     public HttpsRedirectMode HttpsRedirectMode { get; set; } = HttpsRedirectMode.IfAvailable;
     public bool TrustForwardedHeaders { get; set; } = false;
@@ -705,7 +705,10 @@ public class BareMetalWebServer : IBareWebHost
             if (requestPath.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
             {
                 bool isWrite = !string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase);
-                if (!ApiLimiter.TryAcquire(sourceIp, isWrite, out int apiRetryAfter))
+                // Prefer authenticated identity (API key or session) over bare IP so that a
+                // single user behind a shared NAT doesn't consume the entire IP-based quota.
+                var rateLimitIdentity = UserAuth.GetRateLimitIdentity(bmwCtx, sourceIp);
+                if (!ApiLimiter.TryAcquire(rateLimitIdentity, isWrite, out int apiRetryAfter))
                 {
                     bmwCtx.ResponseHeaders.RetryAfter = apiRetryAfter.ToString();
                     if (IsAjaxRequest(bmwCtx))

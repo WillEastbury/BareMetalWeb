@@ -242,7 +242,7 @@ public static class UserAuth
         {
             HttpOnly = true,
             Secure = context.HttpRequest.IsHttps,
-            SameSite = SameSiteMode.Lax
+            SameSite = SameSiteMode.Strict
         };
 
         if (rememberMe)
@@ -628,7 +628,7 @@ public static class UserAuth
         {
             HttpOnly = true,
             Secure = context.HttpRequest.IsHttps,
-            SameSite = SameSiteMode.Lax,
+            SameSite = SameSiteMode.Strict,
             Expires = expiresUtc
         };
         context.SetCookie(SessionCookieName, protectedSessionId, options);
@@ -697,5 +697,35 @@ public static class UserAuth
 
         var principal = await UserAuthHelper.FindByApiKeyAsync(apiKey, cancellationToken).ConfigureAwait(false);
         return principal != null;
+    }
+
+    /// <summary>
+    /// Returns a stable identity string for rate-limiting purposes.
+    /// Prefers authenticated user identity over IP address so that a single user
+    /// behind a shared NAT cannot monopolise the IP-based quota.
+    /// Order of preference: API key hash → encrypted session token → IP address.
+    /// No I/O or decryption is performed — cookie values are used opaquely as keys.
+    /// </summary>
+    public static string GetRateLimitIdentity(BmwContext context, string fallbackIp)
+    {
+        // Authenticated API key callers: hash the raw key with SHA256 (truncated to 16 hex chars)
+        // so the rate-limit identity does not leak partial key material via observable bucket names.
+        if (TryGetApiKey(context, out var rawApiKey) && rawApiKey.Length >= 8)
+        {
+            Span<byte> keyBytes = stackalloc byte[rawApiKey.Length <= 256 ? rawApiKey.Length : 256];
+            System.Text.Encoding.UTF8.GetBytes(rawApiKey.AsSpan()[..Math.Min(rawApiKey.Length, 256)], keyBytes);
+            Span<byte> hashBytes = stackalloc byte[32];
+            System.Security.Cryptography.SHA256.HashData(keyBytes, hashBytes);
+            return "apikey:" + Convert.ToHexString(hashBytes[..8]).ToLowerInvariant();
+        }
+
+        // Browser session callers: use the encrypted session cookie value directly as
+        // the rate-limit key.  This is opaque, stable per-session, and avoids decryption
+        // overhead on every API request.
+        var protectedSessionId = context.GetCookie(SessionCookieName);
+        if (!string.IsNullOrWhiteSpace(protectedSessionId) && protectedSessionId.Length <= 512)
+            return "session:" + protectedSessionId;
+
+        return "ip:" + fallbackIp;
     }
 }
