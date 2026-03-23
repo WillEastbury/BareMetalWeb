@@ -52,18 +52,21 @@ public class ExportTests
             set => _values[Ord_ProductId] = value;
         }
 
+        [DataField(Label = "Quantity", Order = 2, FieldType = Rendering.Models.FormFieldType.Integer)]
         public int Quantity
         {
             get => (int)(_values[Ord_Quantity] ?? 0);
             set => _values[Ord_Quantity] = value;
         }
 
+        [DataField(Label = "Unit Price", Order = 3, FieldType = Rendering.Models.FormFieldType.Decimal)]
         public decimal UnitPrice
         {
             get => (decimal)(_values[Ord_UnitPrice] ?? 0m);
             set => _values[Ord_UnitPrice] = value;
         }
 
+        [DataField(Label = "Notes", Order = 4)]
         public string Notes
         {
             get => (string?)_values[Ord_Notes] ?? string.Empty;
@@ -114,30 +117,35 @@ public class ExportTests
         public TestOrder() : base(TotalFieldCount) { }
         public TestOrder(string createdBy) : base(TotalFieldCount, createdBy) { }
 
+        [DataField(Label = "Order Number", Order = 1)]
         public string OrderNumber
         {
             get => (string?)_values[Ord_OrderNumber] ?? string.Empty;
             set => _values[Ord_OrderNumber] = value;
         }
 
+        [DataField(Label = "Customer", Order = 2)]
         public string CustomerId
         {
             get => (string?)_values[Ord_CustomerId] ?? string.Empty;
             set => _values[Ord_CustomerId] = value;
         }
 
+        [DataField(Label = "Order Date", Order = 3)]
         public DateOnly OrderDate
         {
             get => _values[Ord_OrderDate] is DateOnly d ? d : default;
             set => _values[Ord_OrderDate] = value;
         }
 
+        [DataField(Label = "Status", Order = 4)]
         public string Status
         {
             get => (string?)_values[Ord_Status] ?? string.Empty;
             set => _values[Ord_Status] = value;
         }
 
+        [DataField(Label = "Currency", Order = 5)]
         public string CurrencyId
         {
             get => (string?)_values[Ord_CurrencyId] ?? string.Empty;
@@ -148,7 +156,14 @@ public class ExportTests
         [DataField(Label = "Order Rows", Order = 6, FieldType = Rendering.Models.FormFieldType.ChildList)]
         public List<TestOrderRow> OrderRows
         {
-            get => (List<TestOrderRow>?)_values[Ord_OrderRows] ?? new();
+            get
+            {
+                if (_values[Ord_OrderRows] is List<TestOrderRow> list)
+                    return list;
+                list = new List<TestOrderRow>();
+                _values[Ord_OrderRows] = list;
+                return list;
+            }
             set => _values[Ord_OrderRows] = value;
         }
     }

@@ -56,18 +56,21 @@ public class LookupApiHandlerTests : IDisposable
         public Product() : base(TotalFieldCount) { }
         public Product(string createdBy) : base(TotalFieldCount, createdBy) { }
 
+        [DataField(Label = "Name", Order = 1)]
         public string Name
         {
             get => (string?)_values[Ord_Name] ?? string.Empty;
             set => _values[Ord_Name] = value;
         }
 
+        [DataField(Label = "Description", Order = 2)]
         public string Description
         {
             get => (string?)_values[Ord_Description] ?? string.Empty;
             set => _values[Ord_Description] = value;
         }
 
+        [DataField(Label = "SKU", Order = 3)]
         public string Sku
         {
             get => (string?)_values[Ord_Sku] ?? string.Empty;
@@ -101,12 +104,14 @@ public class LookupApiHandlerTests : IDisposable
         public Customer() : base(TotalFieldCount) { }
         public Customer(string createdBy) : base(TotalFieldCount, createdBy) { }
 
+        [DataField(Label = "Name", Order = 1)]
         public string Name
         {
             get => (string?)_values[Ord_Name] ?? string.Empty;
             set => _values[Ord_Name] = value;
         }
 
+        [DataField(Label = "Email", Order = 2)]
         public string Email
         {
             get => (string?)_values[Ord_Email] ?? string.Empty;
@@ -142,6 +147,7 @@ public class LookupApiHandlerTests : IDisposable
         public Order() : base(TotalFieldCount) { }
         public Order(string createdBy) : base(TotalFieldCount, createdBy) { }
 
+        [DataField(Label = "Order Number", Order = 1)]
         public string OrderNumber
         {
             get => (string?)_values[Ord_OrderNumber] ?? string.Empty;
@@ -157,6 +163,7 @@ public class LookupApiHandlerTests : IDisposable
             set => _values[Ord_CustomerId] = value;
         }
 
+        [DataField(Label = "Status", Order = 3)]
         public string Status
         {
             get => (string?)_values[Ord_Status] ?? string.Empty;

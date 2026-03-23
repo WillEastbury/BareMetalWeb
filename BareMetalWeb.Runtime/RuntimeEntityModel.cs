@@ -169,7 +169,8 @@ public sealed class RuntimeEntityModel
                     : null,
                 EnumValues: f.FieldType == Rendering.Models.FormFieldType.Enum && f.EnumValues.Count > 0
                     ? f.EnumValues
-                    : null
+                    : null,
+                StorageOrdinal: schemaOrdinal
             ));
         }
 

@@ -57,7 +57,14 @@ public sealed class SystemPrincipal : User
     [DataField(Label = "API Keys", Order = 10, Required = false, List = false, View = false, Edit = true, Create = true, Placeholder = "one key per line")]
     public List<string> ApiKeyHashes
     {
-        get => (List<string>?)_values[Ord_ApiKeyHashes] ?? new();
+        get
+        {
+            if (_values[Ord_ApiKeyHashes] is List<string> list)
+                return list;
+            list = new List<string>();
+            _values[Ord_ApiKeyHashes] = list;
+            return list;
+        }
         set => _values[Ord_ApiKeyHashes] = value;
     }
 
