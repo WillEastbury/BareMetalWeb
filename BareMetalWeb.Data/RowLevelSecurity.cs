@@ -101,13 +101,11 @@ public static class RowLevelSecurity
     /// </summary>
     private static string? GetOwnerValue(BaseDataObject record, DataEntityMetadata meta)
     {
-        var ownerFieldName = meta.RlsOwnerField!;
-
-        // Fast path for the common "CreatedBy" case — it's a base field on every entity.
-        if (string.Equals(ownerFieldName, "CreatedBy", StringComparison.OrdinalIgnoreCase))
+        // Fast path: "CreatedBy" is pre-checked at registration time — no per-record string comparison.
+        if (meta.RlsUsesCreatedBy)
             return record.CreatedBy;
 
-        var field = meta.FindField(ownerFieldName);
+        var field = meta.FindField(meta.RlsOwnerField!);
         if (field != null)
         {
             var val = field.GetValueFn(record);

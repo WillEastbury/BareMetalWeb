@@ -211,7 +211,8 @@ public static class LookupApiHandlers
             // RLS: pre-resolve user context once for all records in the batch
             string? batchRlsUser = null;
             string[] batchRlsPerms = Array.Empty<string>();
-            if (RowLevelSecurity.IsEnabled(meta))
+            bool batchRlsEnabled = RowLevelSecurity.IsEnabled(meta);
+            if (batchRlsEnabled)
                 (batchRlsUser, batchRlsPerms) = await GetRlsContextAsync(context, context.RequestAborted);
 
             var results = new Dictionary<string, object?>(ids.Count);
@@ -222,7 +223,7 @@ public static class LookupApiHandlers
                 if (entity != null)
                 {
                     // RLS: skip records not visible to this user
-                    if (RowLevelSecurity.IsEnabled(meta) &&
+                    if (batchRlsEnabled &&
                         !RowLevelSecurity.IsRecordVisible((BaseDataObject)entity, meta, batchRlsUser, batchRlsPerms))
                         continue;
                     results[id] = await EntityToJsonAsync(entity, meta, traverse, context.RequestAborted);

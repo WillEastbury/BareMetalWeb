@@ -151,6 +151,14 @@ public sealed record DataEntityMetadata(
     public DataFieldMetadata? FindField(string name) =>
         FieldsByName.TryGetValue(name, out var field) ? field : null;
 
+    /// <summary>
+    /// Pre-computed flag: <c>true</c> when <see cref="RlsOwnerField"/> equals "CreatedBy"
+    /// (case-insensitive). Used by <see cref="RowLevelSecurity"/> to avoid a per-record
+    /// string comparison on the hot path.
+    /// </summary>
+    public bool RlsUsesCreatedBy { get; } =
+        string.Equals(RlsOwnerField, "CreatedBy", StringComparison.OrdinalIgnoreCase);
+
     private DataFieldMetadata[] BuildFilteredFields(Func<DataFieldMetadata, bool> predicate)
     {
         int count = 0;

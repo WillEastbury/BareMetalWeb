@@ -2097,11 +2097,14 @@ public sealed class RouteHandlers : IRouteHandlers
         var queryDict = ToQueryDictionary(context.HttpRequest.Query);
         var query = DataScaffold.BuildQueryDefinition(queryDict, meta);
 
-        // RLS: inject owner filter so non-admin users see only their own records
-        if (RowLevelSecurity.IsEnabled(meta))
+        // RLS: resolve user context once and inject owner filter so non-admin users see only their own records
+        string? listRlsUser = null;
+        string[] listRlsPerms = Array.Empty<string>();
+        bool listRlsEnabled = RowLevelSecurity.IsEnabled(meta);
+        if (listRlsEnabled)
         {
-            var (rlsUser, rlsPerms) = await GetRlsContextAsync(context, context.RequestAborted).ConfigureAwait(false);
-            if (!RowLevelSecurity.TryApplyFilter(query, meta, rlsUser, rlsPerms))
+            (listRlsUser, listRlsPerms) = await GetRlsContextAsync(context, context.RequestAborted).ConfigureAwait(false);
+            if (!RowLevelSecurity.TryApplyFilter(query, meta, listRlsUser, listRlsPerms))
             {
                 await WriteJsonResponseAsync(context, Array.Empty<object>());
                 return;
@@ -2122,12 +2125,9 @@ public sealed class RouteHandlers : IRouteHandlers
             countQuery.Skip = null;
             countQuery.Top = null;
 
-            // RLS: also apply the owner filter to the count query
-            if (RowLevelSecurity.IsEnabled(meta))
-            {
-                var (rlsUser, rlsPerms) = await GetRlsContextAsync(context, context.RequestAborted).ConfigureAwait(false);
-                RowLevelSecurity.TryApplyFilter(countQuery, meta, rlsUser, rlsPerms);
-            }
+            // RLS: reuse the already-resolved context to apply the same filter to the count query
+            if (listRlsEnabled)
+                RowLevelSecurity.TryApplyFilter(countQuery, meta, listRlsUser, listRlsPerms);
 
             var dataTask  = DataScaffold.QueryAsync(meta, query, cts.Token).AsTask();
             var countTask = DataScaffold.CountAsync(meta, countQuery, cts.Token).AsTask();
