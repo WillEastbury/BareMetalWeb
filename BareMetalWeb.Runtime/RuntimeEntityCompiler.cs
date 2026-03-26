@@ -190,7 +190,8 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
             enableGetIngress: entity.EnableGetIngress,
             fields: compiledFields.AsReadOnly(),
             indexes: compiledIndexes.AsReadOnly(),
-            actions: compiledActions.AsReadOnly()
+            actions: compiledActions.AsReadOnly(),
+            rlsOwnerField: string.IsNullOrWhiteSpace(entity.RlsOwnerField) ? null : entity.RlsOwnerField
         );
     }
 

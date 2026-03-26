@@ -12,6 +12,13 @@ public sealed class DataEntityAttribute : Attribute
     public AutoIdStrategy IdGeneration { get; set; } = AutoIdStrategy.Sequential;
     public string? DefaultSortField { get; set; }
     public SortDirection DefaultSortDirection { get; set; } = SortDirection.Asc;
+    /// <summary>
+    /// When set, enables row-level security (RLS) on this entity.
+    /// The value names the field whose value must match the current user's identifier
+    /// for the record to be visible/mutable by that user. Admins bypass RLS.
+    /// Typical value: <c>"CreatedBy"</c>.
+    /// </summary>
+    public string? RlsOwnerField { get; set; }
 
     public DataEntityAttribute(string name)
     {

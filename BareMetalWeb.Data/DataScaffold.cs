@@ -113,7 +113,8 @@ public sealed record DataEntityMetadata(
     SortDirection DefaultSortDirection = SortDirection.Asc,
     IReadOnlyList<DataFieldMetadata>? DocumentRelationFields = null,
     IReadOnlyList<ValidationRuleAttribute>? EntityValidationRules = null,
-    bool EnableGetIngress = false
+    bool EnableGetIngress = false,
+    string? RlsOwnerField = null
 )
 {
     private DataFieldMetadata[]? _listFields;
@@ -149,6 +150,14 @@ public sealed record DataEntityMetadata(
     /// <summary>Try to find a field by name in O(1). Returns null if not found.</summary>
     public DataFieldMetadata? FindField(string name) =>
         FieldsByName.TryGetValue(name, out var field) ? field : null;
+
+    /// <summary>
+    /// Pre-computed flag: <c>true</c> when <see cref="RlsOwnerField"/> equals "CreatedBy"
+    /// (case-insensitive). Used by <see cref="RowLevelSecurity"/> to avoid a per-record
+    /// string comparison on the hot path.
+    /// </summary>
+    public bool RlsUsesCreatedBy { get; } =
+        string.Equals(RlsOwnerField, "CreatedBy", StringComparison.OrdinalIgnoreCase);
 
     private DataFieldMetadata[] BuildFilteredFields(Func<DataFieldMetadata, bool> predicate)
     {
@@ -2919,6 +2928,7 @@ public static class DataScaffold
         var idGeneration = entityAttribute?.IdGeneration ?? AutoIdStrategy.Sequential;
         var defaultSortField = string.IsNullOrWhiteSpace(entityAttribute?.DefaultSortField) ? null : entityAttribute.DefaultSortField;
         var defaultSortDirection = entityAttribute?.DefaultSortDirection ?? SortDirection.Asc;
+        var rlsOwnerField = string.IsNullOrWhiteSpace(entityAttribute?.RlsOwnerField) ? null : entityAttribute.RlsOwnerField;
 
         // Detect view type and self-referencing parent field
         var viewTypeAttribute = type.GetCustomAttribute<DataViewTypeAttribute>();
@@ -3015,7 +3025,8 @@ public static class DataScaffold
             defaultSortField,
             defaultSortDirection,
             docRelFields,
-            entityValidationRules
+            entityValidationRules,
+            RlsOwnerField: rlsOwnerField
         );
     }
 

@@ -40,7 +40,8 @@ public sealed class RuntimeEntityModel
         bool enableGetIngress,
         IReadOnlyList<RuntimeFieldModel> fields,
         IReadOnlyList<RuntimeIndexModel> indexes,
-        IReadOnlyList<RuntimeActionModel> actions)
+        IReadOnlyList<RuntimeActionModel> actions,
+        string? rlsOwnerField = null)
     {
         EntityId = entityId;
         Name = name;
@@ -57,6 +58,7 @@ public sealed class RuntimeEntityModel
         Fields = fields;
         Indexes = indexes;
         Actions = actions;
+        RlsOwnerField = rlsOwnerField;
     }
 
     public string EntityId { get; }
@@ -77,6 +79,9 @@ public sealed class RuntimeEntityModel
 
     /// <summary>When true, a GET ingress route is registered for this entity.</summary>
     public bool EnableGetIngress { get; }
+
+    /// <summary>When set, names the field used for row-level security ownership checks.</summary>
+    public string? RlsOwnerField { get; }
 
     public IReadOnlyList<RuntimeFieldModel> Fields { get; }
     public IReadOnlyList<RuntimeIndexModel> Indexes { get; }
@@ -246,7 +251,8 @@ public sealed class RuntimeEntityModel
             Handlers: handlers,
             Commands: commands,
             DocumentRelationFields: docRelFields,
-            EnableGetIngress: EnableGetIngress
+            EnableGetIngress: EnableGetIngress,
+            RlsOwnerField: RlsOwnerField
         );
     }
 }

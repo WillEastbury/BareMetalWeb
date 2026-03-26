@@ -90,6 +90,26 @@ Each `[DataEntity]` class can declare a comma-separated `Permissions` property o
 public class Order : BaseDataObject { … }
 ```
 
+### Row-Level Security (RLS)
+
+Entity types can opt into row-level security by setting `RlsOwnerField` on their `[DataEntity]` attribute (compiled types) or on the `EntityDefinition` record (runtime-defined entities). When set, non-admin users can only read, update, and delete records where the owner field value matches their user name.
+
+```csharp
+[DataEntity("Orders", Permissions = "sales", RlsOwnerField = "CreatedBy")]
+public class Order : BaseDataObject { … }
+```
+
+**Enforcement points:**
+- `LookupApiHandlers`: Query, GetById, Batch, Field, Aggregate
+- `RouteHandlers`: List, Get, Put, Patch, Delete, FileGet
+
+**Bypass:** Users with the `admin` permission see all records regardless of ownership.
+
+**Helper:** `RowLevelSecurity` (static class in `BareMetalWeb.Data`) provides:
+- `TryApplyFilter()` — injects an ownership `QueryClause` into any `QueryDefinition`
+- `IsRecordVisible()` — checks a loaded record against the current user
+- `IsAdmin()` — checks for admin bypass
+
 ### MFA
 
 When a user has `MfaEnabled = true`, a valid TOTP token must be submitted at login.  The `/account/mfa` route is hidden from the navigation bar for MFA-enrolled users (they are prompted inline at login).
