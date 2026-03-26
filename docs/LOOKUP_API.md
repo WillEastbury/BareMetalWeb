@@ -255,6 +255,7 @@ document.getElementById('Email').addEventListener('blur', async function() {
 ## Security Considerations
 
 - **Entity-level permissions**: The server enforces entity permissions on every lookup request. Users can only query entities they have permission to access.
+- **Row-level security (RLS)**: Entities with `RlsOwnerField` set automatically filter results so non-admin users see only their own records. Single-record loads (by-ID, batch, field) are also checked.
 - **Field visibility**: Only fields marked with `View = true` are returned in responses.
 - **Session cookies**: The JavaScript client sends session cookies with every request (`credentials: 'same-origin'`).
 - **CSP**: Fetch calls to the same origin work with the existing `connect-src 'self'` policy.

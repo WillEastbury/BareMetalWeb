@@ -53,7 +53,8 @@ The `[DataEntity]` attribute marks a class as a data entity.
     Permissions = "Admin",          // Required permission (default: entity name)
     ShowOnNav = true,               // Show in navigation bar
     NavGroup = "Sales",             // Navigation dropdown group
-    NavOrder = 10)]                 // Sort order within group (lower = first)
+    NavOrder = 10,                  // Sort order within group (lower = first)
+    RlsOwnerField = "CreatedBy")]  // Row-level security owner field (null = disabled)
 ```
 
 | Parameter | Type | Default | Description |
@@ -65,6 +66,7 @@ The `[DataEntity]` attribute marks a class as a data entity.
 | `NavGroup` | string | null | Groups entities under a dropdown |
 | `NavOrder` | int | 0 | Sort order in navigation |
 | `IdGeneration` | AutoIdStrategy | Guid | How IDs are generated |
+| `RlsOwnerField` | string? | null | Field for row-level security (e.g. `"CreatedBy"`) |
 
 ---
 
