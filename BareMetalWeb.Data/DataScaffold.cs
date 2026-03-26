@@ -113,7 +113,8 @@ public sealed record DataEntityMetadata(
     SortDirection DefaultSortDirection = SortDirection.Asc,
     IReadOnlyList<DataFieldMetadata>? DocumentRelationFields = null,
     IReadOnlyList<ValidationRuleAttribute>? EntityValidationRules = null,
-    bool EnableGetIngress = false
+    bool EnableGetIngress = false,
+    string? RlsOwnerField = null
 )
 {
     private DataFieldMetadata[]? _listFields;
@@ -2919,6 +2920,7 @@ public static class DataScaffold
         var idGeneration = entityAttribute?.IdGeneration ?? AutoIdStrategy.Sequential;
         var defaultSortField = string.IsNullOrWhiteSpace(entityAttribute?.DefaultSortField) ? null : entityAttribute.DefaultSortField;
         var defaultSortDirection = entityAttribute?.DefaultSortDirection ?? SortDirection.Asc;
+        var rlsOwnerField = string.IsNullOrWhiteSpace(entityAttribute?.RlsOwnerField) ? null : entityAttribute.RlsOwnerField;
 
         // Detect view type and self-referencing parent field
         var viewTypeAttribute = type.GetCustomAttribute<DataViewTypeAttribute>();
@@ -3015,7 +3017,8 @@ public static class DataScaffold
             defaultSortField,
             defaultSortDirection,
             docRelFields,
-            entityValidationRules
+            entityValidationRules,
+            RlsOwnerField: rlsOwnerField
         );
     }
 

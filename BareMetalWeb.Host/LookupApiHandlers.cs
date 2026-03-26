@@ -71,6 +71,17 @@ public static class LookupApiHandlers
                 return;
             }
 
+            // RLS: verify the loaded record is visible to the current user
+            if (RowLevelSecurity.IsEnabled(meta))
+            {
+                var (rlsUser, rlsPerms) = await GetRlsContextAsync(context, context.RequestAborted);
+                if (!RowLevelSecurity.IsRecordVisible((BaseDataObject)entity, meta, rlsUser, rlsPerms))
+                {
+                    await WriteJsonErrorAsync(context, StatusCodes.Status404NotFound, $"Entity with ID '{id}' not found.");
+                    return;
+                }
+            }
+
             var result = await EntityToJsonAsync(entity, meta, traverse, context.RequestAborted);
             await WriteJsonAsync(context, result);
         }
@@ -112,11 +123,19 @@ public static class LookupApiHandlers
 
         try
         {
-            // SECURITY: No row-level security (RLS) is applied here. Once a user passes entity-level
-            // permission checks, QueryAsync returns ALL matching records with no ownership or tenant
-            // filtering. Implement an IRowFilter interface on DataEntityMetadata to inject user/tenant
-            // context into queries for ownership-based access control (OBAC). See issue #1195.
             var queryDef = BuildQueryFromRequest(context, meta);
+
+            // RLS: inject owner filter so non-admin users see only their own records
+            if (RowLevelSecurity.IsEnabled(meta))
+            {
+                var (rlsUser, rlsPerms) = await GetRlsContextAsync(context, context.RequestAborted);
+                if (!RowLevelSecurity.TryApplyFilter(queryDef, meta, rlsUser, rlsPerms))
+                {
+                    await WriteJsonAsync(context, new Dictionary<string, object> { ["data"] = Array.Empty<object>(), ["count"] = 0 });
+                    return;
+                }
+            }
+
             var entities = await meta.Handlers.QueryAsync(queryDef, context.RequestAborted);
             var results = new List<Dictionary<string, object?>>(entities is ICollection entColl ? entColl.Count : 16);
             foreach (var e in entities)
@@ -189,13 +208,25 @@ public static class LookupApiHandlers
 
         try
         {
+            // RLS: pre-resolve user context once for all records in the batch
+            string? batchRlsUser = null;
+            string[] batchRlsPerms = Array.Empty<string>();
+            if (RowLevelSecurity.IsEnabled(meta))
+                (batchRlsUser, batchRlsPerms) = await GetRlsContextAsync(context, context.RequestAborted);
+
             var results = new Dictionary<string, object?>(ids.Count);
             foreach (var id in ids)
             {
                 if (!uint.TryParse(id, out var parsedId)) continue;
                 var entity = await meta.Handlers.LoadAsync(parsedId, context.RequestAborted);
                 if (entity != null)
+                {
+                    // RLS: skip records not visible to this user
+                    if (RowLevelSecurity.IsEnabled(meta) &&
+                        !RowLevelSecurity.IsRecordVisible((BaseDataObject)entity, meta, batchRlsUser, batchRlsPerms))
+                        continue;
                     results[id] = await EntityToJsonAsync(entity, meta, traverse, context.RequestAborted);
+                }
             }
 
             await WriteJsonAsync(context, new Dictionary<string, object> { ["results"] = results });
@@ -248,6 +279,17 @@ public static class LookupApiHandlers
             {
                 await WriteJsonErrorAsync(context, StatusCodes.Status404NotFound, $"Entity with ID '{id}' not found.");
                 return;
+            }
+
+            // RLS: verify the loaded record is visible to the current user
+            if (RowLevelSecurity.IsEnabled(meta))
+            {
+                var (rlsUser, rlsPerms) = await GetRlsContextAsync(context, context.RequestAborted);
+                if (!RowLevelSecurity.IsRecordVisible((BaseDataObject)entity, meta, rlsUser, rlsPerms))
+                {
+                    await WriteJsonErrorAsync(context, StatusCodes.Status404NotFound, $"Entity with ID '{id}' not found.");
+                    return;
+                }
             }
 
             DataFieldMetadata? field = null;
@@ -306,6 +348,20 @@ public static class LookupApiHandlers
         try
         {
             var queryDef = BuildQueryFromRequest(context, meta);
+
+            // RLS: inject owner filter so aggregates are scoped to owned records
+            if (RowLevelSecurity.IsEnabled(meta))
+            {
+                var (rlsUser, rlsPerms) = await GetRlsContextAsync(context, context.RequestAborted);
+                if (!RowLevelSecurity.TryApplyFilter(queryDef, meta, rlsUser, rlsPerms))
+                {
+                    await WriteJsonAsync(context, new Dictionary<string, object?>
+                    {
+                        ["function"] = fn, ["field"] = fieldName, ["result"] = 0, ["count"] = 0
+                    });
+                    return;
+                }
+            }
             
             // Map string function name to enum
             var aggFn = fn switch
@@ -424,6 +480,19 @@ public static class LookupApiHandlers
                 return false;
         }
         return true;
+    }
+
+    /// <summary>
+    /// Resolves the current user's name and permission tokens for RLS checks.
+    /// Returns <c>null</c> user name when unauthenticated.
+    /// </summary>
+    private static async ValueTask<(string? UserName, string[] Permissions)> GetRlsContextAsync(
+        BmwContext context, System.Threading.CancellationToken cancellationToken)
+    {
+        var user = await UserAuth.GetRequestUserAsync(context, cancellationToken);
+        if (user == null)
+            return (null, Array.Empty<string>());
+        return (UserAuth.GetUserName(user), UserAuth.GetPermissions(user));
     }
 
     private static string? GetRouteValue(BmwContext context, string key)

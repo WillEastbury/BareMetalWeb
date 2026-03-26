@@ -22,7 +22,8 @@ public class EntityDefinition : BaseDataObject
     private const int Ord_NavOrder = BaseFieldCount + 8;
     private const int Ord_SchemaHash = BaseFieldCount + 9;
     private const int Ord_FormLayout = BaseFieldCount + 10;
-    internal const int TotalFieldCount = BaseFieldCount + 11;
+    private const int Ord_RlsOwnerField = BaseFieldCount + 11;
+    internal const int TotalFieldCount = BaseFieldCount + 12;
     private static readonly FieldSlot[] _fieldMap = new[]
     {
         new FieldSlot("CreatedBy", Ord_CreatedBy),
@@ -37,6 +38,7 @@ public class EntityDefinition : BaseDataObject
         new FieldSlot("NavGroup", Ord_NavGroup),
         new FieldSlot("NavOrder", Ord_NavOrder),
         new FieldSlot("Permissions", Ord_Permissions),
+        new FieldSlot("RlsOwnerField", Ord_RlsOwnerField),
         new FieldSlot("SchemaHash", Ord_SchemaHash),
         new FieldSlot("ShowOnNav", Ord_ShowOnNav),
         new FieldSlot("Slug", Ord_Slug),
@@ -146,6 +148,19 @@ public class EntityDefinition : BaseDataObject
     /// </summary>
     [DataField(Label = "Enable GET Ingress", Order = 12)]
     public bool EnableGetIngress { get; set; } = false;
+
+    /// <summary>
+    /// When set, enables row-level security (RLS) on this entity.
+    /// The value names the field whose value must match the current user's identifier
+    /// for the record to be visible/mutable. Admins bypass RLS.
+    /// Typical value: "CreatedBy".
+    /// </summary>
+    [DataField(Label = "RLS Owner Field", Order = 13, Placeholder = "CreatedBy")]
+    public string? RlsOwnerField
+    {
+        get => (string?)_values[Ord_RlsOwnerField];
+        set => _values[Ord_RlsOwnerField] = value;
+    }
 
     public override string ToString() => Name;
 }
