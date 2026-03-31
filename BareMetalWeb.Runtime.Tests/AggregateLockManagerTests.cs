@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
-using BareMetalWeb.Runtime;
+using BareMetalWeb.Data;
 using Xunit;
 
 namespace BareMetalWeb.Runtime.Tests;

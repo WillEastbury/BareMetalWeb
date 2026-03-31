@@ -11,6 +11,11 @@ namespace BareMetalWeb.Data;
 /// </summary>
 public sealed class AggregateLockManager
 {
+    private static readonly AggregateLockManager _instance = new();
+
+    /// <summary>Global singleton. Tests may construct their own instances for isolation.</summary>
+    public static AggregateLockManager Instance => _instance;
+
     private readonly ConcurrentDictionary<string, LockEntry> _locks = new(StringComparer.Ordinal);
     private static readonly TimeSpan DefaultExpiry = TimeSpan.FromSeconds(30);
     private const int MaxRetries = 5;
@@ -89,12 +94,17 @@ public sealed class AggregateLockManager
             $"Keys: {string.Join(", ", sorted)}");
     }
 
-    /// <summary>Try to acquire a single lock. Returns true if acquired.</summary>
+    /// <summary>Try to acquire a single lock with the default expiry. Returns true if acquired.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryAcquire(string aggregateKey, string transactionId)
+        => TryAcquire(aggregateKey, transactionId, DefaultExpiry);
+
+    /// <summary>Try to acquire a single lock with a caller-specified expiry. Returns true if acquired.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool TryAcquire(string aggregateKey, string transactionId, TimeSpan expiry)
     {
         var now = DateTime.UtcNow;
-        var entry = new LockEntry(aggregateKey, transactionId, now + DefaultExpiry);
+        var entry = new LockEntry(aggregateKey, transactionId, now + expiry);
 
         return _locks.AddOrUpdate(aggregateKey,
             _ => entry,
@@ -128,6 +138,36 @@ public sealed class AggregateLockManager
     {
         foreach (var key in keys)
             Release(key, transactionId);
+    }
+
+    /// <summary>
+    /// Try to acquire locks on all aggregate keys in sorted order, with caller-specified expiry.
+    /// Returns false (and releases already-acquired locks) if any single acquisition fails.
+    /// No retries — caller is responsible for retry logic.
+    /// </summary>
+    public bool TryAcquireAll(IEnumerable<string> aggregateKeys, string transactionId, TimeSpan expiry)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var sorted = new List<string>();
+        foreach (var k in aggregateKeys)
+            if (seen.Add(k)) sorted.Add(k);
+        sorted.Sort(StringComparer.Ordinal);
+
+        var acquired = new List<string>(sorted.Count);
+        foreach (var key in sorted)
+        {
+            if (TryAcquire(key, transactionId, expiry))
+            {
+                acquired.Add(key);
+            }
+            else
+            {
+                ReleaseAll(acquired, transactionId);
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>Purge expired locks (call periodically if needed).</summary>

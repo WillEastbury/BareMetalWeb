@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
+using BareMetalWeb.Core;
 using BareMetalWeb.Data;
 using BareMetalWeb.Rendering.Models;
 using BareMetalWeb.Runtime;
@@ -189,9 +189,11 @@ public class MetadataExtractorTests
     // ── EntityDefinition extraction tests ─────────────────────────────────────
 
     [Fact]
-    public void ExtractFromType_ReadsDataEntityAttribute()
+    public void BuildFromMetadata_ReadsEntityAttributes()
     {
-        var (entity, _, _) = MetadataExtractor.ExtractFromType(typeof(SampleWidget));
+        DataScaffold.RegisterEntity<SampleWidget>();
+        var meta = DataScaffold.GetEntityByType(typeof(SampleWidget))!;
+        var (entity, _, _) = MetadataExtractor.BuildFromMetadata(meta);
 
         Assert.Equal("Sample Widgets", entity.Name);
         Assert.Equal("sample-widgets", entity.Slug);
@@ -204,50 +206,46 @@ public class MetadataExtractorTests
     }
 
     [Fact]
-    public void ExtractFromType_SequentialIdStrategy_MapsCorrectly()
+    public void BuildFromMetadata_SequentialIdStrategy_MapsCorrectly()
     {
-        var (entity, _, _) = MetadataExtractor.ExtractFromType(typeof(SampleOrder));
+        DataScaffold.RegisterEntity<SampleOrder>();
+        var meta = DataScaffold.GetEntityByType(typeof(SampleOrder))!;
+        var (entity, _, _) = MetadataExtractor.BuildFromMetadata(meta);
 
         Assert.Equal("sequential", entity.IdStrategy);
     }
 
     [Fact]
-    public void ExtractFromType_WithoutDataEntityAttribute_UsesConventions()
+    public void BuildFromMetadata_GeneratesUniqueIds()
     {
-        var (entity, _, _) = MetadataExtractor.ExtractFromType(typeof(ConventionEntity));
-
-        Assert.False(string.IsNullOrWhiteSpace(entity.Name));
-        Assert.False(string.IsNullOrWhiteSpace(entity.Slug));
-        // Permissions defaults to the entity name
-        Assert.Equal(entity.Name, entity.Permissions);
-    }
-
-    [Fact]
-    public void ExtractFromType_GeneratesUniqueIds()
-    {
-        var (e1, _, _) = MetadataExtractor.ExtractFromType(typeof(SampleWidget));
-        var (e2, _, _) = MetadataExtractor.ExtractFromType(typeof(SampleWidget));
+        DataScaffold.RegisterEntity<SampleWidget>();
+        var meta = DataScaffold.GetEntityByType(typeof(SampleWidget))!;
+        var (e1, _, _) = MetadataExtractor.BuildFromMetadata(meta);
+        var (e2, _, _) = MetadataExtractor.BuildFromMetadata(meta);
 
         // Each call produces fresh GUIDs
-        Assert.NotEqual(e1.EntityId, e2.EntityId);
         Assert.NotEqual(e1.EntityId, e2.EntityId);
     }
 
     // ── FieldDefinition extraction tests ─────────────────────────────────────
 
     [Fact]
-    public void ExtractFromType_ProducesCorrectFieldCount()
+    public void BuildFromMetadata_ProducesCorrectFieldCount()
     {
-        var (_, fields, _) = MetadataExtractor.ExtractFromType(typeof(SampleWidget));
+        DataScaffold.RegisterEntity<SampleWidget>();
+        var meta = DataScaffold.GetEntityByType(typeof(SampleWidget))!;
+        var (_, fields, _) = MetadataExtractor.BuildFromMetadata(meta);
 
         // SampleWidget has 5 annotated properties (Name, Price, IsActive, CreatedDate, Category)
         Assert.Equal(5, fields.Count);
     }
 
     [Fact]
-    public void ExtractFromType_FieldsHaveCorrectNames()
+    public void BuildFromMetadata_FieldsHaveCorrectNames()
     {
-        var (_, fields, _) = MetadataExtractor.ExtractFromType(typeof(SampleWidget));
+        DataScaffold.RegisterEntity<SampleWidget>();
+        var meta = DataScaffold.GetEntityByType(typeof(SampleWidget))!;
+        var (_, fields, _) = MetadataExtractor.BuildFromMetadata(meta);
 
         var names = fields.Select(f => f.Name).ToHashSet();
         Assert.Contains("Name", names);
@@ -258,18 +256,22 @@ public class MetadataExtractorTests
     }
 
     [Fact]
-    public void ExtractFromType_ReadsFieldLabel()
+    public void BuildFromMetadata_ReadsFieldLabel()
     {
-        var (_, fields, _) = MetadataExtractor.ExtractFromType(typeof(SampleWidget));
+        DataScaffold.RegisterEntity<SampleWidget>();
+        var meta = DataScaffold.GetEntityByType(typeof(SampleWidget))!;
+        var (_, fields, _) = MetadataExtractor.BuildFromMetadata(meta);
 
         var nameField = fields.Single(f => f.Name == "Name");
         Assert.Equal("Widget Name", nameField.Label);
     }
 
     [Fact]
-    public void ExtractFromType_ReadsRequiredFlag()
+    public void BuildFromMetadata_ReadsRequiredFlag()
     {
-        var (_, fields, _) = MetadataExtractor.ExtractFromType(typeof(SampleWidget));
+        DataScaffold.RegisterEntity<SampleWidget>();
+        var meta = DataScaffold.GetEntityByType(typeof(SampleWidget))!;
+        var (_, fields, _) = MetadataExtractor.BuildFromMetadata(meta);
 
         var nameField = fields.Single(f => f.Name == "Name");
         Assert.True(nameField.Required);
@@ -279,9 +281,11 @@ public class MetadataExtractorTests
     }
 
     [Fact]
-    public void ExtractFromType_ReadsOrdinals()
+    public void BuildFromMetadata_ReadsOrdinals()
     {
-        var (_, fields, _) = MetadataExtractor.ExtractFromType(typeof(SampleWidget));
+        DataScaffold.RegisterEntity<SampleWidget>();
+        var meta = DataScaffold.GetEntityByType(typeof(SampleWidget))!;
+        var (_, fields, _) = MetadataExtractor.BuildFromMetadata(meta);
 
         var nameField = fields.Single(f => f.Name == "Name");
         var priceField = fields.Single(f => f.Name == "Price");
@@ -291,20 +295,24 @@ public class MetadataExtractorTests
     }
 
     [Fact]
-    public void ExtractFromType_AllFieldsReferenceEntityId()
+    public void BuildFromMetadata_AllFieldsReferenceEntityId()
     {
-        var (entity, fields, _) = MetadataExtractor.ExtractFromType(typeof(SampleWidget));
+        DataScaffold.RegisterEntity<SampleWidget>();
+        var meta = DataScaffold.GetEntityByType(typeof(SampleWidget))!;
+        var (entity, fields, _) = MetadataExtractor.BuildFromMetadata(meta);
 
         Assert.All(fields, f => Assert.Equal(entity.EntityId, f.EntityId));
     }
 
     [Fact]
-    public void ExtractFromType_SkipsCoreProperties()
+    public void BuildFromMetadata_SkipsCoreProperties()
     {
-        var (_, fields, _) = MetadataExtractor.ExtractFromType(typeof(SampleWidget));
+        DataScaffold.RegisterEntity<SampleWidget>();
+        var meta = DataScaffold.GetEntityByType(typeof(SampleWidget))!;
+        var (_, fields, _) = MetadataExtractor.BuildFromMetadata(meta);
 
         var names = fields.Select(f => f.Name).ToList();
-        Assert.DoesNotContain("Id", names);
+        Assert.DoesNotContain("Key", names);
         Assert.DoesNotContain("CreatedOnUtc", names);
         Assert.DoesNotContain("UpdatedOnUtc", names);
         Assert.DoesNotContain("CreatedBy", names);
@@ -320,27 +328,33 @@ public class MetadataExtractorTests
     [InlineData("IsActive", "bool")]
     [InlineData("CreatedDate", "datetime")]
     [InlineData("Category", "string")]
-    public void ExtractFromType_FieldTypes_MappedFromClrTypes(string fieldName, string expectedType)
+    public void BuildFromMetadata_FieldTypes_MappedFromClrTypes(string fieldName, string expectedType)
     {
-        var (_, fields, _) = MetadataExtractor.ExtractFromType(typeof(SampleWidget));
+        DataScaffold.RegisterEntity<SampleWidget>();
+        var meta = DataScaffold.GetEntityByType(typeof(SampleWidget))!;
+        var (_, fields, _) = MetadataExtractor.BuildFromMetadata(meta);
 
         var field = fields.Single(f => f.Name == fieldName);
         Assert.Equal(expectedType, field.Type);
     }
 
     [Fact]
-    public void ExtractFromType_EnumField_HasEnumType()
+    public void BuildFromMetadata_EnumField_HasEnumType()
     {
-        var (_, fields, _) = MetadataExtractor.ExtractFromType(typeof(SampleOrder));
+        DataScaffold.RegisterEntity<SampleOrder>();
+        var meta = DataScaffold.GetEntityByType(typeof(SampleOrder))!;
+        var (_, fields, _) = MetadataExtractor.BuildFromMetadata(meta);
 
         var statusField = fields.Single(f => f.Name == "Status");
         Assert.Equal("enum", statusField.Type);
     }
 
     [Fact]
-    public void ExtractFromType_EnumField_PopulatesEnumValues()
+    public void BuildFromMetadata_EnumField_PopulatesEnumValues()
     {
-        var (_, fields, _) = MetadataExtractor.ExtractFromType(typeof(SampleOrder));
+        DataScaffold.RegisterEntity<SampleOrder>();
+        var meta = DataScaffold.GetEntityByType(typeof(SampleOrder))!;
+        var (_, fields, _) = MetadataExtractor.BuildFromMetadata(meta);
 
         var statusField = fields.Single(f => f.Name == "Status");
         Assert.NotNull(statusField.EnumValues);
@@ -350,9 +364,11 @@ public class MetadataExtractorTests
     }
 
     [Fact]
-    public void ExtractFromType_DateOnlyField_HasDateType()
+    public void BuildFromMetadata_DateOnlyField_HasDateType()
     {
-        var (_, fields, _) = MetadataExtractor.ExtractFromType(typeof(SampleOrder));
+        DataScaffold.RegisterEntity<SampleOrder>();
+        var meta = DataScaffold.GetEntityByType(typeof(SampleOrder))!;
+        var (_, fields, _) = MetadataExtractor.BuildFromMetadata(meta);
 
         var dueDateField = fields.Single(f => f.Name == "DueDate");
         Assert.Equal("date", dueDateField.Type);
@@ -361,9 +377,11 @@ public class MetadataExtractorTests
     // ── IndexDefinition extraction tests ────────────────────────────────────
 
     [Fact]
-    public void ExtractFromType_ProducesIndexForDataIndexAttribute()
+    public void BuildFromMetadata_ProducesIndexForDataIndexAttribute()
     {
-        var (entity, _, indexes) = MetadataExtractor.ExtractFromType(typeof(SampleWidget));
+        DataScaffold.RegisterEntity<SampleWidget>();
+        var meta = DataScaffold.GetEntityByType(typeof(SampleWidget))!;
+        var (entity, _, indexes) = MetadataExtractor.BuildFromMetadata(meta);
 
         // SampleWidget.Category has [DataIndex]
         Assert.Single(indexes);
@@ -373,22 +391,16 @@ public class MetadataExtractorTests
     }
 
     [Fact]
-    public void ExtractFromType_BTreeIndex_HasCorrectType()
+    public void BuildFromMetadata_BTreeIndex_HasCorrectType()
     {
-        var (_, _, indexes) = MetadataExtractor.ExtractFromType(typeof(SampleOrder));
+        DataScaffold.RegisterEntity<SampleOrder>();
+        var meta = DataScaffold.GetEntityByType(typeof(SampleOrder))!;
+        var (_, _, indexes) = MetadataExtractor.BuildFromMetadata(meta);
 
         // SampleOrder.DueDate has [DataIndex(IndexKind.BTree)]
         Assert.Single(indexes);
         Assert.Equal("DueDate", indexes[0].FieldNames);
         Assert.Equal("btree", indexes[0].Type);
-    }
-
-    [Fact]
-    public void ExtractFromType_NoDataIndex_ProducesNoIndexes()
-    {
-        var (_, _, indexes) = MetadataExtractor.ExtractFromType(typeof(ConventionEntity));
-
-        Assert.Empty(indexes);
     }
 
     // ── MapFieldTypeString tests ─────────────────────────────────────────────
@@ -437,18 +449,18 @@ public class MetadataExtractorTests
     // ── ResolveEntitySlug tests ──────────────────────────────────────────────
 
     [Fact]
-    public void ResolveEntitySlug_WithExplicitSlug_ReturnsSlug()
+    public void ResolveEntitySlug_RegisteredEntity_ReturnsSlug()
     {
-        // SampleWidget has Slug = "sample-widgets"
+        DataScaffold.RegisterEntity<SampleWidget>();
         var slug = MetadataExtractor.ResolveEntitySlug(typeof(SampleWidget));
         Assert.Equal("sample-widgets", slug);
     }
 
     [Fact]
-    public void ResolveEntitySlug_WithoutSlug_DerivesFromName()
+    public void ResolveEntitySlug_UnregisteredEntity_DerivesFromTypeName()
     {
-        // SampleOrder has no explicit Slug
-        var slug = MetadataExtractor.ResolveEntitySlug(typeof(SampleOrder));
+        // ConventionEntity is not registered — falls back to convention
+        var slug = MetadataExtractor.ResolveEntitySlug(typeof(ConventionEntity));
         Assert.False(string.IsNullOrWhiteSpace(slug));
     }
 }

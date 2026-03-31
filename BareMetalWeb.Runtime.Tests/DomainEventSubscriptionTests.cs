@@ -1,4 +1,5 @@
 using System.Linq;
+using BareMetalWeb.Core;
 using BareMetalWeb.Data;
 using BareMetalWeb.Runtime;
 using Xunit;
@@ -13,12 +14,10 @@ public class DomainEventSubscriptionTests
     [Fact]
     public void DomainEventSubscription_HasCorrectSlug()
     {
-        var attr = typeof(DomainEventSubscription)
-            .GetCustomAttributes(typeof(DataEntityAttribute), false)
-            .Cast<DataEntityAttribute>()
-            .Single();
+        DataScaffold.RegisterEntity<DomainEventSubscription>();
+        var meta = DataScaffold.GetEntityByType(typeof(DomainEventSubscription))!;
 
-        Assert.Equal("domain-event-subscriptions", attr.Slug);
+        Assert.Equal("domain-event-subscriptions", meta.Slug);
     }
 
     // ── Field presence ───────────────────────────────────────────────────────
@@ -74,9 +73,11 @@ public class DomainEventSubscriptionTests
     // ── MetadataExtractor ─────────────────────────────────────────────────────
 
     [Fact]
-    public void MetadataExtractor_ExtractFromDomainEventSubscription_ProducesEntityDef()
+    public void MetadataExtractor_BuildFromMetadata_ProducesEntityDef()
     {
-        var (entityDef, fields, indexes) = MetadataExtractor.ExtractFromType(typeof(DomainEventSubscription));
+        DataScaffold.RegisterEntity<DomainEventSubscription>();
+        var meta = DataScaffold.GetEntityByType(typeof(DomainEventSubscription))!;
+        var (entityDef, fields, indexes) = MetadataExtractor.BuildFromMetadata(meta);
 
         Assert.NotNull(entityDef);
         Assert.Equal("Workflow Rules", entityDef.Name);
@@ -87,7 +88,9 @@ public class DomainEventSubscriptionTests
     [Fact]
     public void MetadataExtractor_DomainEventSubscription_NameFieldIsRequired()
     {
-        var (_, fields, _) = MetadataExtractor.ExtractFromType(typeof(DomainEventSubscription));
+        DataScaffold.RegisterEntity<DomainEventSubscription>();
+        var meta = DataScaffold.GetEntityByType(typeof(DomainEventSubscription))!;
+        var (_, fields, _) = MetadataExtractor.BuildFromMetadata(meta);
         var nameField = fields.FirstOrDefault(f => f.Name == "Name");
 
         Assert.NotNull(nameField);
@@ -97,7 +100,10 @@ public class DomainEventSubscriptionTests
     [Fact]
     public void MetadataExtractor_DomainEventSubscription_SourceEntityFieldHasLookup()
     {
-        var (_, fields, _) = MetadataExtractor.ExtractFromType(typeof(DomainEventSubscription));
+        DataScaffold.RegisterEntity<DomainEventSubscription>();
+        DataScaffold.RegisterEntity<EntityDefinition>();
+        var meta = DataScaffold.GetEntityByType(typeof(DomainEventSubscription))!;
+        var (_, fields, _) = MetadataExtractor.BuildFromMetadata(meta);
         var sourceField = fields.FirstOrDefault(f => f.Name == "SourceEntity");
 
         Assert.NotNull(sourceField);
