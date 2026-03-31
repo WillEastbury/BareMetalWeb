@@ -1069,10 +1069,44 @@ public class BareMetalWebServer : IBareWebHost
     /// <summary>Renders the appropriate error response (401 or 403) for a failed auth check.</summary>
     private async Task RenderAuthError(AuthResult result, BmwContext context)
     {
-        if (result == AuthResult.Unauthenticated)
-            await RenderUnauthorized(context);
-        else
-            await RenderForbidden(context);
+        bool isUnauth = result == AuthResult.Unauthenticated;
+        var requestPath = context.HttpRequest.Path.Value;
+
+        // Resolve the user the system thinks is making this request (helps debug stale cookies)
+        var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+        var userName = user != null ? UserAuth.GetUserName(user) : null;
+
+        if (IsAjaxRequest(context))
+        {
+            var error = isUnauth
+                ? ApiErrorWriter.Unauthorized(detail: "Authentication is required.", instance: requestPath)
+                : ApiErrorWriter.Forbidden(
+                    detail: userName != null ? $"Access denied for user '{userName}'." : "Access denied (anonymous).",
+                    instance: requestPath);
+            await ApiErrorWriter.WriteAsync(context, error, context.RequestAborted);
+            return;
+        }
+
+        // Browser: 401 → redirect to login; 403 → render error page
+        if (isUnauth)
+        {
+            context.StatusCode = StatusCodes.Status302Found;
+            context.ResponseHeaders.Location = "/login";
+            return;
+        }
+
+        var htmlDetail = userName != null
+            ? $"<p>Access denied for user <strong>{System.Net.WebUtility.HtmlEncode(userName)}</strong>.</p>"
+            : "<p>Access denied.</p>";
+
+        context.StatusCode = StatusCodes.Status403Forbidden;
+        PageInfo forbiddenPage = ErrorPageInfo with
+        {
+            PageMetaData = ErrorPageInfo.PageMetaData with { StatusCode = StatusCodes.Status403Forbidden },
+            PageContext = ErrorPageInfo.PageContext with { PageMetaDataValues = new[] { "403 - Forbidden", htmlDetail } }
+        };
+        context.SetPageInfo(forbiddenPage);
+        await HtmlRenderer.RenderPage(context);
     }
 
     private static async ValueTask<AuthResult> IsAuthorizedAsync(PageInfo? pageInfo, BmwContext context, CancellationToken cancellationToken = default)
@@ -1204,61 +1238,8 @@ public class BareMetalWebServer : IBareWebHost
             context.ResponseHeaders["Keep-Alive"] = "timeout=60, max=1000";
     }
 
-    public async Task RenderForbidden(BmwContext context)
-    {
-        // Resolve the user the system thinks is making this request (helps debug stale cookies)
-        var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-        var userName = user != null ? UserAuth.GetUserName(user) : null;
-        var requestPath = context.HttpRequest.Path.Value;
-
-        if (IsAjaxRequest(context))
-        {
-            var detail = userName != null
-                ? $"Access denied for user '{userName}'."
-                : "Access denied (anonymous).";
-            await ApiErrorWriter.WriteAsync(context,
-                ApiErrorWriter.Forbidden(detail: detail, instance: requestPath),
-                context.RequestAborted);
-            return;
-        }
-
-        var htmlDetail = userName != null
-            ? $"<p>Access denied for user <strong>{System.Net.WebUtility.HtmlEncode(userName)}</strong>.</p>"
-            : "<p>Access denied.</p>";
-
-        context.StatusCode = StatusCodes.Status403Forbidden;
-
-        PageInfo forbiddenPage = ErrorPageInfo with
-        {
-            PageMetaData = ErrorPageInfo.PageMetaData with
-            {
-                StatusCode = StatusCodes.Status403Forbidden
-            },
-            PageContext = ErrorPageInfo.PageContext with
-            {
-                PageMetaDataValues = new[] { "403 - Forbidden", htmlDetail }
-            }
-        };
-        context.SetPageInfo(forbiddenPage);
-        await HtmlRenderer.RenderPage(context);
-    }
-
-    public async Task RenderUnauthorized(BmwContext context)
-    {
-        var requestPath = context.HttpRequest.Path.Value;
-
-        if (IsAjaxRequest(context))
-        {
-            await ApiErrorWriter.WriteAsync(context,
-                ApiErrorWriter.Unauthorized(detail: "Authentication is required.", instance: requestPath),
-                context.RequestAborted);
-            return;
-        }
-
-        // For browser requests, redirect to login
-        context.StatusCode = StatusCodes.Status302Found;
-        context.ResponseHeaders.Location = "/login";
-    }
+    /// <summary>Interface implementation — delegates to unified RenderAuthError.</summary>
+    public Task RenderForbidden(BmwContext context) => RenderAuthError(AuthResult.Forbidden, context);
 
     private bool ApplyCors(BmwContext context)
     {
