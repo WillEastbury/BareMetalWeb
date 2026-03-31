@@ -1138,23 +1138,16 @@ public sealed class RouteHandlers : IRouteHandlers
 
     public async ValueTask SetupHandler(BmwContext context)
     {
-        await BuildPageHandler(async ctx =>
+        if (await RootUserExistsAsync(context.RequestAborted).ConfigureAwait(false))
         {
-            if (await RootUserExistsAsync(context.RequestAborted).ConfigureAwait(false))
-            {
-                var lockedUser = await GetLockedRootUserAsync(context.RequestAborted).ConfigureAwait(false);
-                if (lockedUser != null)
-                {
-                    RenderUnlockForm(ctx, "Your admin account is locked. Enter your current password to unlock it.");
-                    return;
-                }
+            await WriteSetupAlreadyCompleteAsync(context);
+            return;
+        }
 
-                ctx.SetStringValue("title", "Setup");
-                ctx.SetStringValue("html_message", "<p>Root user already exists.</p>");
-                return;
-            }
-
+        await BuildPageHandler(ctx =>
+        {
             RenderSetupForm(ctx, null, null, null, new SetupRegistrationInput());
+            return ValueTask.CompletedTask;
         })(context);
     }
 
@@ -1162,40 +1155,7 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         if (await RootUserExistsAsync(context.RequestAborted).ConfigureAwait(false))
         {
-            var lockedUser = await GetLockedRootUserAsync(context.RequestAborted).ConfigureAwait(false);
-            if (lockedUser == null)
-            {
-                context.SetStringValue("title", "Setup");
-                context.SetStringValue("html_message", "<p>Root user already exists.</p>");
-                await _renderer.RenderPage(context);
-                return;
-            }
-
-            // Read form data; use empty collection for non-form requests so CSRF check always runs
-            var unlockForm = context.HttpRequest.HasFormContentType
-                ? await context.HttpRequest.ReadFormAsync()
-                : FormCollection.Empty;
-
-            if (!CsrfProtection.ValidateFormToken(context, unlockForm))
-            {
-                RenderUnlockForm(context, "Invalid security token. Please try again.");
-                await _renderer.RenderPage(context);
-                return;
-            }
-
-            var unlockPassword = unlockForm["password"].ToString();
-            if (string.IsNullOrWhiteSpace(unlockPassword) || !UserAuth.VerifyPassword(lockedUser, unlockPassword))
-            {
-                RenderUnlockForm(context, "Invalid password. Account remains locked.");
-                await _renderer.RenderPage(context);
-                return;
-            }
-
-            UserAuth.RegisterSuccessfulLogin(lockedUser);
-            await UserAuth.SaveUserAsync(lockedUser, context.RequestAborted);
-            context.SetStringValue("title", "Setup");
-            context.SetStringValue("html_message", "<p>Account unlocked successfully. You may now sign in.</p>");
-            await _renderer.RenderPage(context);
+            await WriteSetupAlreadyCompleteAsync(context);
             return;
         }
 
@@ -1241,11 +1201,10 @@ public sealed class RouteHandlers : IRouteHandlers
             }
         }
 
+        // Double-check race condition: another request may have created the root user
         if (await RootUserExistsAsync(context.RequestAborted).ConfigureAwait(false))
         {
-            context.SetStringValue("title", "Setup");
-            context.SetStringValue("html_message", "<p>Root user already exists.</p>");
-            await _renderer.RenderPage(context);
+            await WriteSetupAlreadyCompleteAsync(context);
             return;
         }
 
@@ -1678,6 +1637,14 @@ public sealed class RouteHandlers : IRouteHandlers
         ));
     }
 
+    /// <summary>Returns 409 Conflict — system is already configured.</summary>
+    private static async ValueTask WriteSetupAlreadyCompleteAsync(BmwContext context)
+    {
+        await ApiErrorWriter.WriteAsync(context,
+            ApiErrorWriter.Conflict(detail: "System is already configured.", instance: "/setup"),
+            context.RequestAborted);
+    }
+
     private void RenderSetupForm(BmwContext context, string? message, string? userName, string? email, SetupRegistrationInput registrationInput)
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
@@ -1700,25 +1667,6 @@ public sealed class RouteHandlers : IRouteHandlers
                 new FormField(FormFieldType.String, "management_principal_name", "Management principal name", false, DefaultManagementPrincipalName, Value: registrationInput.PrincipalName),
                 new FormField(FormFieldType.String, "management_tenant_id", "Management tenant ID (reference)", false, "tenant-001", Value: registrationInput.TenantId),
                 new FormField(FormFieldType.String, "management_client_id", "Management client ID (reference)", false, "client-001", Value: registrationInput.ClientId)
-            }
-        ));
-    }
-
-    private void RenderUnlockForm(BmwContext context, string? message)
-    {
-        var csrfToken = CsrfProtection.EnsureToken(context);
-        context.SetStringValue("title", "Unlock Admin Account");
-        context.SetStringValue("html_message", string.IsNullOrWhiteSpace(message)
-            ? "<p>Enter your current password to unlock your admin account.</p>"
-            : $"<div class=\"alert alert-warning\">{WebUtility.HtmlEncode(message)}</div>");
-        context.AddFormDefinition(new FormDefinition(
-            Action: "/setup",
-            Method: "post",
-            SubmitLabel: "Unlock Account",
-            Fields: new[]
-            {
-                new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: csrfToken),
-                new FormField(FormFieldType.Password, "password", "Current Password", true, "Enter your current password")
             }
         ));
     }
@@ -6226,30 +6174,6 @@ public sealed class RouteHandlers : IRouteHandlers
             break;
         }
         return hasUsers;
-    }
-
-    private static async ValueTask<BaseDataObject?> GetLockedRootUserAsync(CancellationToken cancellationToken = default)
-    {
-        var query = new QueryDefinition
-        {
-            Clauses = new List<QueryClause>
-            {
-                new QueryClause { Field = "Permissions", Operator = QueryOperator.Contains, Value = "admin" },
-                new QueryClause { Field = "Permissions", Operator = QueryOperator.Contains, Value = "monitoring" }
-            }
-        };
-
-        var users = await UserAuth.QueryUsersAsync(query, cancellationToken).ConfigureAwait(false);
-        BaseDataObject? lockedUser = null;
-        foreach (var u in users)
-        {
-            if (UserAuth.IsLockedOut(u))
-            {
-                lockedUser = u;
-                break;
-            }
-        }
-        return lockedUser;
     }
 
     private static string GetDisplayValue(DataEntityMetadata meta, BaseDataObject item)

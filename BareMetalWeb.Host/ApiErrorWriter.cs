@@ -212,12 +212,13 @@ internal static class ApiErrorWriter
         Detail = detail ?? "Content-Type must be application/json.",
     };
 
-    internal static ApiError Conflict(string? detail = null) => new()
+    internal static ApiError Conflict(string? detail = null, string? instance = null) => new()
     {
         Type = ApiErrorTypes.Conflict,
         Title = "Conflict",
         Status = StatusCodes.Status409Conflict,
         Detail = detail,
+        Instance = instance,
     };
 
     internal static ApiError InternalError(string errorId, string? detail = null) => new()
