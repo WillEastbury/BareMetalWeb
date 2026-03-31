@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data;
 using BareMetalWeb.Data.Interfaces;
+using BareMetalWeb.Rendering.Models;
 using Xunit;
 
 namespace BareMetalWeb.Data.Tests;
@@ -92,6 +93,71 @@ public class ChildListJsonBindingTests : IDisposable
         _originalStore = DataStoreProvider.Current;
         DataStoreProvider.Current = new InMemoryDataStore();
         _ = GalleryTestFixture.State;
+        // Pre-register child factories so TryConvertJson can create List<TestOrderRow> instances
+        DataScaffold.PreRegisterChildFactories(
+            typeof(TestOrderRow),
+            () => new List<TestOrderRow>(),
+            () => new TestOrderRow());
+        // Register TestOrderRow as an entity so GetChildFieldMetadata can build field accessors
+        var fields = new[]
+        {
+            MakeField("ProductId", FormFieldType.String, TestOrderRow.BaseFieldCount + 2),
+            MakeField("Quantity", FormFieldType.Integer, TestOrderRow.BaseFieldCount + 3),
+            MakeField("UnitPrice", FormFieldType.Decimal, TestOrderRow.BaseFieldCount + 4),
+            MakeField("Notes", FormFieldType.String, TestOrderRow.BaseFieldCount + 1),
+            MakeField("LineTotal", FormFieldType.Decimal, TestOrderRow.BaseFieldCount + 0),
+        };
+        var meta = new DataEntityMetadata(
+            Type: typeof(TestOrderRow),
+            Name: "Test Order Rows",
+            Slug: "test-order-rows",
+            Permissions: "",
+            ShowOnNav: false,
+            NavGroup: null,
+            NavOrder: 0,
+            IdGeneration: AutoIdStrategy.None,
+            ViewType: ViewType.Table,
+            ParentField: null,
+            Fields: fields,
+            Handlers: new DataEntityHandlers(
+                Create: () => new TestOrderRow(),
+                LoadAsync: (_, _) => default,
+                SaveAsync: (_, _) => default,
+                DeleteAsync: (_, _) => default,
+                QueryAsync: (_, _) => default,
+                CountAsync: (_, _) => default),
+            Commands: Array.Empty<RemoteCommandMetadata>());
+        DataScaffold.RegisterEntityByType(typeof(TestOrderRow), meta);
+    }
+
+    private static DataFieldMetadata MakeField(string name, FormFieldType fieldType, int ordinal)
+    {
+        return new DataFieldMetadata(
+            ClrType: fieldType switch
+            {
+                FormFieldType.Integer => typeof(int),
+                FormFieldType.Decimal or FormFieldType.Money => typeof(decimal),
+                FormFieldType.YesNo => typeof(bool),
+                _ => typeof(string),
+            },
+            Name: name,
+            Label: name,
+            FieldType: fieldType,
+            Order: ordinal,
+            Required: false,
+            List: true,
+            View: true,
+            Edit: true,
+            Create: true,
+            ReadOnly: false,
+            Placeholder: null,
+            Lookup: null,
+            IdGeneration: IdGenerationStrategy.None,
+            Computed: null,
+            Upload: null,
+            Calculated: null,
+            Validation: null,
+            StorageOrdinal: ordinal);
     }
 
     public void Dispose()

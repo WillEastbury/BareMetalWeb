@@ -4,7 +4,6 @@ using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Net;
-using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using BareMetalWeb.Data;
@@ -175,7 +174,6 @@ public static class DataScaffold
     private static readonly ConcurrentDictionary<string, DataEntityMetadata> EntitiesBySlug = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, DataEntityMetadata> EntitiesByName = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<Type, DataEntityMetadata> EntitiesByType = new();
-    private static readonly NullabilityInfoContext NullabilityContext = new();
     private static readonly ConcurrentDictionary<string, LookupCacheEntry> LookupCache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
@@ -216,11 +214,33 @@ public static class DataScaffold
         });
     }
 
-    /// <summary>Compile Expression.New for a type and return a cached factory delegate (no Activator.CreateInstance).</summary>
-    private static Func<object> CompileFactory([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type type)
+    /// <summary>
+    /// Pre-registers <c>List&lt;T&gt;</c> and instance factories for a child entity type.
+    /// Called at startup by <see cref="AttributeMetadataBuilder"/> so the hot path
+    /// never needs <c>MakeGenericType</c> or <c>Activator.CreateInstance</c>.
+    /// </summary>
+    internal static void PreRegisterChildFactories(Type childType, Func<object> listFactory, Func<object> instanceFactory)
     {
-        // AOT-safe: use Activator.CreateInstance instead of Expression.Lambda.Compile()
-        return () => Activator.CreateInstance(type)!;
+        ListFactoryCache.TryAdd(childType, listFactory);
+        InstanceFactoryCache.TryAdd(childType, instanceFactory);
+    }
+
+    /// <summary>Pre-registers a dictionary factory for a (key, value) type pair.</summary>
+    internal static void PreRegisterDictFactory((Type, Type) key, Func<object> factory)
+    {
+        DictFactoryCache.TryAdd(key, factory);
+    }
+
+    /// <summary>
+    /// Registers a pre-built <see cref="DataEntityMetadata"/> indexed by CLR type.
+    /// Used by tests that need child-type resolution without calling <see cref="RegisterEntity{T}"/>.
+    /// </summary>
+    internal static void RegisterEntityByType(Type type, DataEntityMetadata metadata)
+    {
+        EntitiesByType[type] = metadata;
+        EntitiesBySlug[metadata.Slug] = metadata;
+        EntitiesByName[metadata.Name] = metadata;
+        InvalidateEntityListCache();
     }
 
     /// <summary>
@@ -248,7 +268,7 @@ public static class DataScaffold
 
         private static DataEntityMetadata? Build()
         {
-            return BuildEntityMetadata<T>();
+            return AttributeMetadataBuilder.BuildEntityMetadata<T>();
         }
     }
 
@@ -798,106 +818,13 @@ public static class DataScaffold
         if (!IsChildListType(field.ClrType, out var childType))
             return null;
 
-        var result = new List<Dictionary<string, object?>>();
+        // Look up child type's registered metadata (no reflection)
+        var childMeta2 = GetEntityByType(childType);
+        if (childMeta2 != null)
+            return BuildSubFieldSchemasFromEntity(childMeta2, field);
 
-        var properties = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-        Array.Sort(properties, (a, b) => string.CompareOrdinal(a.Name, b.Name));
-
-        foreach (var prop in properties)
-        {
-            if (!prop.CanRead || !prop.CanWrite) continue;
-
-            var fieldAttr  = prop.GetCustomAttribute<DataFieldAttribute>();
-            if (fieldAttr == null || (!fieldAttr.Create && !fieldAttr.Edit)) continue;
-
-            var lookupAttr  = prop.GetCustomAttribute<DataLookupAttribute>();
-            var calcAttr    = prop.GetCustomAttribute<CalculatedFieldAttribute>();
-            var copyParAttr = prop.GetCustomAttribute<CopyFromParentAttribute>();
-
-            var label      = fieldAttr.Label ?? DeCamelcaseWithId(prop.Name);
-            var effectiveType = fieldAttr.FieldType == FormFieldType.Unknown
-                ? MapFieldType(prop.PropertyType)
-                : fieldAttr.FieldType;
-            if (lookupAttr != null) effectiveType = FormFieldType.LookupList;
-
-            var fd = new Dictionary<string, object?>
-            {
-                ["name"]     = prop.Name,
-                ["label"]    = label,
-                ["type"]     = effectiveType.ToString(),
-                ["required"] = fieldAttr.Required,
-                ["readOnly"] = calcAttr != null
-            };
-
-            // Lookup metadata (no DB call – just attribute data)
-            if (lookupAttr != null)
-            {
-                var targetMeta = GetEntityByType(lookupAttr.TargetType);
-                fd["lookup"] = new Dictionary<string, object?>
-                {
-                    ["targetSlug"]    = targetMeta?.Slug,
-                    ["targetName"]    = targetMeta?.Name,
-                    ["valueField"]    = lookupAttr.ValueField,
-                    ["displayField"]  = lookupAttr.DisplayField,
-                    ["queryField"]    = lookupAttr.QueryField,
-                    ["queryValue"]    = lookupAttr.QueryValue,
-                    ["sortField"]     = lookupAttr.SortField,
-                    ["sortDirection"] = lookupAttr.SortDirection.ToString()
-                };
-                fd["enumValues"] = null;
-                // CopyFields for inline copy when lookup selection changes
-                fd["lookupCopyFields"] = string.IsNullOrEmpty(lookupAttr.CopyFields) ? null : (object)lookupAttr.CopyFields;
-                fd["lookupTargetSlug"] = targetMeta?.Slug;
-            }
-            else if (effectiveType == FormFieldType.Enum)
-            {
-                fd["lookup"]     = null;
-                var enumOpts = BuildEnumOptions(prop.PropertyType);
-                var enumList = new List<object>(enumOpts.Count);
-                foreach (var o in enumOpts)
-                    enumList.Add((object)new Dictionary<string, object?> { ["value"] = o.Key, ["label"] = o.Value });
-                fd["enumValues"] = enumList;
-                fd["lookupCopyFields"] = null;
-                fd["lookupTargetSlug"] = null;
-            }
-            else
-            {
-                fd["lookup"]          = null;
-                fd["enumValues"]      = null;
-                fd["lookupCopyFields"] = null;
-                fd["lookupTargetSlug"] = null;
-            }
-
-            // Calculated field JSON AST (CSP-safe; no eval/new Function needed on client)
-            if (calcAttr != null)
-            {
-                try
-                {
-                    var parser = new ExpressionParser();
-                    var ast    = parser.Parse(calcAttr.Expression);
-                    fd["calculated"] = new Dictionary<string, object?> { ["expression"] = ast.ToJsonAst() };
-                }
-                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Calculated field expression parse failed for {field.Name}: {ex.Message}"); fd["calculated"] = new Dictionary<string, object?> { ["expression"] = FallbackAstObject }; }
-            }
-            else
-            {
-                fd["calculated"] = null;
-            }
-
-            // CopyFromParent support
-            fd["copyFromParent"] = copyParAttr != null
-                ? (object)new Dictionary<string, object?>
-                {
-                    ["parentField"] = copyParAttr.ParentFieldName,
-                    ["entitySlug"]  = copyParAttr.EntitySlug,
-                    ["sourceField"] = copyParAttr.SourceFieldName
-                }
-                : null;
-
-            result.Add(fd);
-        }
-
-        return result;
+        // Child type not registered — return empty (no reflection fallback)
+        return null;
     }
 
     /// <summary>
@@ -1011,10 +938,18 @@ public static class DataScaffold
             var value = field.GetValueFn(instance);
             if (value is not IEnumerable enumerable)
                 continue;
-            var childFields = GetChildFieldMetadataSimple(childType);
-            var headers = new string[childFields.Count];
-            for (int hi = 0; hi < childFields.Count; hi++)
-                headers[hi] = childFields[hi].Label;
+            var childMeta3 = GetEntityByType(childType);
+            if (childMeta3 == null)
+                continue;
+            var childFields = childMeta3.Fields;
+            var editableFields = new List<DataFieldMetadata>();
+            foreach (var cf in childFields)
+            {
+                if (cf.Create || cf.Edit) editableFields.Add(cf);
+            }
+            var headers = new string[editableFields.Count];
+            for (int hi = 0; hi < editableFields.Count; hi++)
+                headers[hi] = editableFields[hi].Label;
             var rows = new List<string[]>();
             
             foreach (var item in enumerable)
@@ -1022,12 +957,17 @@ public static class DataScaffold
                 if (item == null)
                     continue;
                     
-                var row = new string[childFields.Count];
-                for (int i = 0; i < childFields.Count; i++)
+                var row = new string[editableFields.Count];
+                for (int i = 0; i < editableFields.Count; i++)
                 {
-                    var childField = childFields[i];
-                    var rawValue = childField.Getter(item);
-                    var displayText = ToDisplayString(rawValue, childField.FieldType);
+                    var childField = editableFields[i];
+                    object? rawValue = null;
+                    if (item is BaseDataObject bdo && bdo.Schema != null
+                        && bdo.Schema.TryGetOrdinal(childField.Name, out var ord))
+                    {
+                        rawValue = bdo.GetFieldValue(ord);
+                    }
+                    var displayText = ToDisplayString(rawValue, childField.ClrType);
                     row[i] = displayText;
                 }
                 rows.Add(row);
@@ -1771,13 +1711,10 @@ public static class DataScaffold
         var meta = GetEntityByType(type);
         if (meta != null) return meta;
 
-        // Derive slug from [DataEntity] attribute on compiled types
-        var attr = type.GetCustomAttribute(typeof(DataEntityAttribute)) as DataEntityAttribute;
-        if (attr != null)
-        {
-            var derivedSlug = !string.IsNullOrWhiteSpace(attr.Slug) ? attr.Slug! : ToSlug(attr.Name);
-            TryGetEntity(derivedSlug, out meta);
-        }
+        // Derive slug from type name by convention (no reflection)
+        var derivedName = Pluralize(DeCamelcase(type.Name));
+        var derivedSlug = ToSlug(derivedName);
+        TryGetEntity(derivedSlug, out meta);
         return meta;
     }
 
@@ -1876,7 +1813,7 @@ public static class DataScaffold
         return options;
     }
 
-    private static bool IsDefaultValue(object? value, Type type)
+    internal static bool IsDefaultValue(object? value, Type type)
     {
         if (value == null)
             return true;
@@ -1971,7 +1908,7 @@ public static class DataScaffold
         Action<object, object?> Setter
     );
 
-    private static bool IsChildListType(Type type, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] out Type childType)
+    internal static bool IsChildListType(Type type, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] out Type childType)
     {
         childType = typeof(object);
         if (!type.IsGenericType || type.GetGenericTypeDefinition() != typeof(List<>))
@@ -1984,124 +1921,21 @@ public static class DataScaffold
     /// <summary>
     /// Gets child field metadata without resolving lookups (for export scenarios where we don't need lookup data)
     /// </summary>
-    private static IReadOnlyList<ChildFieldMeta> GetChildFieldMetadataSimple([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type childType)
-    {
-        var fields = new List<ChildFieldMeta>();
-        var properties = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-        Array.Sort(properties, (a, b) => string.CompareOrdinal(a.Name, b.Name));
-
-        foreach (var prop in properties)
-        {
-            if (!prop.CanRead || !prop.CanWrite)
-                continue;
-
-            var fieldAttribute = prop.GetCustomAttribute<DataFieldAttribute>();
-            if (fieldAttribute == null)
-                continue;
-
-            if (!fieldAttribute.Create && !fieldAttribute.Edit)
-                continue;
-
-            var label = fieldAttribute.Label ?? DeCamelcaseWithId(prop.Name);
-            var required = fieldAttribute.Required;
-            var effectiveFieldType = fieldAttribute.FieldType == FormFieldType.Unknown
-                ? MapFieldType(prop.PropertyType)
-                : fieldAttribute.FieldType;
-
-            // Don't resolve lookups in this simplified version
-            fields.Add(new ChildFieldMeta(prop.Name, label, prop.PropertyType, required, effectiveFieldType, null, null, null, null, null, null, null,
-                obj => prop.GetValue(obj),
-                (obj, val) => prop.SetValue(obj, val)));
-        }
-
-        return fields;
-    }
-
-    // Cached child field metadata — avoids re-reflecting on every form render.
+    // Cached child field metadata — avoids re-building on every form render.
     private static readonly ConcurrentDictionary<Type, IReadOnlyList<ChildFieldMeta>> ChildFieldMetadataCache = new();
 
-    private static IReadOnlyList<ChildFieldMeta> GetChildFieldMetadata([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type childType)
+    private static IReadOnlyList<ChildFieldMeta> GetChildFieldMetadata(Type childType)
     {
-        return ChildFieldMetadataCache.GetOrAdd(childType, static type => BuildChildFieldMetadata(type));
-    }
-
-    private static IReadOnlyList<ChildFieldMeta> BuildChildFieldMetadata([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type childType)
-    {
-        var fields = new List<ChildFieldMeta>();
-        var properties = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-        Array.Sort(properties, (a, b) => string.CompareOrdinal(a.Name, b.Name));
-
-        foreach (var prop in properties)
+        return ChildFieldMetadataCache.GetOrAdd(childType, static type =>
         {
-            if (!prop.CanRead || !prop.CanWrite)
-                continue;
+            // Try metadata-driven path first (no reflection)
+            var childMeta = GetEntityByType(type);
+            if (childMeta != null)
+                return GetChildFieldMetadataFromEntity(childMeta, null!);
 
-            var fieldAttribute = prop.GetCustomAttribute<DataFieldAttribute>();
-            var lookupAttribute = prop.GetCustomAttribute<DataLookupAttribute>();
-            if (fieldAttribute == null)
-                continue;
-
-            if (!fieldAttribute.Create && !fieldAttribute.Edit)
-                continue;
-
-            var label = fieldAttribute.Label ?? DeCamelcaseWithId(prop.Name);
-            var required = fieldAttribute.Required;
-            var effectiveFieldType = fieldAttribute.FieldType == FormFieldType.Unknown
-                ? MapFieldType(prop.PropertyType)
-                : fieldAttribute.FieldType;
-
-            IReadOnlyList<KeyValuePair<string, string>>? lookupOptions = null;
-            string? lookupTargetSlug = null;
-            string? lookupCopyFields = null;
-            if (lookupAttribute != null)
-            {
-                var lookup = new DataLookupConfig(
-                    lookupAttribute.TargetType,
-                    lookupAttribute.ValueField,
-                    lookupAttribute.DisplayField,
-                    lookupAttribute.QueryField,
-                    lookupAttribute.QueryOperator,
-                    lookupAttribute.QueryValue,
-                    lookupAttribute.SortField,
-                    lookupAttribute.SortDirection,
-                    TimeSpan.FromSeconds(Math.Max(0, lookupAttribute.CacheSeconds))
-                );
-                lookupOptions = GetLookupOptions(lookup);
-                effectiveFieldType = FormFieldType.LookupList;
-                if (!string.IsNullOrEmpty(lookupAttribute.CopyFields))
-                {
-                    var targetMeta = GetEntityByType(lookupAttribute.TargetType);
-                    lookupTargetSlug = targetMeta?.Slug;
-                    lookupCopyFields = lookupAttribute.CopyFields;
-                }
-            }
-            else if (effectiveFieldType == FormFieldType.Enum)
-            {
-                lookupOptions = BuildEnumOptions(prop.PropertyType);
-            }
-
-            var calculatedAttr = prop.GetCustomAttribute<CalculatedFieldAttribute>();
-
-            var copyFromParentAttr = prop.GetCustomAttribute<CopyFromParentAttribute>();
-
-            fields.Add(new ChildFieldMeta(
-                Name: prop.Name,
-                Label: label,
-                FieldType: prop.PropertyType,
-                Required: required,
-                FormFieldType: effectiveFieldType,
-                LookupOptions: lookupOptions,
-                Calculated: calculatedAttr,
-                LookupTargetSlug: lookupTargetSlug,
-                LookupCopyFields: lookupCopyFields,
-                CopyFromParentField: copyFromParentAttr?.ParentFieldName,
-                CopyFromParentSlug: copyFromParentAttr?.EntitySlug,
-                CopyFromParentSourceField: copyFromParentAttr?.SourceFieldName,
-                Getter: obj => prop.GetValue(obj),
-                Setter: (obj, val) => prop.SetValue(obj, val)));
-        }
-
-        return fields;
+            // Child type not registered — return empty
+            return Array.Empty<ChildFieldMeta>();
+        });
     }
 
     /// <summary>
@@ -2160,20 +1994,18 @@ public static class DataScaffold
                 CopyFromParentField: cf.CopyFromParentField,
                 CopyFromParentSlug: cf.CopyFromParentSlug,
                 CopyFromParentSourceField: cf.CopyFromParentSourceField,
-                Getter: obj => null,
-                Setter: (obj, val) => { }));
+                Getter: cf.StorageOrdinal >= 0 ? cf.GetValueFn : (obj => null),
+                Setter: cf.StorageOrdinal >= 0 ? cf.SetValueFn : ((obj, val) => { })));
         }
         return fields;
     }
 
-    [RequiresDynamicCode("Creating List<T> instances for child types requires dynamic code generation.")]
-    [RequiresUnreferencedCode("Child list parsing requires compiled entity types to be preserved.")]
-    private static bool TryParseChildList(string rawValue, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type childType, out object? list)
+    private static bool TryParseChildList(string rawValue, Type childType, out object? list)
     {
         list = null;
-        var listFactory = ListFactoryCache.GetOrAdd(childType, static t =>
-            CompileFactory(typeof(List<>).MakeGenericType(t)));
-        var instanceFactory = InstanceFactoryCache.GetOrAdd(childType, CompileFactory);
+        if (!ListFactoryCache.TryGetValue(childType, out var listFactory)
+            || !InstanceFactoryCache.TryGetValue(childType, out var instanceFactory))
+            return false;
 
         if (string.IsNullOrWhiteSpace(rawValue))
         {
@@ -2256,13 +2088,11 @@ public static class DataScaffold
         return false;
     }
 
-    [RequiresDynamicCode("Creating Dictionary<string,T> instances for value types requires dynamic code generation.")]
-    [RequiresUnreferencedCode("Dictionary parsing requires compiled entity types to be preserved.")]
     private static bool TryParseDictionary(string rawValue, Type valueType, out object? dictionary)
     {
         dictionary = null;
-        var dictFactory = DictFactoryCache.GetOrAdd((typeof(string), valueType), static key =>
-            CompileFactory(typeof(Dictionary<,>).MakeGenericType(key.Item1, key.Item2)));
+        if (!DictFactoryCache.TryGetValue((typeof(string), valueType), out var dictFactory))
+            return false;
 
         if (string.IsNullOrWhiteSpace(rawValue))
         {
@@ -2629,14 +2459,12 @@ public static class DataScaffold
     /// Deserialises a JSON array of objects into a <c>List&lt;T&gt;</c> where T is a child entity type.
     /// Uses cached child field metadata with pre-compiled setter delegates (no per-call reflection).
     /// </summary>
-    [RequiresDynamicCode("Creating List<T> instances for child types requires dynamic code generation.")]
-    [RequiresUnreferencedCode("JSON child list deserialization requires compiled entity types to be preserved.")]
     private static bool TryConvertJsonChildList(JsonElement element, Type childType, out object? list)
     {
         list = null;
-        var listFactory = ListFactoryCache.GetOrAdd(childType, static t =>
-            CompileFactory(typeof(List<>).MakeGenericType(t)));
-        var instanceFactory = InstanceFactoryCache.GetOrAdd(childType, CompileFactory);
+        if (!ListFactoryCache.TryGetValue(childType, out var listFactory)
+            || !InstanceFactoryCache.TryGetValue(childType, out var instanceFactory))
+            return false;
 
         if (element.ValueKind == JsonValueKind.Null)
         {
@@ -2716,388 +2544,6 @@ public static class DataScaffold
         return FormFieldType.String;
     }
 
-    private static DataEntityMetadata? BuildEntityMetadata<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicMethods | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] T>() where T : BaseDataObject, new()
-    {
-        var type = typeof(T);
-        if (type.IsAbstract)
-            return null;
-
-        var entityAttribute = type.GetCustomAttribute<DataEntityAttribute>();
-        if (entityAttribute == null)
-            return null;
-
-        // Read entity-level validation rules at registration time (no runtime reflection)
-        List<ValidationRuleAttribute>? entityValidationRules = null;
-        foreach (var attr in type.GetCustomAttributes(false))
-        {
-            if (attr is ValidationRuleAttribute vr)
-            {
-                entityValidationRules ??= new List<ValidationRuleAttribute>();
-                entityValidationRules.Add(vr);
-            }
-        }
-
-        var fields = new List<DataFieldMetadata>();
-        var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-        Array.Sort(properties, (a, b) => string.CompareOrdinal(a.Name, b.Name));
-
-        // Read ordinal mapping from entity's field lookup table (zero reflection)
-        var ordinalMap = new Dictionary<string, int>(32, StringComparer.Ordinal);
-        var probe = new T();
-        foreach (var slot in probe.GetFieldMap())
-            ordinalMap[slot.Name] = slot.Ordinal;
-
-        for (int i = 0; i < properties.Length; i++)
-        {
-            var prop = properties[i];
-            if (!prop.CanRead || !prop.CanWrite)
-                continue;
-
-            // Batch-read all custom attributes once per property (avoids 10+ individual reflection calls)
-            var allAttrs = prop.GetCustomAttributes(false);
-            DataFieldAttribute? fieldAttribute = null;
-            FileFieldAttribute? fileFieldAttribute = null;
-            ImageFieldAttribute? imageFieldAttribute = null;
-            DataLookupAttribute? lookupAttribute = null;
-            IdGenerationAttribute? idGenAttribute = null;
-            ComputedFieldAttribute? computedAttribute = null;
-            CalculatedFieldAttribute? calculatedAttribute = null;
-            DataIndexAttribute? dataIndexAttribute = null;
-            RelatedDocumentAttribute? relatedDocAttribute = null;
-            SingletonFlagAttribute? singletonFlagAttribute = null;
-            List<ValidationAttribute>? validationAttrs = null;
-            List<ValidationRuleAttribute>? fieldExprRules = null;
-            for (int j = 0; j < allAttrs.Length; j++)
-            {
-                switch (allAttrs[j])
-                {
-                    case DataFieldAttribute a: fieldAttribute = a; break;
-                    case FileFieldAttribute a: fileFieldAttribute = a; break;
-                    case ImageFieldAttribute a: imageFieldAttribute = a; break;
-                    case DataLookupAttribute a: lookupAttribute = a; break;
-                    case IdGenerationAttribute a: idGenAttribute = a; break;
-                    case ComputedFieldAttribute a: computedAttribute = a; break;
-                    case CalculatedFieldAttribute a: calculatedAttribute = a; break;
-                    case DataIndexAttribute a: dataIndexAttribute = a; break;
-                    case RelatedDocumentAttribute a: relatedDocAttribute = a; break;
-                    case SingletonFlagAttribute a: singletonFlagAttribute = a; break;
-                    case ValidationAttribute va:
-                        validationAttrs ??= new List<ValidationAttribute>();
-                        validationAttrs.Add(va);
-                        break;
-                    case ValidationRuleAttribute vr:
-                        fieldExprRules ??= new List<ValidationRuleAttribute>();
-                        fieldExprRules.Add(vr);
-                        break;
-                }
-            }
-
-            if (IsCoreDataObjectProperty(prop))
-            {
-                // Allow core properties if they have DataField or IdGeneration attributes
-                if (fieldAttribute == null && idGenAttribute == null)
-                    continue;
-            }
-
-            var hasSingletonFlag = prop.PropertyType == typeof(bool) && singletonFlagAttribute != null;
-            if (fieldAttribute == null && imageFieldAttribute == null && fileFieldAttribute == null)
-                continue;
-
-            var fieldType = imageFieldAttribute != null
-                ? FormFieldType.Image
-                : fileFieldAttribute != null
-                    ? FormFieldType.File
-                    : fieldAttribute?.FieldType == FormFieldType.Unknown || fieldAttribute == null
-                        ? MapFieldType(prop.PropertyType)
-                        : fieldAttribute.FieldType;
-            var label = imageFieldAttribute?.Label
-                ?? fileFieldAttribute?.Label
-                ?? fieldAttribute?.Label
-                ?? DeCamelcaseWithId(prop.Name);
-            var required = imageFieldAttribute?.Required
-                ?? fileFieldAttribute?.Required
-                ?? fieldAttribute?.Required
-                ?? (!IsNullable(prop) || !HasDefaultValue(probe, prop));
-            var order = imageFieldAttribute?.Order
-                ?? fileFieldAttribute?.Order
-                ?? fieldAttribute?.Order
-                ?? (i + 1);
-            DataLookupConfig? lookup = null;
-            if (lookupAttribute != null)
-            {
-                lookup = new DataLookupConfig(
-                    lookupAttribute.TargetType,
-                    lookupAttribute.ValueField,
-                    lookupAttribute.DisplayField,
-                    lookupAttribute.QueryField,
-                    lookupAttribute.QueryOperator,
-                    lookupAttribute.QueryValue,
-                    lookupAttribute.SortField,
-                    lookupAttribute.SortDirection,
-                    TimeSpan.FromSeconds(Math.Max(0, lookupAttribute.CacheSeconds))
-                );
-            }
-
-            ComputedFieldConfig? computed = null;
-            if (computedAttribute != null)
-            {
-                computed = new ComputedFieldConfig(
-                    computedAttribute.SourceEntity,
-                    computedAttribute.SourceField,
-                    computedAttribute.ForeignKeyField,
-                    computedAttribute.ChildCollectionProperty,
-                    computedAttribute.Strategy,
-                    computedAttribute.Trigger,
-                    computedAttribute.Aggregate,
-                    TimeSpan.FromSeconds(Math.Max(0, computedAttribute.CacheSeconds))
-                );
-            }
-
-            UploadFieldConfig? upload = null;
-            if (imageFieldAttribute != null)
-            {
-                upload = new UploadFieldConfig(
-                    imageFieldAttribute.MaxFileSizeBytes,
-                    imageFieldAttribute.AllowedMimeTypes,
-                    imageFieldAttribute.MaxWidth > 0 ? imageFieldAttribute.MaxWidth : null,
-                    imageFieldAttribute.MaxHeight > 0 ? imageFieldAttribute.MaxHeight : null,
-                    imageFieldAttribute.GenerateThumbnail
-                );
-            }
-            else if (fileFieldAttribute != null)
-            {
-                upload = new UploadFieldConfig(
-                    fileFieldAttribute.MaxFileSizeBytes,
-                    fileFieldAttribute.AllowedMimeTypes,
-                    null,
-                    null,
-                    false
-                );
-            }
-
-            RelatedDocumentConfig? relatedDoc = relatedDocAttribute != null
-                ? new RelatedDocumentConfig(relatedDocAttribute.TargetType, relatedDocAttribute.DisplayField)
-                : null;
-
-            fields.Add(new DataFieldMetadata(
-                prop.PropertyType,
-                prop.Name,
-                label,
-                fieldType,
-                order,
-                required,
-                imageFieldAttribute?.List ?? fileFieldAttribute?.List ?? fieldAttribute?.List ?? true,
-                imageFieldAttribute?.View ?? fileFieldAttribute?.View ?? fieldAttribute?.View ?? true,
-                imageFieldAttribute?.Edit ?? fileFieldAttribute?.Edit ?? fieldAttribute?.Edit ?? true,
-                imageFieldAttribute?.Create ?? fileFieldAttribute?.Create ?? fieldAttribute?.Create ?? true,
-                (imageFieldAttribute?.ReadOnly ?? fileFieldAttribute?.ReadOnly ?? fieldAttribute?.ReadOnly ?? false) || (computed != null) || (calculatedAttribute != null), // Computed and calculated fields are always readonly
-                imageFieldAttribute?.Placeholder ?? fileFieldAttribute?.Placeholder ?? fieldAttribute?.Placeholder,
-                lookup,
-                idGenAttribute?.Strategy ?? IdGenerationStrategy.None,
-                computed,
-                upload,
-                calculatedAttribute,
-                BuildValidationConfigInline(validationAttrs, fieldExprRules),
-                dataIndexAttribute != null,
-                relatedDoc,
-                DataIndex: dataIndexAttribute,
-                HasSingletonFlag: hasSingletonFlag,
-                StorageOrdinal: ordinalMap.TryGetValue(prop.Name, out var storageOrd) ? storageOrd : -1
-            ));
-        }
-
-        var name = entityAttribute?.Name ?? Pluralize(DeCamelcaseWithId(type.Name));
-        var slug = string.IsNullOrWhiteSpace(entityAttribute?.Slug)
-            ? ToSlug(name)
-            : entityAttribute!.Slug!.Trim().ToLowerInvariant();
-        var permissions = string.IsNullOrWhiteSpace(entityAttribute?.Permissions)
-            ? name
-            : entityAttribute!.Permissions;
-        var showOnNav = entityAttribute?.ShowOnNav ?? false;
-        var navGroup = entityAttribute?.NavGroup ?? "Admin";
-        var navOrder = entityAttribute?.NavOrder ?? 0;
-        var idGeneration = entityAttribute?.IdGeneration ?? AutoIdStrategy.Sequential;
-        var defaultSortField = string.IsNullOrWhiteSpace(entityAttribute?.DefaultSortField) ? null : entityAttribute.DefaultSortField;
-        var defaultSortDirection = entityAttribute?.DefaultSortDirection ?? SortDirection.Asc;
-
-        // Detect view type and self-referencing parent field
-        var viewTypeAttribute = type.GetCustomAttribute<DataViewTypeAttribute>();
-        var viewType = viewTypeAttribute?.ViewType ?? ViewType.Table;
-        DataFieldMetadata? parentField = null;
-        
-        // Find self-referencing lookup field (for tree/org chart views)
-        foreach (var field in fields)
-        {
-            if (field.Lookup != null && field.Lookup.TargetType == type)
-            {
-                parentField = field;
-                break;
-            }
-        }
-
-        var handlers = new DataEntityHandlers(
-            static () => new T(),
-            LoadTypedAsync<T>,
-            SaveTypedAsync<T>,
-            DeleteTypedAsync<T>,
-            QueryTypedAsync<T>,
-            CountTypedAsync<T>
-        );
-
-        // Discover [RemoteCommand] methods and pre-compile typed invoker delegates.
-        // Using Delegate.CreateDelegate at startup avoids per-request MethodInfo.Invoke overhead
-        // and is NativeAOT-safe because T is a concrete type with [DynamicallyAccessedMembers].
-        var commands = new List<RemoteCommandMetadata>();
-        var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
-        foreach (var method in methods)
-        {
-            var cmdAttr = method.GetCustomAttribute<RemoteCommandAttribute>();
-            if (cmdAttr == null) continue;
-            var returnType = method.ReturnType;
-
-            Func<object, ValueTask<RemoteCommandResult>> invoker;
-            if (returnType == typeof(RemoteCommandResult))
-            {
-                var d = (Func<T, RemoteCommandResult>)Delegate.CreateDelegate(typeof(Func<T, RemoteCommandResult>), method);
-                invoker = obj => new ValueTask<RemoteCommandResult>(d((T)obj));
-            }
-            else if (returnType == typeof(Task<RemoteCommandResult>))
-            {
-                var d = (Func<T, Task<RemoteCommandResult>>)Delegate.CreateDelegate(typeof(Func<T, Task<RemoteCommandResult>>), method);
-                invoker = obj => new ValueTask<RemoteCommandResult>(d((T)obj));
-            }
-            else if (returnType == typeof(ValueTask<RemoteCommandResult>))
-            {
-                var d = (Func<T, ValueTask<RemoteCommandResult>>)Delegate.CreateDelegate(typeof(Func<T, ValueTask<RemoteCommandResult>>), method);
-                invoker = obj => d((T)obj);
-            }
-            else
-            {
-                continue;
-            }
-
-            commands.Add(new RemoteCommandMetadata(
-                invoker,
-                method.Name,
-                cmdAttr.Label ?? DeCamelcaseWithId(method.Name),
-                cmdAttr.Icon,
-                cmdAttr.ConfirmMessage,
-                cmdAttr.Destructive,
-                cmdAttr.Permission,
-                cmdAttr.OverrideEntityPermissions,
-                cmdAttr.Order
-            ));
-        }
-
-        fields.Sort((a, b) => a.Order.CompareTo(b.Order));
-        commands.Sort((a, b) => a.Order.CompareTo(b.Order));
-        var docRelFields = new List<DataFieldMetadata>();
-        foreach (var f in fields)
-        {
-            if (f.RelatedDocument != null)
-                docRelFields.Add(f);
-        }
-
-        return new DataEntityMetadata(
-            type,
-            name,
-            slug,
-            permissions,
-            showOnNav,
-            navGroup,
-            navOrder,
-            idGeneration,
-            viewType,
-            parentField,
-            fields,
-            handlers,
-            commands,
-            defaultSortField,
-            defaultSortDirection,
-            docRelFields,
-            entityValidationRules
-        );
-    }
-
-    private static bool IsCoreDataObjectProperty(PropertyInfo property)
-    {
-        return property.DeclaringType == typeof(BaseDataObject)
-            || property.Name == nameof(BaseDataObject.Key)
-            || property.Name == nameof(BaseDataObject.CreatedOnUtc)
-            || property.Name == nameof(BaseDataObject.UpdatedOnUtc)
-            || property.Name == nameof(BaseDataObject.CreatedBy)
-            || property.Name == nameof(BaseDataObject.UpdatedBy)
-            || property.Name == nameof(BaseDataObject.ETag);
-    }
-
-    private static ValidationConfig? BuildValidationConfigInline(
-        List<ValidationAttribute>? validators, List<ValidationRuleAttribute>? expressionRules)
-    {
-        if ((validators == null || validators.Count == 0) && (expressionRules == null || expressionRules.Count == 0))
-            return null;
-
-        int? minLength = null;
-        int? maxLength = null;
-        double? rangeMin = null;
-        double? rangeMax = null;
-        string? regexPattern = null;
-        string? regexMessage = null;
-        bool isEmail = false;
-        bool isUrl = false;
-        bool isPhone = false;
-
-        if (validators != null)
-        {
-            foreach (var v in validators)
-            {
-                switch (v)
-                {
-                    case MinLengthAttribute ml: minLength = ml.Length; break;
-                    case MaxLengthAttribute mx: maxLength = mx.Length; break;
-                    case RangeAttribute r: rangeMin = r.Min; rangeMax = r.Max; break;
-                    case RegexPatternAttribute rp: regexPattern = rp.Pattern; regexMessage = rp.ErrorMessage; break;
-                    case EmailAddressAttribute: isEmail = true; break;
-                    case UrlAttribute: isUrl = true; break;
-                    case PhoneAttribute: isPhone = true; break;
-                }
-            }
-        }
-
-        return new ValidationConfig(
-            minLength, maxLength, rangeMin, rangeMax,
-            regexPattern, regexMessage,
-            isEmail, isUrl, isPhone,
-            (IReadOnlyList<ValidationAttribute>?)validators ?? Array.Empty<ValidationAttribute>(),
-            (IReadOnlyList<ValidationRuleAttribute>?)expressionRules ?? Array.Empty<ValidationRuleAttribute>()
-        );
-    }
-
-    private static bool IsNullable(PropertyInfo property)
-    {
-        if (Nullable.GetUnderlyingType(property.PropertyType) != null)
-            return true;
-        if (property.PropertyType.IsValueType)
-            return false;
-
-        var nullability = NullabilityContext.Create(property);
-        return nullability.ReadState == NullabilityState.Nullable
-            || nullability.WriteState == NullabilityState.Nullable;
-    }
-
-    private static bool HasDefaultValue(object defaultInstance, PropertyInfo property)
-    {
-        object? value;
-        try
-        {
-            value = property.GetValue(defaultInstance);
-        }
-        catch
-        {
-            return false;
-        }
-
-        return !IsDefaultValue(value, property.PropertyType);
-    }
 
     internal static string DeCamelcase(string name) => DeCamelcaseWithId(name);
 
@@ -3180,16 +2626,16 @@ public static class DataScaffold
         return slug.Trim('-');
     }
 
-    private static async ValueTask<BaseDataObject?> LoadTypedAsync<T>(uint key, CancellationToken cancellationToken) where T : BaseDataObject
+    internal static async ValueTask<BaseDataObject?> LoadTypedAsync<T>(uint key, CancellationToken cancellationToken) where T : BaseDataObject
         => await DataStoreProvider.Current.LoadAsync<T>(key, cancellationToken);
 
-    private static async ValueTask SaveTypedAsync<T>(BaseDataObject instance, CancellationToken cancellationToken) where T : BaseDataObject
+    internal static async ValueTask SaveTypedAsync<T>(BaseDataObject instance, CancellationToken cancellationToken) where T : BaseDataObject
         => await DataStoreProvider.Current.SaveAsync((T)instance, cancellationToken);
 
-    private static async ValueTask DeleteTypedAsync<T>(uint key, CancellationToken cancellationToken) where T : BaseDataObject
+    internal static async ValueTask DeleteTypedAsync<T>(uint key, CancellationToken cancellationToken) where T : BaseDataObject
         => await DataStoreProvider.Current.DeleteAsync<T>(key, cancellationToken);
 
-    private static async ValueTask<IEnumerable<BaseDataObject>> QueryTypedAsync<T>(QueryDefinition? query, CancellationToken cancellationToken) where T : BaseDataObject
+    internal static async ValueTask<IEnumerable<BaseDataObject>> QueryTypedAsync<T>(QueryDefinition? query, CancellationToken cancellationToken) where T : BaseDataObject
     {
         var results = await DataStoreProvider.Current.QueryAsync<T>(query, cancellationToken);
         var list = new List<BaseDataObject>();
@@ -3198,7 +2644,7 @@ public static class DataScaffold
         return list;
     }
 
-    private static async ValueTask<int> CountTypedAsync<T>(QueryDefinition? query, CancellationToken cancellationToken) where T : BaseDataObject
+    internal static async ValueTask<int> CountTypedAsync<T>(QueryDefinition? query, CancellationToken cancellationToken) where T : BaseDataObject
         => await DataStoreProvider.Current.CountAsync<T>(query, cancellationToken);
 
     /// <summary>
