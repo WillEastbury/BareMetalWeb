@@ -93,4 +93,27 @@ describe('vnext-app – SPA router skipped on SSR pages (no #vnext-content)', ()
     simulateInit();
     expect(startSpy).toHaveBeenCalledTimes(1);
   });
+
+  test('SPA router does not activate on SSR pages with only #vnext-root (setup page)', () => {
+    // Simulate SSR setup page: has #vnext-root and .bm-ssr-content but NOT #vnext-content
+    document.body.innerHTML =
+      '<div id="vnext-root"></div>' +
+      '<div class="bm-ssr-content"><form><input name="username"></form></div>';
+
+    const startSpy = jest.spyOn(router, 'start');
+
+    // Replicate the SPA router guard (second IIFE in vnext-app.js)
+    function simulateSpaRouter() {
+      const R = document.getElementById('vnext-content');
+      if (!R) return;
+      const ssrContent = document.querySelector('.bm-ssr-content');
+      if (ssrContent) ssrContent.classList.add('bm-ssr-hidden');
+      router.on('/:entity', jest.fn()).start();
+    }
+
+    simulateSpaRouter();
+    expect(startSpy).not.toHaveBeenCalled();
+    // SSR content must remain visible
+    expect(document.querySelector('.bm-ssr-content').classList.contains('bm-ssr-hidden')).toBe(false);
+  });
 });

@@ -5001,7 +5001,9 @@
   'use strict';
   BareMetalRest.setRoot('/api/');
 
-  const R   = document.getElementById('vnext-root') || document.getElementById('vnext-content');
+  // Only activate the SPA router on VNext shell pages (which have #vnext-content).
+  // SSR pages (setup, login, metrics…) have #vnext-root but must NOT be SPA-routed.
+  const R   = document.getElementById('vnext-content');
   if (!R) return;
 
   let _routeAbortController = null;
