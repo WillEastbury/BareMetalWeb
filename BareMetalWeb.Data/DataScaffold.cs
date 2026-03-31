@@ -262,16 +262,6 @@ public static class DataScaffold
 
     private sealed record LookupCacheEntry(IReadOnlyList<KeyValuePair<string, string>> Options, bool IsLarge, DateTime ExpiresUtc);
 
-    internal static class DataEntityMetadataCache<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicMethods | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] T> where T : BaseDataObject, new()
-    {
-        public static readonly DataEntityMetadata? Metadata = Build();
-
-        private static DataEntityMetadata? Build()
-        {
-            return AttributeMetadataBuilder.BuildEntityMetadata<T>();
-        }
-    }
-
     private static volatile IReadOnlyList<DataEntityMetadata>? _cachedEntityList;
 
     public static IReadOnlyList<DataEntityMetadata> Entities
@@ -300,7 +290,7 @@ public static class DataScaffold
     public static bool RegisterEntity<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicMethods | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] T>() where T : BaseDataObject, new()
     {
         var type = typeof(T);
-        var metadata = DataEntityMetadataCache<T>.Metadata;
+        var metadata = AttributeMetadataBuilder.BuildEntityMetadata<T>();
         if (metadata == null)
             return false;
 
