@@ -32,6 +32,19 @@ public interface IDataProvider
     ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject;
     void Delete<T>(uint key) where T : BaseDataObject;
     ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject;
+
+    // ── Entity-name-based overloads (no generic type required) ──────────
+    void Save(string entityTypeName, BaseDataObject obj);
+    ValueTask SaveAsync(string entityTypeName, BaseDataObject obj, CancellationToken cancellationToken = default);
+    BaseDataObject? Load(string entityTypeName, uint key);
+    ValueTask<BaseDataObject?> LoadAsync(string entityTypeName, uint key, CancellationToken cancellationToken = default);
+    IEnumerable<BaseDataObject> Query(string entityTypeName, QueryDefinition? query = null);
+    ValueTask<IEnumerable<BaseDataObject>> QueryAsync(string entityTypeName, QueryDefinition? query = null, CancellationToken cancellationToken = default);
+    int Count(string entityTypeName, QueryDefinition? query = null);
+    ValueTask<int> CountAsync(string entityTypeName, QueryDefinition? query = null, CancellationToken cancellationToken = default);
+    void Delete(string entityTypeName, uint key);
+    ValueTask DeleteAsync(string entityTypeName, uint key, CancellationToken cancellationToken = default);
+
     IDisposable AcquireIndexLock(string entityName, string fieldName);
     bool IndexFileExists(string entityName, string fieldName, IndexFileKind kind);
     Stream OpenIndexRead(string entityName, string fieldName, IndexFileKind kind);

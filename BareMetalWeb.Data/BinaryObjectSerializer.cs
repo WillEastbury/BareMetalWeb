@@ -1946,27 +1946,46 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
     private static MemberAccessor[] BuildMemberAccessors(Type type)
     {
         // Entity types: use ordinal-indexed DataScaffold metadata (zero reflection)
-        var meta = DataScaffold.GetEntityByType(type);
+        // Try by CLR type first (compiled entities), then by name (string-registered entities)
+        var meta = DataScaffold.GetEntityByType(type) ?? DataScaffold.GetEntityByName(type.Name);
         if (meta != null)
         {
             // Build accessors from metadata fields + base properties — no PropertyInfo, no reflection.
-            var list = new List<MemberAccessor>(meta.Fields.Count + BasePropertyAccessors.Length);
-
-            // Base properties (Key, Identifier, CreatedOnUtc, etc.) — static ordinal accessors
-            for (int i = 0; i < BasePropertyAccessors.Length; i++)
-                list.Add(BasePropertyAccessors[i]);
-
-            // Entity-specific DataField properties — ordinal-indexed via metadata
-            foreach (var fieldMeta in meta.Fields)
+            if (meta.Fields.Count > 0)
             {
-                if (fieldMeta.StorageOrdinal < 0)
-                    continue;
-                list.Add(new MemberAccessor(fieldMeta.Name, fieldMeta.ClrType,
-                    fieldMeta.GetValueFn, fieldMeta.SetValueFn));
+                var list = new List<MemberAccessor>(meta.Fields.Count + BasePropertyAccessors.Length);
+                for (int i = 0; i < BasePropertyAccessors.Length; i++)
+                    list.Add(BasePropertyAccessors[i]);
+
+                foreach (var fieldMeta in meta.Fields)
+                {
+                    if (fieldMeta.StorageOrdinal < 0) continue;
+                    list.Add(new MemberAccessor(fieldMeta.Name, fieldMeta.ClrType,
+                        fieldMeta.GetValueFn, fieldMeta.SetValueFn));
+                }
+                list.Sort(static (a, b) => StringComparer.Ordinal.Compare(a.Name, b.Name));
+                return list.ToArray();
             }
 
-            list.Sort(static (a, b) => StringComparer.Ordinal.Compare(a.Name, b.Name));
-            return list.ToArray();
+            // Schema-based fallback: entity registered by name with EntitySchema
+            // but no DataFieldMetadata. Build accessors from schema ordinals.
+            if (meta.Schema != null)
+            {
+                var schema = meta.Schema;
+                var list = new List<MemberAccessor>(schema.FieldCount + BasePropertyAccessors.Length);
+                for (int i = 0; i < BasePropertyAccessors.Length; i++)
+                    list.Add(BasePropertyAccessors[i]);
+
+                for (int i = 0; i < schema.FieldCount; i++)
+                {
+                    int ord = BaseDataObject.BaseFieldCount + i;
+                    list.Add(new MemberAccessor(schema.Names[i], schema.ClrTypes[i],
+                        obj => ((BaseDataObject)obj).GetFieldValue(ord),
+                        (obj, val) => ((BaseDataObject)obj).SetFieldValue(ord, val)));
+                }
+                list.Sort(static (a, b) => StringComparer.Ordinal.Compare(a.Name, b.Name));
+                return list.ToArray();
+            }
         }
 
         // Non-entity types with explicit member registration (zero reflection)

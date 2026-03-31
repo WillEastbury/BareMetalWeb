@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using BareMetalWeb.Data;
 
 namespace BareMetalWeb.Runtime;
 
@@ -31,9 +32,11 @@ public sealed class SamplePackage
 
     public List<IndexDefinition> Indexes { get; set; } = new();
 
-    public List<ActionDefinition> Actions { get; set; } = new();
+    /// <summary>Action definitions — stored as DataRecord via "action-definitions" slug.</summary>
+    public List<BaseDataObject> Actions { get; set; } = new();
 
-    public List<ActionCommandDefinition> ActionCommands { get; set; } = new();
+    /// <summary>Action commands — stored as DataRecord via "action-commands" slug.</summary>
+    public List<BaseDataObject> ActionCommands { get; set; } = new();
 
     public List<SampleReport> Reports { get; set; } = new();
 
@@ -43,12 +46,14 @@ public sealed class SamplePackage
     /// <summary>Permission definitions to create when deploying this package.</summary>
     public List<SamplePermission> Permissions { get; set; } = new();
 
-    public List<AggregationDefinition> Aggregations { get; set; } = new();
+    /// <summary>Aggregation definitions — stored as DataRecord via "aggregation-definitions" slug.</summary>
+    public List<BaseDataObject> Aggregations { get; set; } = new();
 
-    public List<ScheduledActionDefinition> ScheduledActions { get; set; } = new();
+    /// <summary>Scheduled actions — stored as DataRecord via "scheduled-actions" slug.</summary>
+    public List<BaseDataObject> ScheduledActions { get; set; } = new();
 
-    /// <summary>Workflow / automation rules to create when deploying this package.</summary>
-    public List<DomainEventSubscription> WorkflowRules { get; set; } = new();
+    /// <summary>Workflow / automation rules — stored as DataRecord via "domain-event-subscriptions" slug.</summary>
+    public List<BaseDataObject> WorkflowRules { get; set; } = new();
 }
 
 /// <summary>

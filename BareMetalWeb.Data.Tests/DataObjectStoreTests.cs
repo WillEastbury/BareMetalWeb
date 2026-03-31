@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data.Interfaces;
 using Xunit;
@@ -183,6 +184,18 @@ public class DataObjectStoreTests
         {
             public void Dispose() { }
         }
+
+        // ── Non-generic stubs ──────────────────────────────────────────
+        public void Save(string e, BaseDataObject o) => throw new NotSupportedException();
+        public ValueTask SaveAsync(string e, BaseDataObject o, CancellationToken ct = default) => throw new NotSupportedException();
+        public BaseDataObject? Load(string e, uint k) => throw new NotSupportedException();
+        public ValueTask<BaseDataObject?> LoadAsync(string e, uint k, CancellationToken ct = default) => throw new NotSupportedException();
+        public IEnumerable<BaseDataObject> Query(string e, QueryDefinition? q = null) => throw new NotSupportedException();
+        public ValueTask<IEnumerable<BaseDataObject>> QueryAsync(string e, QueryDefinition? q = null, CancellationToken ct = default) => throw new NotSupportedException();
+        public int Count(string e, QueryDefinition? q = null) => throw new NotSupportedException();
+        public ValueTask<int> CountAsync(string e, QueryDefinition? q = null, CancellationToken ct = default) => throw new NotSupportedException();
+        public void Delete(string e, uint k) => throw new NotSupportedException();
+        public ValueTask DeleteAsync(string e, uint k, CancellationToken ct = default) => throw new NotSupportedException();
     }
 
     [Fact]

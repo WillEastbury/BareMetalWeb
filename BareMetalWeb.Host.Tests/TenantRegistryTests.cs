@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data;
@@ -308,5 +312,17 @@ public sealed class TenantRegistryTests : IDisposable
         public uint NextSequentialKey(string e) => 0;
         public void SeedSequentialKey(string e, uint floor) { }
         private sealed class D : IDisposable { public void Dispose() { } }
+
+        // ── Non-generic stubs ──────────────────────────────────────────
+        public void Save(string e, BaseDataObject o) => throw new NotSupportedException();
+        public ValueTask SaveAsync(string e, BaseDataObject o, CancellationToken ct = default) => throw new NotSupportedException();
+        public BaseDataObject? Load(string e, uint k) => throw new NotSupportedException();
+        public ValueTask<BaseDataObject?> LoadAsync(string e, uint k, CancellationToken ct = default) => throw new NotSupportedException();
+        public IEnumerable<BaseDataObject> Query(string e, QueryDefinition? q = null) => throw new NotSupportedException();
+        public ValueTask<IEnumerable<BaseDataObject>> QueryAsync(string e, QueryDefinition? q = null, CancellationToken ct = default) => throw new NotSupportedException();
+        public int Count(string e, QueryDefinition? q = null) => throw new NotSupportedException();
+        public ValueTask<int> CountAsync(string e, QueryDefinition? q = null, CancellationToken ct = default) => throw new NotSupportedException();
+        public void Delete(string e, uint k) => throw new NotSupportedException();
+        public ValueTask DeleteAsync(string e, uint k, CancellationToken ct = default) => throw new NotSupportedException();
     }
 }

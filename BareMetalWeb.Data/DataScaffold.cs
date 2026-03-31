@@ -367,6 +367,32 @@ public static class DataScaffold
     /// </summary>
     public static int RegisterEntity(string entityName, EntitySchema schema, DataEntityHandlers handlers)
     {
+        // Build DataFieldMetadata from schema so FindField/GetValueFn/SetValueFn work
+        var fields = new DataFieldMetadata[schema.FieldCount];
+        for (int i = 0; i < schema.FieldCount; i++)
+        {
+            var fieldType = MapFieldTypeToFormFieldType(schema.Types[i]);
+            fields[i] = new DataFieldMetadata(
+                ClrType: schema.ClrTypes[i],
+                Name: schema.Names[i],
+                Label: DeCamelcase(schema.Names[i]),
+                FieldType: fieldType,
+                Order: i,
+                Required: schema.IsRequired[i],
+                List: true, View: true, Edit: true, Create: true,
+                ReadOnly: false,
+                Placeholder: null,
+                Lookup: null,
+                IdGeneration: IdGenerationStrategy.None,
+                Computed: null,
+                Upload: null,
+                Calculated: null,
+                Validation: null,
+                IsIndexed: schema.IsIndexed[i],
+                StorageOrdinal: BaseDataObject.BaseFieldCount + i
+            );
+        }
+
         var metadata = new DataEntityMetadata(
             Type: typeof(DataRecord),
             Name: entityName,
@@ -378,7 +404,7 @@ public static class DataScaffold
             IdGeneration: AutoIdStrategy.Sequential,
             ViewType: ViewType.Table,
             ParentField: null,
-            Fields: Array.Empty<DataFieldMetadata>(),
+            Fields: fields,
             Handlers: handlers,
             Commands: Array.Empty<RemoteCommandMetadata>()
         );
@@ -631,6 +657,21 @@ public static class DataScaffold
         if (effective.IsEnum) return FieldType.EnumInt32;
         return FieldType.StringUtf8;
     }
+
+    /// <summary>Maps a schema FieldType to the UI-facing FormFieldType.</summary>
+    private static FormFieldType MapFieldTypeToFormFieldType(FieldType ft) => ft switch
+    {
+        FieldType.Bool => FormFieldType.YesNo,
+        FieldType.Int32 or FieldType.UInt32 or FieldType.Int16 or FieldType.Int64
+            or FieldType.Byte => FormFieldType.Integer,
+        FieldType.Decimal or FieldType.Float32 or FieldType.Float64 => FormFieldType.Decimal,
+        FieldType.DateTime => FormFieldType.DateTime,
+        FieldType.DateOnly => FormFieldType.DateOnly,
+        FieldType.TimeOnly => FormFieldType.TimeOnly,
+        FieldType.Guid => FormFieldType.String,
+        FieldType.EnumInt32 => FormFieldType.Enum,
+        _ => FormFieldType.String
+    };
 
     private const int MaxPageSize = 10000;
 
