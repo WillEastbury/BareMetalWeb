@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using BareMetalWeb.Core;
 using BareMetalWeb.Data.Interfaces;
 
 namespace BareMetalWeb.Data;
@@ -97,6 +98,123 @@ public sealed class DataObjectStore : IDataObjectStore
         if (key == 0) throw new ArgumentException("Key cannot be zero.", nameof(key));
         var provider = ResolveProvider(typeof(T));
         await provider.DeleteAsync<T>(key, cancellationToken).ConfigureAwait(false);
+    }
+
+    // ── Ordinal-based overloads (hot path) ──────────────────────────────
+
+    private EntitySchema ResolveSchema(int entityOrdinal)
+    {
+        var meta = DataScaffold.GetEntityByOrdinal(entityOrdinal)
+            ?? throw new InvalidOperationException($"No entity registered at ordinal {entityOrdinal}.");
+        return meta.Schema
+            ?? throw new InvalidOperationException($"Entity '{meta.Name}' (ordinal {entityOrdinal}) has no schema.");
+    }
+
+    private EntitySchema ResolveSchema(string entityTypeName)
+    {
+        var ordinal = DataScaffold.GetEntityOrdinal(entityTypeName);
+        if (ordinal < 0)
+            throw new InvalidOperationException($"No entity registered with name '{entityTypeName}'.");
+        return ResolveSchema(ordinal);
+    }
+
+    public void Save(int entityOrdinal, BaseDataObject obj)
+    {
+        if (obj is null) throw new ArgumentNullException(nameof(obj));
+        var schema = ResolveSchema(entityOrdinal);
+        var provider = ResolveProviderByName(schema.EntityName);
+        if (obj.Key == 0)
+            obj.Key = provider.NextSequentialKey(schema.EntityName);
+        provider.Save(schema.EntityName, obj);
+    }
+
+    public BaseDataObject? Load(int entityOrdinal, uint key)
+    {
+        if (key == 0) throw new ArgumentException("Key cannot be zero.", nameof(key));
+        var schema = ResolveSchema(entityOrdinal);
+        return ResolveProviderByName(schema.EntityName).Load(schema.EntityName, key);
+    }
+
+    public IEnumerable<BaseDataObject> Query(int entityOrdinal, QueryDefinition? query = null)
+    {
+        var schema = ResolveSchema(entityOrdinal);
+        return ResolveProviderByName(schema.EntityName).Query(schema.EntityName, query);
+    }
+
+    public void Delete(int entityOrdinal, uint key)
+    {
+        if (key == 0) throw new ArgumentException("Key cannot be zero.", nameof(key));
+        var schema = ResolveSchema(entityOrdinal);
+        ResolveProviderByName(schema.EntityName).Delete(schema.EntityName, key);
+    }
+
+    public ValueTask SaveAsync(int entityOrdinal, BaseDataObject obj, CancellationToken cancellationToken = default)
+    { Save(entityOrdinal, obj); return ValueTask.CompletedTask; }
+
+    public ValueTask<BaseDataObject?> LoadAsync(int entityOrdinal, uint key, CancellationToken cancellationToken = default)
+        => new(Load(entityOrdinal, key));
+
+    public ValueTask<IEnumerable<BaseDataObject>> QueryAsync(int entityOrdinal, QueryDefinition? query = null, CancellationToken cancellationToken = default)
+        => new(Query(entityOrdinal, query));
+
+    public ValueTask<int> CountAsync(int entityOrdinal, QueryDefinition? query = null, CancellationToken cancellationToken = default)
+    {
+        var schema = ResolveSchema(entityOrdinal);
+        return ResolveProviderByName(schema.EntityName).CountAsync(schema.EntityName, query, cancellationToken);
+    }
+
+    public ValueTask DeleteAsync(int entityOrdinal, uint key, CancellationToken cancellationToken = default)
+    { Delete(entityOrdinal, key); return ValueTask.CompletedTask; }
+
+    // ── String-based overloads (resolve name → ordinal → hot path) ──────
+
+    public void Save(string entityTypeName, BaseDataObject obj)
+    {
+        if (obj is null) throw new ArgumentNullException(nameof(obj));
+        var provider = ResolveProviderByName(entityTypeName);
+        if (obj.Key == 0)
+            obj.Key = provider.NextSequentialKey(entityTypeName);
+        provider.Save(entityTypeName, obj);
+    }
+
+    public BaseDataObject? Load(string entityTypeName, uint key)
+    {
+        if (key == 0) throw new ArgumentException("Key cannot be zero.", nameof(key));
+        return ResolveProviderByName(entityTypeName).Load(entityTypeName, key);
+    }
+
+    public IEnumerable<BaseDataObject> Query(string entityTypeName, QueryDefinition? query = null)
+        => ResolveProviderByName(entityTypeName).Query(entityTypeName, query);
+
+    public void Delete(string entityTypeName, uint key)
+    {
+        if (key == 0) throw new ArgumentException("Key cannot be zero.", nameof(key));
+        ResolveProviderByName(entityTypeName).Delete(entityTypeName, key);
+    }
+
+    public ValueTask SaveAsync(string entityTypeName, BaseDataObject obj, CancellationToken cancellationToken = default)
+    { Save(entityTypeName, obj); return ValueTask.CompletedTask; }
+
+    public ValueTask<BaseDataObject?> LoadAsync(string entityTypeName, uint key, CancellationToken cancellationToken = default)
+        => new(Load(entityTypeName, key));
+
+    public ValueTask<IEnumerable<BaseDataObject>> QueryAsync(string entityTypeName, QueryDefinition? query = null, CancellationToken cancellationToken = default)
+        => new(Query(entityTypeName, query));
+
+    public ValueTask<int> CountAsync(string entityTypeName, QueryDefinition? query = null, CancellationToken cancellationToken = default)
+        => ResolveProviderByName(entityTypeName).CountAsync(entityTypeName, query, cancellationToken);
+
+    public ValueTask DeleteAsync(string entityTypeName, uint key, CancellationToken cancellationToken = default)
+    { Delete(entityTypeName, key); return ValueTask.CompletedTask; }
+
+    private IDataProvider ResolveProviderByName(string entityTypeName)
+    {
+        if (_providersList.Count > 0)
+            return _providersList[0];
+        if (_fallbackProvider is not null)
+            return _fallbackProvider;
+        throw new InvalidOperationException(
+            $"No IDataProvider registered and no fallback provider configured (entity: {entityTypeName}).");
     }
 
     private IDataProvider ResolveProvider(Type type)

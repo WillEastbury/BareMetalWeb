@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace BareMetalWeb.Data;
 
 /// <summary>
@@ -276,4 +278,23 @@ public static class SystemEntitySchemas
         RuntimeRelease,
         DeploymentNode
     };
+
+    // ── Name-based lookup ────────────────────────────────────────────────────
+
+    private static readonly Dictionary<string, EntitySchema> s_byName = BuildByNameLookup();
+
+    private static Dictionary<string, EntitySchema> BuildByNameLookup()
+    {
+        var dict = new Dictionary<string, EntitySchema>(All.Count, System.StringComparer.OrdinalIgnoreCase);
+        foreach (var s in All)
+            dict[s.EntityName] = s;
+        return dict;
+    }
+
+    /// <summary>
+    /// Returns the system <see cref="EntitySchema"/> whose <see cref="EntitySchema.EntityName"/>
+    /// matches <paramref name="entityTypeName"/> (case-insensitive), or <c>null</c> if no match.
+    /// </summary>
+    public static EntitySchema? GetByName(string entityTypeName)
+        => s_byName.TryGetValue(entityTypeName, out var schema) ? schema : null;
 }

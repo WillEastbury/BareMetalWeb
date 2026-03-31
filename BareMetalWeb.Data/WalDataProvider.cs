@@ -1446,6 +1446,119 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
         return ValueTask.CompletedTask;
     }
 
+    // ── Entity-name-based overloads (IDataProvider non-generic) ─────────────
+    //
+    // These resolve a system EntitySchema by name, coerce the object to a
+    // DataRecord when necessary, and delegate to the existing Record-based
+    // methods above.  Fully AOT-safe — no reflection, no generic dispatch.
+
+    /// <summary>Resolves an <see cref="EntitySchema"/> by entity type name, or throws.</summary>
+    private static EntitySchema ResolveSchemaByName(string entityTypeName)
+    {
+        return SystemEntitySchemas.GetByName(entityTypeName)
+            ?? throw new InvalidOperationException(
+                $"No EntitySchema registered for entity type '{entityTypeName}'. " +
+                "Register it in SystemEntitySchemas or use the generic overload.");
+    }
+
+    /// <summary>
+    /// Ensures <paramref name="obj"/> is a <see cref="DataRecord"/> compatible with
+    /// <paramref name="schema"/>.  If it already is one, returns it directly; otherwise
+    /// copies base + entity field values into a new record.
+    /// </summary>
+    private static DataRecord AsDataRecord(BaseDataObject obj, EntitySchema schema)
+    {
+        if (obj is DataRecord dr)
+        {
+            dr.EntityTypeName = schema.EntityName;
+            dr.Schema = schema;
+            return dr;
+        }
+
+        var record = schema.CreateRecord();
+        record.Key = obj.Key;
+        record.Identifier = obj.Identifier;
+        record.CreatedOnUtc = obj.CreatedOnUtc;
+        record.UpdatedOnUtc = obj.UpdatedOnUtc;
+        record.CreatedBy = obj.CreatedBy;
+        record.UpdatedBy = obj.UpdatedBy;
+        record.ETag = obj.ETag;
+        record.Version = obj.Version;
+
+        int total = BaseDataObject.BaseFieldCount + schema.FieldCount;
+        int copyEnd = Math.Min(total, obj.FieldCount);
+        for (int i = BaseDataObject.BaseFieldCount; i < copyEnd; i++)
+            record.SetValue(i, obj.GetFieldValue(i));
+
+        return record;
+    }
+
+    /// <inheritdoc />
+    public void Save(string entityTypeName, BaseDataObject obj)
+    {
+        if (obj is null) throw new ArgumentNullException(nameof(obj));
+        var schema = ResolveSchemaByName(entityTypeName);
+        var record = AsDataRecord(obj, schema);
+        if (record.Key == 0)
+            record.Key = NextSequentialKey(entityTypeName);
+        SaveRecord(record, schema);
+        obj.Key = record.Key;
+    }
+
+    /// <inheritdoc />
+    public ValueTask SaveAsync(string entityTypeName, BaseDataObject obj, CancellationToken cancellationToken = default)
+    {
+        Save(entityTypeName, obj);
+        return ValueTask.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public BaseDataObject? Load(string entityTypeName, uint key)
+    {
+        var schema = ResolveSchemaByName(entityTypeName);
+        return LoadRecord(key, schema);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<BaseDataObject?> LoadAsync(string entityTypeName, uint key, CancellationToken cancellationToken = default)
+        => new(Load(entityTypeName, key));
+
+    /// <inheritdoc />
+    public IEnumerable<BaseDataObject> Query(string entityTypeName, QueryDefinition? query = null)
+    {
+        var schema = ResolveSchemaByName(entityTypeName);
+        return QueryRecords(schema, query);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<IEnumerable<BaseDataObject>> QueryAsync(string entityTypeName, QueryDefinition? query = null, CancellationToken cancellationToken = default)
+        => new(Query(entityTypeName, query));
+
+    /// <inheritdoc />
+    public int Count(string entityTypeName, QueryDefinition? query = null)
+    {
+        var schema = ResolveSchemaByName(entityTypeName);
+        return CountRecords(schema, query);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<int> CountAsync(string entityTypeName, QueryDefinition? query = null, CancellationToken cancellationToken = default)
+        => new(Count(entityTypeName, query));
+
+    /// <inheritdoc />
+    public void Delete(string entityTypeName, uint key)
+    {
+        var schema = ResolveSchemaByName(entityTypeName);
+        DeleteRecord(key, schema);
+    }
+
+    /// <inheritdoc />
+    public ValueTask DeleteAsync(string entityTypeName, uint key, CancellationToken cancellationToken = default)
+    {
+        Delete(entityTypeName, key);
+        return ValueTask.CompletedTask;
+    }
+
     private static bool MatchesRecordQuery(DataRecord record, EntitySchema schema, QueryDefinition query)
     {
         foreach (var clause in query.Clauses)
