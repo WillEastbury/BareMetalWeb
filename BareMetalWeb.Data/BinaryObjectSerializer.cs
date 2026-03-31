@@ -37,6 +37,30 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         // Register IdentifierValue (readonly struct) as a known type.
         // Serialization/deserialization is handled inline as two ulongs.
         InstanceFactory.TryAdd(typeof(IdentifierValue), () => default(IdentifierValue));
+
+        // Pre-register collection factories for all element types used by entity fields.
+        // This eliminates the Activator.CreateInstance fallback in CreateTypeShape.
+        RegisterCollectionFactory<string>();
+        RegisterCollectionFactory<int>();
+        RegisterCollectionFactory<uint>();
+        RegisterCollectionFactory<long>();
+        RegisterCollectionFactory<double>();
+        RegisterCollectionFactory<float>();
+        RegisterCollectionFactory<bool>();
+        RegisterCollectionFactory<DateTime>();
+        RegisterCollectionFactory<Guid>();
+    }
+
+    /// <summary>
+    /// Pre-registers <c>List&lt;T&gt;</c> and <c>Dictionary&lt;string, T&gt;</c> factories
+    /// for the given element type. Call at startup for each type used in entity collection fields.
+    /// </summary>
+    public static void RegisterCollectionFactory<T>()
+    {
+        InstanceFactory.TryAdd(typeof(List<T>), static () => new List<T>());
+        InstanceFactory.TryAdd(typeof(Dictionary<string, T>), static () => new Dictionary<string, T>());
+        InstanceFactory.TryAdd(typeof(Dictionary<uint, T>), static () => new Dictionary<uint, T>());
+        InstanceFactory.TryAdd(typeof(Dictionary<int, T>), static () => new Dictionary<int, T>());
     }
 
     // Base property accessors for BaseDataObject — ordinal-indexed, zero reflection.
@@ -1247,6 +1271,10 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         var t = typeof(T);
         RegisterKnownTypeCore(t);
         InstanceFactory.TryAdd(t, static () => new T());
+        // Also register List<T> and Dictionary<string,T> factories so CreateTypeShape
+        // never falls back to Activator.CreateInstance for collection fields.
+        InstanceFactory.TryAdd(typeof(List<T>), static () => new List<T>());
+        InstanceFactory.TryAdd(typeof(Dictionary<string, T>), static () => new Dictionary<string, T>());
     }
 
     /// <summary>
@@ -1556,9 +1584,10 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             shape.Kind = TypeKind.List;
             shape.ElementType = AssumePublicMembers(listElementType);
             var listType = type;
-            // Capture the annotated 'listType' local so the trimmer tracks the
-            // [DynamicallyAccessedMembers(PublicParameterlessConstructor)] annotation.
-            var listFactory = InstanceFactory.GetOrAdd(listType, _ => { var t = listType; return () => Activator.CreateInstance(t)!; });
+            var listFactory = InstanceFactory.GetOrAdd(listType, static t =>
+                throw new InvalidOperationException(
+                    $"No factory registered for collection type '{t.FullName}'. " +
+                    "Pre-register it at startup with BinaryObjectSerializer.RegisterKnownType<T>()."));
             shape.ListFactory = _ => (System.Collections.IList)listFactory();
             return shape;
         }
@@ -1569,9 +1598,10 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             shape.KeyType = AssumePublicMembers(keyType);
             shape.ValueType = AssumePublicMembers(valueType);
             var dictType = type;
-            // Capture the annotated 'dictType' local so the trimmer tracks the
-            // [DynamicallyAccessedMembers(PublicParameterlessConstructor)] annotation.
-            var dictFactory = InstanceFactory.GetOrAdd(dictType, _ => { var t = dictType; return () => Activator.CreateInstance(t)!; });
+            var dictFactory = InstanceFactory.GetOrAdd(dictType, static t =>
+                throw new InvalidOperationException(
+                    $"No factory registered for collection type '{t.FullName}'. " +
+                    "Pre-register it at startup with BinaryObjectSerializer.RegisterKnownType<T>()."));
             shape.DictionaryFactory = _ => (System.Collections.IDictionary)dictFactory();
             return shape;
         }

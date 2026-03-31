@@ -91,7 +91,7 @@ check_with_exclude "dynamic " "dynamic keyword detected" \
 
 # Activator.CreateInstance (use typed factories or metadata-driven construction)
 check_with_exclude "Activator\.CreateInstance" "Activator.CreateInstance detected" \
-  "DataScaffold\.cs\|BinaryObjectSerializer\.cs\|//\|///"
+  "DataScaffold\.cs\|//\|///"
 
 # MakeGenericType / MakeGenericMethod (NativeAOT-incompatible)
 check_with_exclude "MakeGenericType" "Type.MakeGenericType detected (NativeAOT incompatible)" \
