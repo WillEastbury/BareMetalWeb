@@ -1150,30 +1150,24 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
     // parallel arrays and ordinal-indexed closures instead of generic type
     // parameters and reflection-based schema building.
 
-    private readonly ConcurrentDictionary<string, MetadataWireSerializer.FieldPlan[]> _recordPlans
+    private readonly ConcurrentDictionary<string, BinaryObjectSerializer.FieldPlan[]> _recordPlans
         = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, int> _recordSchemaVersions
         = new(StringComparer.OrdinalIgnoreCase);
-    private MetadataWireSerializer? _metaSerializer;
 
-    private MetadataWireSerializer GetMetaSerializer()
+    private BinaryObjectSerializer GetBinarySerializer()
     {
-        if (_metaSerializer != null) return _metaSerializer;
-        byte[] key;
         if (_serializer is BinaryObjectSerializer bos)
-            key = bos.GetSigningKeyCopy();
-        else
-            key = new byte[32];
-        _metaSerializer = new MetadataWireSerializer(key);
-        return _metaSerializer;
+            return bos;
+        throw new InvalidOperationException("FieldPlan serialization requires a BinaryObjectSerializer instance.");
     }
 
-    private MetadataWireSerializer.FieldPlan[] GetOrBuildRecordPlan(EntitySchema schema)
+    private BinaryObjectSerializer.FieldPlan[] GetOrBuildRecordPlan(EntitySchema schema)
     {
         return _recordPlans.GetOrAdd(schema.EntityName, _ =>
         {
             var descriptors = schema.BuildFieldPlanDescriptors();
-            return MetadataWireSerializer.BuildPlanUncached(descriptors);
+            return BinaryObjectSerializer.BuildPlanUncached(descriptors);
         });
     }
 
@@ -1216,7 +1210,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             }
 
             var plan = GetOrBuildRecordPlan(schema);
-            var serializer = GetMetaSerializer();
+            var serializer = GetBinarySerializer();
             var bytes = serializer.Serialize(record, plan, schemaVersion);
             var walKey = GetOrAllocateKey(entityName, record.Key);
 
@@ -1304,7 +1298,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
         try
         {
             var plan = GetOrBuildRecordPlan(schema);
-            var serializer = GetMetaSerializer();
+            var serializer = GetBinarySerializer();
             result = schema.CreateRecord();
             result.Key = key;
             serializer.DeserializeInto(payload.Span, plan, result);

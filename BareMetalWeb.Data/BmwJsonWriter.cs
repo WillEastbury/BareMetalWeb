@@ -4,8 +4,8 @@ using System.Collections;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
-using FieldPlan = BareMetalWeb.Data.MetadataWireSerializer.FieldPlan;
-using WireFieldType = BareMetalWeb.Data.MetadataWireSerializer.WireFieldType;
+using FieldPlan = BareMetalWeb.Data.BinaryObjectSerializer.FieldPlan;
+using WireFieldType = BareMetalWeb.Data.BinaryObjectSerializer.WireFieldType;
 
 namespace BareMetalWeb.Data;
 
@@ -155,7 +155,7 @@ public static class BmwJsonWriter
         IEnumerable items,
         FieldPlan[] plan,
         JsonFieldFragment[] fragments,
-        MetadataWireSerializer serializer,
+        BinaryObjectSerializer serializer,
         int count)
     {
         var sw = Stopwatch.StartNew();

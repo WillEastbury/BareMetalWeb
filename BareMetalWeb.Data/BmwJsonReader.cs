@@ -3,8 +3,8 @@ using System.Buffers.Binary;
 using System.Buffers.Text;
 using System.Runtime.CompilerServices;
 using System.Text;
-using FieldPlan = BareMetalWeb.Data.MetadataWireSerializer.FieldPlan;
-using WireFieldType = BareMetalWeb.Data.MetadataWireSerializer.WireFieldType;
+using FieldPlan = BareMetalWeb.Data.BinaryObjectSerializer.FieldPlan;
+using WireFieldType = BareMetalWeb.Data.BinaryObjectSerializer.WireFieldType;
 
 namespace BareMetalWeb.Data;
 
@@ -61,7 +61,7 @@ public static class BmwJsonReader
     /// BSO1 binary row payload. Unknown JSON properties are ignored;
     /// malformed tokens are rejected.
     /// </summary>
-    /// <returns>BSO1 binary payload (unsigned — caller signs via MetadataWireSerializer).</returns>
+    /// <returns>BSO1 binary payload (unsigned — caller signs via BinaryObjectSerializer).</returns>
     public static byte[] ReadEntity(
         ReadOnlySpan<byte> jsonUtf8,
         FieldPlan[] plan,

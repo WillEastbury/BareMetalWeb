@@ -1,16 +1,16 @@
 using System.Buffers;
 using System.Text;
 using BareMetalWeb.Data;
-using FieldPlan = BareMetalWeb.Data.MetadataWireSerializer.FieldPlan;
-using WireFieldType = BareMetalWeb.Data.MetadataWireSerializer.WireFieldType;
+using FieldPlan = BareMetalWeb.Data.BinaryObjectSerializer.FieldPlan;
+using WireFieldType = BareMetalWeb.Data.BinaryObjectSerializer.WireFieldType;
 
 namespace BareMetalWeb.Data.Tests;
 
 public class BmwJsonWriterTests
 {
-    // Signing key for MetadataWireSerializer (32 bytes)
+    // Signing key for BinaryObjectSerializer (32 bytes)
     private static readonly byte[] SigningKey = new byte[32];
-    private static readonly MetadataWireSerializer Serializer = new(SigningKey);
+    private static readonly BinaryObjectSerializer Serializer = new(SigningKey);
 
     // ────────────── Helpers ──────────────
 

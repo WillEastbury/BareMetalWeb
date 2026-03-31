@@ -115,15 +115,15 @@ public sealed class EntitySchema
     // ── FieldPlan builder (AOT-safe closures) ──────────────────────────────
 
     /// <summary>
-    /// Builds <see cref="MetadataWireSerializer.FieldPlanDescriptor"/> entries
+    /// Builds <see cref="BinaryObjectSerializer.FieldPlanDescriptor"/> entries
     /// for this schema. Includes BaseDataObject structural fields (Key, timestamps,
     /// audit, ETag, Version, EntityTypeName) followed by schema-defined fields.
     /// All getters/setters are simple closures — no reflection, fully AOT-safe.
     /// </summary>
-    public MetadataWireSerializer.FieldPlanDescriptor[] BuildFieldPlanDescriptors()
+    public BinaryObjectSerializer.FieldPlanDescriptor[] BuildFieldPlanDescriptors()
     {
         // Base properties: Key, CreatedOnUtc, UpdatedOnUtc, CreatedBy, UpdatedBy, ETag, Version, EntityTypeName
-        var basePlans = new MetadataWireSerializer.FieldPlanDescriptor[]
+        var basePlans = new BinaryObjectSerializer.FieldPlanDescriptor[]
         {
             MakeDescriptor("__Key", typeof(uint), false,
                 obj => ((DataRecord)obj).Key,
@@ -151,15 +151,15 @@ public sealed class EntitySchema
                 (obj, val) => ((DataRecord)obj).EntityTypeName = val?.ToString() ?? string.Empty),
         };
 
-        var descriptors = new MetadataWireSerializer.FieldPlanDescriptor[basePlans.Length + FieldCount];
+        var descriptors = new BinaryObjectSerializer.FieldPlanDescriptor[basePlans.Length + FieldCount];
         basePlans.CopyTo(descriptors, 0);
 
         for (int i = 0; i < FieldCount; i++)
         {
             int ord = BaseDataObject.BaseFieldCount + i; // offset past base fields
             var (wireType, wireNullable, enumUnderlying) =
-                MetadataWireSerializer.ResolveWireType(ClrTypes[i]);
-            descriptors[basePlans.Length + i] = new MetadataWireSerializer.FieldPlanDescriptor
+                BinaryObjectSerializer.ResolveWireType(ClrTypes[i]);
+            descriptors[basePlans.Length + i] = new BinaryObjectSerializer.FieldPlanDescriptor
             {
                 Name = Names[i],
                 WireType = wireType,
@@ -173,12 +173,12 @@ public sealed class EntitySchema
         return descriptors;
     }
 
-    private static MetadataWireSerializer.FieldPlanDescriptor MakeDescriptor(
+    private static BinaryObjectSerializer.FieldPlanDescriptor MakeDescriptor(
         string name, Type clrType, bool nullable,
         Func<object, object?> getter, Action<object, object?> setter)
     {
-        var (wireType, wireNullable, enumUnderlying) = MetadataWireSerializer.ResolveWireType(clrType);
-        return new MetadataWireSerializer.FieldPlanDescriptor
+        var (wireType, wireNullable, enumUnderlying) = BinaryObjectSerializer.ResolveWireType(clrType);
+        return new BinaryObjectSerializer.FieldPlanDescriptor
         {
             Name = name,
             WireType = wireType,

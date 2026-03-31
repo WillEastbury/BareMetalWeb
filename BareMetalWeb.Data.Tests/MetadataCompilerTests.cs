@@ -174,11 +174,11 @@ public class MetadataCompilerTests
 
         var snapshot = MetadataCompiler.Compile(new[] { MakeEntity("test", fields) });
 
-        Assert.Equal(MetadataWireSerializer.WireFieldType.Bool, snapshot.Fields.WireTypes[0]);
-        Assert.Equal(MetadataWireSerializer.WireFieldType.Int32, snapshot.Fields.WireTypes[1]);
-        Assert.Equal(MetadataWireSerializer.WireFieldType.Decimal, snapshot.Fields.WireTypes[2]);
-        Assert.Equal(MetadataWireSerializer.WireFieldType.DateTime, snapshot.Fields.WireTypes[3]);
-        Assert.Equal(MetadataWireSerializer.WireFieldType.String, snapshot.Fields.WireTypes[4]);
+        Assert.Equal(BinaryObjectSerializer.WireFieldType.Bool, snapshot.Fields.WireTypes[0]);
+        Assert.Equal(BinaryObjectSerializer.WireFieldType.Int32, snapshot.Fields.WireTypes[1]);
+        Assert.Equal(BinaryObjectSerializer.WireFieldType.Decimal, snapshot.Fields.WireTypes[2]);
+        Assert.Equal(BinaryObjectSerializer.WireFieldType.DateTime, snapshot.Fields.WireTypes[3]);
+        Assert.Equal(BinaryObjectSerializer.WireFieldType.String, snapshot.Fields.WireTypes[4]);
     }
 
     [Fact]

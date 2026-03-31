@@ -1,6 +1,6 @@
 using System;
 using BareMetalWeb.Rendering.Models;
-using static BareMetalWeb.Data.MetadataWireSerializer;
+using static BareMetalWeb.Data.BinaryObjectSerializer;
 
 namespace BareMetalWeb.Data;
 

@@ -147,7 +147,7 @@ public static class DeltaApiHandlers
             }
             else
             {
-                // Return binary: version(4) + serialized entity via MetadataWireSerializer
+                // Return binary: version(4) + serialized entity via BinaryObjectSerializer
                 var plan = BinaryApiHandlers.GetOrBuildPlanPublic(meta);
                 var serializer = BinaryApiHandlers.GetSerializer();
                 if (serializer == null)

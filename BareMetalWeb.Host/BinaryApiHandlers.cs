@@ -16,14 +16,14 @@ namespace BareMetalWeb.Host;
 /// </summary>
 public static class BinaryApiHandlers
 {
-    private static MetadataWireSerializer? _serializer;
+    private static BinaryObjectSerializer? _serializer;
 
     /// <summary>Get the serializer instance for use by related handlers.</summary>
-    internal static MetadataWireSerializer? GetSerializer() => _serializer;
+    internal static BinaryObjectSerializer? GetSerializer() => _serializer;
     private static byte[]? _signingKeyRaw;
     private static IBufferedLogger? _logger;
-    private static readonly ConcurrentDictionary<string, MetadataWireSerializer.FieldPlan[]> _plans = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly ConcurrentDictionary<string, MetadataWireSerializer.WireSchemaDescriptor> _schemas = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, BinaryObjectSerializer.FieldPlan[]> _plans = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, BinaryObjectSerializer.WireSchemaDescriptor> _schemas = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, BmwJsonWriter.JsonFieldFragment[]> _jsonFragments = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, BmwJsonReader.JsonPropertyLookup[]> _jsonLookups = new(StringComparer.OrdinalIgnoreCase);
 
@@ -42,7 +42,7 @@ public static class BinaryApiHandlers
     public static void Initialize(byte[] signingKey, IBufferedLogger? logger = null)
     {
         _signingKeyRaw = (byte[])signingKey.Clone();
-        _serializer = new MetadataWireSerializer(signingKey);
+        _serializer = new BinaryObjectSerializer(signingKey);
         _logger = logger;
         ResolveRawBinaryProvider();
     }
@@ -68,13 +68,13 @@ public static class BinaryApiHandlers
 
     // ────────────── Helpers ──────────────
 
-    private static MetadataWireSerializer.FieldPlan[] GetOrBuildPlan(DataEntityMetadata meta)
+    private static BinaryObjectSerializer.FieldPlan[] GetOrBuildPlan(DataEntityMetadata meta)
     {
         return _plans.GetOrAdd(meta.Slug, _ => BuildPlanFromMetadata(meta));
     }
 
     /// <summary>Public accessor for GetOrBuildPlan, used by DeltaApiHandlers.</summary>
-    internal static MetadataWireSerializer.FieldPlan[] GetOrBuildPlanPublic(DataEntityMetadata meta)
+    internal static BinaryObjectSerializer.FieldPlan[] GetOrBuildPlanPublic(DataEntityMetadata meta)
         => GetOrBuildPlan(meta);
 
     private static BmwJsonWriter.JsonFieldFragment[] GetOrBuildFragments(DataEntityMetadata meta)
@@ -91,7 +91,7 @@ public static class BinaryApiHandlers
     /// Reverse-lookup: find the DataEntityMetadata whose cached plan matches.
     /// Falls back to null for uncached/ad-hoc plans (callers build fragments inline).
     /// </summary>
-    private static DataEntityMetadata? FindMetaForPlan(MetadataWireSerializer.FieldPlan[] plan)
+    private static DataEntityMetadata? FindMetaForPlan(BinaryObjectSerializer.FieldPlan[] plan)
     {
         foreach (var kvp in _plans)
         {
@@ -109,20 +109,20 @@ public static class BinaryApiHandlers
     /// safely transcode from raw BSO1 binary. Object-type fields use recursive
     /// serialization that BmwJsonWriter doesn't support.
     /// </summary>
-    private static bool IsSafeForRawBinaryTranscoding(MetadataWireSerializer.FieldPlan[] plan)
+    private static bool IsSafeForRawBinaryTranscoding(BinaryObjectSerializer.FieldPlan[] plan)
     {
         for (int i = 0; i < plan.Length; i++)
         {
-            if (plan[i].WireType == MetadataWireSerializer.WireFieldType.Object)
+            if (plan[i].WireType == BinaryObjectSerializer.WireFieldType.Object)
                 return false;
         }
         return true;
     }
 
-    private static MetadataWireSerializer.FieldPlan[] BuildPlanFromMetadata(DataEntityMetadata meta)
+    private static BinaryObjectSerializer.FieldPlan[] BuildPlanFromMetadata(DataEntityMetadata meta)
     {
         // Build plan from metadata fields + base properties — zero reflection.
-        var descriptors = new List<MetadataWireSerializer.FieldPlanDescriptor>(meta.Fields.Count + 8);
+        var descriptors = new List<BinaryObjectSerializer.FieldPlanDescriptor>(meta.Fields.Count + 8);
 
         // Base properties
         AddBaseDescriptor(descriptors, "CreatedBy", typeof(string), BareMetalWeb.Data.BaseDataObject.Ord_CreatedBy);
@@ -141,10 +141,10 @@ public static class BinaryApiHandlers
                 continue;
 
             var clrType = fieldMeta.ClrType;
-            var (wireType, isNullable, enumUnderlying) = MetadataWireSerializer.ResolveWireType(clrType);
+            var (wireType, isNullable, enumUnderlying) = BinaryObjectSerializer.ResolveWireType(clrType);
             var effectiveType = Nullable.GetUnderlyingType(clrType) ?? clrType;
 
-            descriptors.Add(new MetadataWireSerializer.FieldPlanDescriptor
+            descriptors.Add(new BinaryObjectSerializer.FieldPlanDescriptor
             {
                 Name = fieldMeta.Name,
                 WireType = wireType,
@@ -156,15 +156,15 @@ public static class BinaryApiHandlers
             });
         }
 
-        return MetadataWireSerializer.BuildPlan(meta.Type, descriptors);
+        return BinaryObjectSerializer.BuildPlan(meta.Type, descriptors);
     }
 
-    private static void AddBaseDescriptor(List<MetadataWireSerializer.FieldPlanDescriptor> descriptors, string name, Type clrType, int ordinal)
+    private static void AddBaseDescriptor(List<BinaryObjectSerializer.FieldPlanDescriptor> descriptors, string name, Type clrType, int ordinal)
     {
-        var (wireType, isNullable, enumUnderlying) = MetadataWireSerializer.ResolveWireType(clrType);
+        var (wireType, isNullable, enumUnderlying) = BinaryObjectSerializer.ResolveWireType(clrType);
         var effectiveType = Nullable.GetUnderlyingType(clrType) ?? clrType;
         var ord = ordinal;
-        descriptors.Add(new MetadataWireSerializer.FieldPlanDescriptor
+        descriptors.Add(new BinaryObjectSerializer.FieldPlanDescriptor
         {
             Name = name,
             WireType = wireType,
@@ -176,12 +176,12 @@ public static class BinaryApiHandlers
         });
     }
 
-    private static MetadataWireSerializer.WireSchemaDescriptor GetOrBuildSchema(DataEntityMetadata meta)
+    private static BinaryObjectSerializer.WireSchemaDescriptor GetOrBuildSchema(DataEntityMetadata meta)
     {
         return _schemas.GetOrAdd(meta.Slug, _ =>
         {
             var plan = GetOrBuildPlan(meta);
-            return MetadataWireSerializer.BuildSchemaDescriptor(meta.Slug, 1, plan);
+            return BinaryObjectSerializer.BuildSchemaDescriptor(meta.Slug, 1, plan);
         });
     }
 
@@ -683,7 +683,7 @@ public static class BinaryApiHandlers
         return ct.Contains("application/json", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static async ValueTask WriteEntityResponse(BmwContext context, object entity, MetadataWireSerializer.FieldPlan[] plan, int statusCode = StatusCodes.Status200OK)
+    private static async ValueTask WriteEntityResponse(BmwContext context, object entity, BinaryObjectSerializer.FieldPlan[] plan, int statusCode = StatusCodes.Status200OK)
     {
         context.Response.StatusCode = statusCode;
         if (WantsJson(context))
@@ -706,7 +706,7 @@ public static class BinaryApiHandlers
         }
     }
 
-    private static async ValueTask WriteListResponse(BmwContext context, List<object> list, MetadataWireSerializer.FieldPlan[] plan)
+    private static async ValueTask WriteListResponse(BmwContext context, List<object> list, BinaryObjectSerializer.FieldPlan[] plan)
     {
         if (WantsJson(context))
         {
@@ -726,7 +726,7 @@ public static class BinaryApiHandlers
         }
     }
 
-    private static async ValueTask<object?> ReadEntityFromRequest(BmwContext context, MetadataWireSerializer.FieldPlan[] plan, Type entityType)
+    private static async ValueTask<object?> ReadEntityFromRequest(BmwContext context, BinaryObjectSerializer.FieldPlan[] plan, Type entityType)
     {
         if (RequestIsJson(context))
         {
