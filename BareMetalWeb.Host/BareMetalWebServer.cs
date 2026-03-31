@@ -756,10 +756,11 @@ public class BareMetalWebServer : IBareWebHost
                         // (GetRouteValue / GetRouteParam) work identically to path-based dispatch.
                         HydrateRouteParamsFromQuery(bmwCtx, idPage.RouteKey);
 
-                        if (!await IsAuthorizedAsync(idPage.PageInfo, bmwCtx, bmwCtx.RequestAborted).ConfigureAwait(false))
+                        var idAuthResult = await IsAuthorizedAsync(idPage.PageInfo, bmwCtx, bmwCtx.RequestAborted).ConfigureAwait(false);
+                        if (idAuthResult != AuthResult.Allowed)
                         {
                             await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, idPage.PageInfo, bmwCtx.RequestAborted).ConfigureAwait(false);
-                            await RenderForbidden(bmwCtx);
+                            await RenderAuthError(idAuthResult, bmwCtx);
                             return;
                         }
                         await idPage.Handler(bmwCtx);
@@ -786,10 +787,11 @@ public class BareMetalWebServer : IBareWebHost
                     bmwCtx.SetPageInfo(page.PageInfo);
                 }
                 bmwCtx.CompiledPlans = page.CompiledPlans;
-                if (!await IsAuthorizedAsync(page.PageInfo, bmwCtx, bmwCtx.RequestAborted).ConfigureAwait(false))
+                var pageAuthResult = await IsAuthorizedAsync(page.PageInfo, bmwCtx, bmwCtx.RequestAborted).ConfigureAwait(false);
+                if (pageAuthResult != AuthResult.Allowed)
                 {
                     await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, page.PageInfo, bmwCtx.RequestAborted).ConfigureAwait(false);
-                    await RenderForbidden(bmwCtx);
+                    await RenderAuthError(pageAuthResult, bmwCtx);
                     return;
                 }
                 await page.Handler(bmwCtx);
@@ -804,10 +806,11 @@ public class BareMetalWebServer : IBareWebHost
                 {
                     bmwCtx.SetPageInfo(allPage.PageInfo);
                 }
-                if (!await IsAuthorizedAsync(allPage.PageInfo, bmwCtx, bmwCtx.RequestAborted).ConfigureAwait(false))
+                var allAuthResult = await IsAuthorizedAsync(allPage.PageInfo, bmwCtx, bmwCtx.RequestAborted).ConfigureAwait(false);
+                if (allAuthResult != AuthResult.Allowed)
                 {
                     await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, allPage.PageInfo, bmwCtx.RequestAborted).ConfigureAwait(false);
-                    await RenderForbidden(bmwCtx);
+                    await RenderAuthError(allAuthResult, bmwCtx);
                     return;
                 }
                 await allPage.Handler(bmwCtx);
@@ -818,10 +821,11 @@ public class BareMetalWebServer : IBareWebHost
             if (_prefixRouter.TryMatch(bmwCtx, out RouteHandlerData prefixPage))
             {
                 Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
-                if (!await IsAuthorizedAsync(prefixPage.PageInfo, bmwCtx, bmwCtx.RequestAborted).ConfigureAwait(false))
+                var prefixAuthResult = await IsAuthorizedAsync(prefixPage.PageInfo, bmwCtx, bmwCtx.RequestAborted).ConfigureAwait(false);
+                if (prefixAuthResult != AuthResult.Allowed)
                 {
                     await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, prefixPage.PageInfo, bmwCtx.RequestAborted).ConfigureAwait(false);
-                    await RenderForbidden(bmwCtx);
+                    await RenderAuthError(prefixAuthResult, bmwCtx);
                     return;
                 }
                 await prefixPage.Handler(bmwCtx);
@@ -854,10 +858,11 @@ public class BareMetalWebServer : IBareWebHost
                     {
                         bmwCtx.SetPageInfo(injectedPage.PageInfo);
                     }
-                    if (!await IsAuthorizedAsync(injectedPage.PageInfo, bmwCtx, bmwCtx.RequestAborted).ConfigureAwait(false))
+                    var injAuthResult = await IsAuthorizedAsync(injectedPage.PageInfo, bmwCtx, bmwCtx.RequestAborted).ConfigureAwait(false);
+                    if (injAuthResult != AuthResult.Allowed)
                     {
                         await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, injectedPage.PageInfo, bmwCtx.RequestAborted).ConfigureAwait(false);
-                        await RenderForbidden(bmwCtx);
+                        await RenderAuthError(injAuthResult, bmwCtx);
                         return;
                     }
                     await injectedPage.Handler(bmwCtx);
@@ -1058,27 +1063,39 @@ public class BareMetalWebServer : IBareWebHost
         return null;
     }
 
-    private static async ValueTask<bool> IsAuthorizedAsync(PageInfo? pageInfo, BmwContext context, CancellationToken cancellationToken = default)
+    /// <summary>Result of an authorization check — distinguishes unauthenticated from insufficient permissions.</summary>
+    private enum AuthResult { Allowed, Unauthenticated, Forbidden }
+
+    /// <summary>Renders the appropriate error response (401 or 403) for a failed auth check.</summary>
+    private async Task RenderAuthError(AuthResult result, BmwContext context)
+    {
+        if (result == AuthResult.Unauthenticated)
+            await RenderUnauthorized(context);
+        else
+            await RenderForbidden(context);
+    }
+
+    private static async ValueTask<AuthResult> IsAuthorizedAsync(PageInfo? pageInfo, BmwContext context, CancellationToken cancellationToken = default)
     {
         if (pageInfo == null)
-            return true;
+            return AuthResult.Allowed;
 
         var permissionsNeeded = pageInfo.PageMetaData.PermissionsNeeded ?? string.Empty;
         // Empty permissions means public/anonymous access is allowed
         if (string.IsNullOrWhiteSpace(permissionsNeeded))
-            return true;
+            return AuthResult.Allowed;
 
         if (string.Equals(permissionsNeeded, "Public", StringComparison.OrdinalIgnoreCase))
-            return true;
+            return AuthResult.Allowed;
 
         var user = await UserAuth.GetRequestUserAsync(context, cancellationToken).ConfigureAwait(false);
         bool isAnonymous = user == null;
 
         if (string.Equals(permissionsNeeded, "AnonymousOnly", StringComparison.OrdinalIgnoreCase))
-            return isAnonymous;
+            return isAnonymous ? AuthResult.Allowed : AuthResult.Forbidden;
 
         if (string.Equals(permissionsNeeded, "Authenticated", StringComparison.OrdinalIgnoreCase))
-            return !isAnonymous;
+            return !isAnonymous ? AuthResult.Allowed : AuthResult.Unauthenticated;
 
         // Parse required permissions with span-based iteration to avoid string[] allocation
         if (isAnonymous)
@@ -1094,7 +1111,7 @@ public class BareMetalWebServer : IBareWebHost
                 else { seg = check[..ci]; check = check[(ci + 1)..]; }
                 if (!seg.Trim().IsEmpty) { hasAnyPerm = true; break; }
             }
-            return !hasAnyPerm;
+            return hasAnyPerm ? AuthResult.Unauthenticated : AuthResult.Allowed;
         }
 
         var userPermissions = new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase);
@@ -1112,11 +1129,9 @@ public class BareMetalWebServer : IBareWebHost
             if (trimmed.IsEmpty) continue;
             foundAny = true;
             if (!altLookup.Contains(trimmed))
-                return false;
+                return AuthResult.Forbidden;
         }
-        if (!foundAny)
-            return true; // No actual permissions after parsing, treat as public
-        return true;
+        return AuthResult.Allowed;
     }
 
     private static async ValueTask<bool> RootUserExistsAsync(CancellationToken cancellationToken = default)
@@ -1191,13 +1206,25 @@ public class BareMetalWebServer : IBareWebHost
 
     public async Task RenderForbidden(BmwContext context)
     {
+        // Resolve the user the system thinks is making this request (helps debug stale cookies)
+        var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+        var userName = user != null ? UserAuth.GetUserName(user) : null;
+        var requestPath = context.HttpRequest.Path.Value;
+
         if (IsAjaxRequest(context))
         {
+            var detail = userName != null
+                ? $"Access denied for user '{userName}'."
+                : "Access denied (anonymous).";
             await ApiErrorWriter.WriteAsync(context,
-                ApiErrorWriter.Forbidden(),
+                ApiErrorWriter.Forbidden(detail: detail, instance: requestPath),
                 context.RequestAborted);
             return;
         }
+
+        var htmlDetail = userName != null
+            ? $"<p>Access denied for user <strong>{System.Net.WebUtility.HtmlEncode(userName)}</strong>.</p>"
+            : "<p>Access denied.</p>";
 
         context.StatusCode = StatusCodes.Status403Forbidden;
 
@@ -1209,11 +1236,28 @@ public class BareMetalWebServer : IBareWebHost
             },
             PageContext = ErrorPageInfo.PageContext with
             {
-                PageMetaDataValues = new[] { "403 - Forbidden", "<p>Access denied.</p>" }
+                PageMetaDataValues = new[] { "403 - Forbidden", htmlDetail }
             }
         };
         context.SetPageInfo(forbiddenPage);
         await HtmlRenderer.RenderPage(context);
+    }
+
+    public async Task RenderUnauthorized(BmwContext context)
+    {
+        var requestPath = context.HttpRequest.Path.Value;
+
+        if (IsAjaxRequest(context))
+        {
+            await ApiErrorWriter.WriteAsync(context,
+                ApiErrorWriter.Unauthorized(detail: "Authentication is required.", instance: requestPath),
+                context.RequestAborted);
+            return;
+        }
+
+        // For browser requests, redirect to login
+        context.StatusCode = StatusCodes.Status302Found;
+        context.ResponseHeaders.Location = "/login";
     }
 
     private bool ApplyCors(BmwContext context)

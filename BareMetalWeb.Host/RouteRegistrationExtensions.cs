@@ -233,12 +233,13 @@ public static class RouteRegistrationExtensions
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Reset MFA", "" }, "Authenticated", false, 1),
             routeHandlers.MfaResetPostHandler));
 
-        // Initial setup
+        // Initial setup — Public so stale session cookies don't trigger AnonymousOnly 403.
+        // The handler itself guards against re-setup when a root user already exists.
         host.RegisterRoute("GET /setup", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Setup", "" }, "AnonymousOnly", false, 1),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Setup", "" }, "Public", false, 1),
             routeHandlers.SetupHandler));
         host.RegisterRoute("POST /setup", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Setup", "" }, "AnonymousOnly", false, 1),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Setup", "" }, "Public", false, 1),
             routeHandlers.SetupPostHandler));
     }
 

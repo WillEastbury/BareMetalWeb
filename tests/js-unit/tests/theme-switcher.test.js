@@ -14,13 +14,13 @@ const SRC = path.resolve(
 
 const THEME_STORAGE_KEY  = 'bm-selected-theme';
 const LAYOUT_STORAGE_KEY = 'bm-selected-layout';
-const DEFAULT_THEME      = 'light';
+const DEFAULT_THEME      = 'default';
 const THEME_PREFIX       = '/static/css/themes/';
 const THEME_SUFFIX       = '.min.css';
 
-// Allowed BMW theme names (must match the set in theme-switcher.js)
-const VALID_THEMES = ['light', 'dark', 'colourful', 'muted', 'highviz',
-    'ocean', 'forest', 'sunset', 'midnight', 'rose'];
+// Allowed Bootswatch theme names (must match the set in theme-switcher.js)
+const VALID_THEMES = ['default', 'cerulean', 'cosmo', 'darkly', 'flatly',
+    'journal', 'lux', 'minty', 'sandstone', 'slate'];
 
 // Load the theme-switcher IIFE into the current jsdom window.
 function loadSwitcher() {
@@ -85,15 +85,15 @@ function sharedCleanup() {
   document.body.removeAttribute('data-bm-skin');
 }
 
-// ── BMW skin always-on ──────────────────────────────────────────────────────
+// ── Bootswatch theme loading ──────────────────────────────────────────────
 
-describe('theme-switcher – BMW skin always active', () => {
+describe('theme-switcher – Bootswatch theme loading', () => {
   afterEach(sharedCleanup);
 
-  test('loads with data-bm-skin="bmw" set on body', () => {
+  test('loads without setting data-bm-skin on body', () => {
     createThemeSelect();
     loadSwitcher();
-    expect(document.body.getAttribute('data-bm-skin')).toBe('bmw');
+    expect(document.body.hasAttribute('data-bm-skin')).toBe(false);
   });
 });
 
@@ -103,7 +103,7 @@ describe('theme-switcher – cookie storage', () => {
   beforeEach(sharedCleanup);
   afterEach(sharedCleanup);
 
-  test('default theme is "light" when no cookie is set', () => {
+  test('default theme is "default" when no cookie is set', () => {
     const sel = createThemeSelect();
     loadSwitcher();
     const href = getThemeLinkHref();
@@ -111,18 +111,18 @@ describe('theme-switcher – cookie storage', () => {
   });
 
   test('stored cookie theme is applied on load', () => {
-    setCookieTheme('dark');
+    setCookieTheme('darkly');
     const sel = createThemeSelect();
     loadSwitcher();
     const href = getThemeLinkHref();
-    expect(href).toContain('dark');
+    expect(href).toContain('darkly');
   });
 
   test('theme select value is set to stored cookie value on load', () => {
-    setCookieTheme('muted');
+    setCookieTheme('minty');
     const sel = createThemeSelect();
     loadSwitcher();
-    expect(sel.value).toBe('muted');
+    expect(sel.value).toBe('minty');
   });
 });
 
@@ -150,11 +150,11 @@ describe('theme-switcher – applyTheme()', () => {
     const sel = createThemeSelect();
     loadSwitcher();
 
-    sel.value = 'dark';
+    sel.value = 'darkly';
     sel.dispatchEvent(new Event('change'));
 
     const href = getThemeLinkHref();
-    expect(href).toContain('dark');
+    expect(href).toContain('darkly');
   });
 
   test('unknown theme is clamped to the default', () => {

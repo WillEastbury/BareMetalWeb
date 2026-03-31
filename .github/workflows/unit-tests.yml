@@ -20,6 +20,15 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  # ── Stage 0: Guardrails (no reflection, no JSON, no rogue packages) ────
+  guardrails:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run guardrails scan
+        run: chmod +x guardrails.sh && ./guardrails.sh
+
   # ── Stage 1a: Build Debug (for tests) ──────────────────────────────────
   build-debug:
     runs-on: ubuntu-latest
@@ -284,13 +293,14 @@ jobs:
   # External jobs (e.g. ci-cd-pipeline.yml) can depend on this single job
   # instead of enumerating every shard.
   tests-passed:
-    needs: [test-data, test-host, test-rendering, test-runtime, test-core, test-api, test-jest]
+    needs: [guardrails, test-data, test-host, test-rendering, test-runtime, test-core, test-api, test-jest]
     runs-on: ubuntu-latest
     if: always()
     steps:
       - name: Check all shards passed
         run: |
           results=(
+            "${{ needs.guardrails.result }}"
             "${{ needs.test-data.result }}"
             "${{ needs.test-host.result }}"
             "${{ needs.test-rendering.result }}"
@@ -301,8 +311,8 @@ jobs:
           )
           for r in "${results[@]}"; do
             if [ "$r" != "success" ]; then
-              echo "::error::One or more test shards failed (results: ${results[*]})"
+              echo "::error::One or more CI checks failed (results: ${results[*]})"
               exit 1
             fi
           done
-          echo "All test shards passed ✓"
+          echo "All CI checks passed ✓"

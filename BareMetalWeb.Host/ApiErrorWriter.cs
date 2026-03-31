@@ -27,6 +27,12 @@ internal readonly struct ApiError
     /// <summary>Correlation ID for server-side log lookup (typically set on 5xx).</summary>
     public string? ErrorId { get; init; }
 
+    /// <summary>
+    /// URI reference identifying the specific resource that triggered the error (RFC 7807 "instance").
+    /// Typically the request path, e.g. <c>/api/_meta</c> or <c>/setup</c>.
+    /// </summary>
+    public string? Instance { get; init; }
+
     /// <summary>Optional field-level validation errors.</summary>
     public FieldError[]? Errors { get; init; }
 }
@@ -130,6 +136,11 @@ internal static class ApiErrorWriter
             writer.WriteString("errorId"u8, error.ErrorId);
         }
 
+        if (error.Instance is not null)
+        {
+            writer.WriteString("instance"u8, error.Instance);
+        }
+
         if (error.Errors is { Length: > 0 } fieldErrors)
         {
             writer.WriteStartArray("errors"u8);
@@ -157,20 +168,22 @@ internal static class ApiErrorWriter
         Errors = errors,
     };
 
-    internal static ApiError Unauthorized(string? detail = null) => new()
+    internal static ApiError Unauthorized(string? detail = null, string? instance = null) => new()
     {
         Type = ApiErrorTypes.Unauthorized,
         Title = "Unauthorized",
         Status = StatusCodes.Status401Unauthorized,
         Detail = detail ?? "Authentication is required.",
+        Instance = instance,
     };
 
-    internal static ApiError Forbidden(string? detail = null) => new()
+    internal static ApiError Forbidden(string? detail = null, string? instance = null) => new()
     {
         Type = ApiErrorTypes.Forbidden,
         Title = "Forbidden",
         Status = StatusCodes.Status403Forbidden,
         Detail = detail ?? "Access denied.",
+        Instance = instance,
     };
 
     internal static ApiError NotFound(string? detail = null) => new()

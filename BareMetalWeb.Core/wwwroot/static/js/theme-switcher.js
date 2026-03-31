@@ -1,21 +1,18 @@
-// Theme switcher — BMW skin is permanent; 5 colour themes + 2 layout modes
+// Theme switcher — Bootswatch themes + 2 layout modes
 (function() {
     'use strict';
-
-    // BMW skin is always active — set server-side and reinforced here
-    document.body.setAttribute('data-bm-skin', 'bmw');
 
     const THEME_PATH_PREFIX = '/static/css/themes/';
     const THEME_PATH_SUFFIX = '.min.css';
     const THEME_STORAGE_KEY = 'bm-selected-theme';
-    const DEFAULT_THEME     = 'light';
+    const DEFAULT_THEME     = 'default';
 
     const LAYOUT_STORAGE_KEY = 'bm-selected-layout';
     const DEFAULT_LAYOUT     = 'top';
 
-    // Allowed BMW theme names
-    const ALLOWED_THEMES = new Set(['light', 'dark', 'colourful', 'muted', 'highviz',
-        'ocean', 'forest', 'sunset', 'midnight', 'rose']);
+    // Allowed Bootswatch theme names
+    const ALLOWED_THEMES = new Set(['default', 'cerulean', 'cosmo', 'darkly', 'flatly',
+        'journal', 'lux', 'minty', 'sandstone', 'slate']);
 
     // Allowed layout names: top (horizontal navbar) or sidebar (left vertical navbar)
     const ALLOWED_LAYOUTS = new Set(['top', 'sidebar']);

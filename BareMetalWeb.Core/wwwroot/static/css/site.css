@@ -1,13 +1,6 @@
 :root {
     --bm-nav-height: 56px;
     --bm-footer-height: 56px;
-    /* BMW skin defaults — Light theme. Overridden by the per-theme CSS file. */
-    --bmw-bg: #f7f7f9;
-    --bmw-fg: #222;
-    --bmw-p: #fff;
-    --bmw-b: #e3e3e3;
-    --bmw-a: #2a6df4;
-    --bmw-g: 12px;
 }
 
 body {
@@ -1129,48 +1122,3 @@ body[data-bm-layout="top"] .bm-content { padding: 0.5rem !important; }
 body[data-bm-layout="top"] .bm-page-card { box-shadow: none; border: none; }
 body[data-bm-layout="top"] .bm-page-card .card-header { display: none; }
 body[data-bm-layout="top"] .bm-footer { min-height: 32px; padding: 0.25rem 0.5rem; font-size: 0.75rem; }
-
-/* ── BMW skin (permanent — always active via data-bm-skin="bmw" on body) ── */
-body[data-bm-skin="bmw"] {
-    /* Variables are defined in :root (defaults) and overridden by the theme CSS file */
-    font: 14px system-ui, sans-serif !important;
-    background: var(--bmw-bg) !important; color: var(--bmw-fg) !important;
-}
-body[data-bm-skin="bmw"] .bm-navbar {
-    background: var(--bmw-p) !important; border-bottom: 1px solid var(--bmw-b);
-    box-shadow: none; min-height: auto; padding: 10px 14px;
-}
-body[data-bm-skin="bmw"] .bm-navbar .navbar-brand { color: var(--bmw-fg) !important; font-weight: 700; }
-body[data-bm-skin="bmw"] .bm-navbar .nav-link { color: var(--bmw-fg) !important; opacity: 0.8; padding: 0.3rem 0.5rem; }
-body[data-bm-skin="bmw"] .bm-navbar .nav-link:hover { opacity: 1; }
-body[data-bm-skin="bmw"] .bm-navbar .nav-link.active { color: var(--bmw-a) !important; opacity: 1; }
-body[data-bm-skin="bmw"] .bm-content { background: var(--bmw-bg); }
-body[data-bm-skin="bmw"] .bm-page-card {
-    background: var(--bmw-p); border: 1px solid var(--bmw-b);
-    border-radius: 6px; box-shadow: none;
-}
-body[data-bm-skin="bmw"] .bm-page-card .card-header {
-    background: var(--bmw-p); border-bottom: 1px solid var(--bmw-b); font-weight: 600;
-}
-body[data-bm-skin="bmw"] .card { background: var(--bmw-p); border: 1px solid var(--bmw-b); border-radius: 6px; box-shadow: none; }
-body[data-bm-skin="bmw"] .btn { border: 1px solid var(--bmw-b); background: var(--bmw-p); border-radius: 4px; }
-body[data-bm-skin="bmw"] .btn-primary { background: var(--bmw-a); border-color: var(--bmw-a); color: #fff; }
-body[data-bm-skin="bmw"] .btn-primary:hover { filter: brightness(1.1); }
-body[data-bm-skin="bmw"] .form-control, body[data-bm-skin="bmw"] .form-select {
-    border: 1px solid var(--bmw-b); border-radius: 4px; background: var(--bmw-p);
-}
-body[data-bm-skin="bmw"] .table { border-collapse: collapse; }
-body[data-bm-skin="bmw"] .table td, body[data-bm-skin="bmw"] .table th {
-    padding: 8px; border-bottom: 1px solid var(--bmw-b);
-}
-body[data-bm-skin="bmw"] .table thead th { border-bottom-width: 2px; }
-body[data-bm-skin="bmw"] .bm-footer {
-    background: var(--bmw-p) !important; border-top: 1px solid var(--bmw-b);
-    color: var(--bmw-fg) !important;
-}
-body[data-bm-skin="bmw"] .dropdown-menu {
-    background: var(--bmw-p); border: 1px solid var(--bmw-b); border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,.08);
-}
-body[data-bm-skin="bmw"] .dropdown-item:hover { background: var(--bmw-bg); }
-body[data-bm-skin="bmw"] .badge { border-radius: 4px; }
-body[data-bm-skin="bmw"] .alert { border-radius: 6px; border-width: 1px; }

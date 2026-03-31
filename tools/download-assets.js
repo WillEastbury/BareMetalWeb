@@ -7,23 +7,16 @@
  * The app serves these committed files directly — no CDN access is required at runtime.
  *
  * Outputs to:
- *   BareMetalWeb.Core/wwwroot/static/css/themes/base.min.css     – Bootstrap + Bootstrap Icons (shared base)
- *   BareMetalWeb.Core/wwwroot/static/css/themes/{theme}.min.css  – BMW minimal CSS-variable theme overrides
+ *   BareMetalWeb.Core/wwwroot/static/css/themes/base.min.css     – Bootstrap Icons (shared base)
+ *   BareMetalWeb.Core/wwwroot/static/css/themes/{theme}.min.css  – Bootswatch theme (full Bootstrap CSS)
  *   BareMetalWeb.Core/wwwroot/static/fonts/                      – woff2 font files
  *   BareMetalWeb.Core/wwwroot/static/js/bootstrap.bundle.min.js  – Bootstrap JS
  *
- * base.min.css structure:
- *   1. Bootstrap Icons @font-face block (font paths rewritten to /static/fonts/)
- *   2. Bootstrap CSS base (no Bootswatch colour overrides)
- *
- * Per-theme CSS bundles contain only BMW CSS custom-property overrides:
- *   :root { --bmw-bg: ...; --bmw-fg: ...; --bmw-p: ...; --bmw-b: ...; --bmw-a: ...; --bmw-g: 12px }
+ * base.min.css contains only Bootstrap Icons (@font-face + icon classes).
+ * Each theme file is a complete Bootswatch-themed Bootstrap CSS bundle copied
+ * from node_modules/bootswatch. The "default" theme uses plain Bootstrap CSS.
  *
  * Usage:  node tools/download-assets.js
- *
- * To force re-download of all files (including already-existing ones), delete the
- * relevant files first or use the 'Download Static Assets' GitHub Actions workflow
- * with 'force_refresh' enabled.
  */
 
 'use strict';
@@ -49,27 +42,26 @@ for (const d of [THEMES_DIR, FONTS_DIR]) {
 
 // ── Versions ────────────────────────────────────────────────────────────────
 
-const BS_ICONS_VER      = '1.11.3';
-const BOOTSTRAP_CSS_VER = '5.3.3';
-const BOOTSTRAP_JS_VER  = '5.3.3';
+const BS_ICONS_VER     = '1.11.3';
+const BOOTSTRAP_JS_VER = '5.3.3';
 
-// ── BMW theme definitions ────────────────────────────────────────────────────
+// ── Bootswatch themes to include ─────────────────────────────────────────────
 //
-// Five minimal CSS-variable-only theme files.
-// The base.min.css provides Bootstrap structure; these files override the palette.
+// Each entry maps our theme name → Bootswatch dist folder name.
+// "default" uses plain Bootstrap CSS from the bootstrap npm package.
 
-const BMW_THEMES = {
-    light: `/* BMW Light theme */\n:root{--bmw-bg:#f7f7f9;--bmw-fg:#222;--bmw-p:#fff;--bmw-b:#e3e3e3;--bmw-a:#2a6df4;--bmw-g:12px}\n`,
-    dark:  `/* BMW Dark theme */\n:root{--bmw-bg:#1a1a1a;--bmw-fg:#e8e8e8;--bmw-p:#242424;--bmw-b:#3a3a3a;--bmw-a:#4d9fff;--bmw-g:12px;--bs-body-color:#e8e8e8;--bs-body-bg:#1a1a1a;--bs-border-color:#3a3a3a;--bs-secondary-bg:#2a2a2a;--bs-emphasis-color:#fff;--bs-secondary-color:rgba(232,232,232,.75)}body{color-scheme:dark}\n`,
-    colourful: `/* BMW Colourful theme */\n:root{--bmw-bg:#f0f4ff;--bmw-fg:#1a1a2e;--bmw-p:#fff;--bmw-b:#b8c8f8;--bmw-a:#7c3aed;--bmw-g:12px}\n`,
-    muted: `/* BMW Muted theme */\n:root{--bmw-bg:#f5f4f2;--bmw-fg:#4a4a4a;--bmw-p:#fafaf8;--bmw-b:#d8d6d0;--bmw-a:#6b7a8d;--bmw-g:12px}\n`,
-    highviz: `/* BMW HighViz theme — high contrast accessibility */\n:root{--bmw-bg:#fff;--bmw-fg:#000;--bmw-p:#fff;--bmw-b:#000;--bmw-a:#cc0000;--bmw-g:12px;--bs-body-color:#000;--bs-body-bg:#fff;--bs-border-color:#000}\n`,
-    ocean: `/* BMW Ocean theme */\n:root{--bmw-bg:#eef6fb;--bmw-fg:#1a3a4a;--bmw-p:#ffffff;--bmw-b:#9dc8e0;--bmw-a:#0077aa;--bmw-g:12px}\n`,
-    forest: `/* BMW Forest theme */\n:root{--bmw-bg:#f0f5ee;--bmw-fg:#1e3a1e;--bmw-p:#ffffff;--bmw-b:#a8c9a8;--bmw-a:#2e7d32;--bmw-g:12px}\n`,
-    sunset: `/* BMW Sunset theme */\n:root{--bmw-bg:#fff8f2;--bmw-fg:#3a1a00;--bmw-p:#ffffff;--bmw-b:#f5c4a0;--bmw-a:#d4500a;--bmw-g:12px}\n`,
-    midnight: `/* BMW Midnight theme */\n:root{--bmw-bg:#0d1117;--bmw-fg:#e6edf3;--bmw-p:#161b22;--bmw-b:#30363d;--bmw-a:#58a6ff;--bmw-g:12px;--bs-body-color:#e6edf3;--bs-body-bg:#0d1117;--bs-border-color:#30363d;--bs-secondary-bg:#161b22;--bs-emphasis-color:#fff;--bs-secondary-color:rgba(230,237,243,.75)}body{color-scheme:dark}\n`,
-    rose: `/* BMW Rose theme */\n:root{--bmw-bg:#fef5f8;--bmw-fg:#3a1a2a;--bmw-p:#ffffff;--bmw-b:#f0b8cf;--bmw-a:#c2185b;--bmw-g:12px}\n`,
-};
+const THEMES = [
+    'default',      // plain Bootstrap
+    'cerulean',     // blue sky tones
+    'cosmo',        // modern clean
+    'darkly',       // dark
+    'flatly',       // flat design
+    'journal',      // warm newsprint
+    'lux',          // elegant
+    'minty',        // fresh green
+    'sandstone',    // warm earthy
+    'slate',        // dark slate
+];
 
 // ── HTTP helpers ─────────────────────────────────────────────────────────────
 
@@ -89,7 +81,6 @@ function fetch(rawUrl, asBinary = false) {
         };
 
         const req = lib.request(options, (res) => {
-            // Follow up to 5 redirects
             if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
                 const nextUrl = new URL(res.headers.location, rawUrl).href;
                 resolve(fetch(nextUrl, asBinary));
@@ -124,10 +115,8 @@ async function downloadBootstrapIcons() {
     console.log(`Downloading bootstrap-icons@${BS_ICONS_VER} CSS...`);
     let css = await fetch(cssUrl);
 
-    // Rewrite the relative font paths inside the icons CSS to absolute /static/fonts/ paths
     css = css.replace(/url\(\s*["']?\.\/fonts\/bootstrap-icons\.woff2[^"')]*["']?\s*\)/gi,
         `url('${fontStaticRef}')`);
-    // Also handle paths without leading ./
     css = css.replace(/url\(\s*["']?fonts\/bootstrap-icons\.woff2[^"')]*["']?\s*\)/gi,
         `url('${fontStaticRef}')`);
 
@@ -139,19 +128,7 @@ async function downloadBootstrapIcons() {
         console.log(`  bootstrap-icons.woff2 already exists`);
     }
 
-    return css; // cleaned CSS ready to prepend to the base bundle
-}
-
-// ── Bootstrap base CSS ────────────────────────────────────────────────────────
-
-/**
- * Download the pure Bootstrap CSS (without Bootswatch colour overrides).
- * This forms the structural foundation that all BMW themes build upon.
- */
-async function downloadBootstrapCss() {
-    const cssUrl = `https://cdn.jsdelivr.net/npm/bootstrap@${BOOTSTRAP_CSS_VER}/dist/css/bootstrap.min.css`;
-    console.log(`Downloading bootstrap@${BOOTSTRAP_CSS_VER} CSS...`);
-    return fetch(cssUrl);
+    return css;
 }
 
 // ── Bootstrap JS ──────────────────────────────────────────────────────────────
@@ -171,6 +148,35 @@ async function downloadBootstrapJs() {
     console.log(`  Saved to ${jsDest}`);
 }
 
+// ── Bootswatch theme copy ─────────────────────────────────────────────────────
+
+function copyBootswatchThemes() {
+    const nodeModules = path.join(REPO_ROOT, 'node_modules');
+    const bootswatchDist = path.join(nodeModules, 'bootswatch', 'dist');
+    const bootstrapCss = path.join(nodeModules, 'bootstrap', 'dist', 'css', 'bootstrap.min.css');
+
+    console.log('\nCopying Bootswatch theme files...');
+    for (const theme of THEMES) {
+        const destFile = path.join(THEMES_DIR, `${theme}.min.css`);
+        let srcFile;
+        if (theme === 'default') {
+            srcFile = bootstrapCss;
+        } else {
+            srcFile = path.join(bootswatchDist, theme, 'bootstrap.min.css');
+        }
+
+        if (!fs.existsSync(srcFile)) {
+            console.error(`  ERROR: source not found: ${srcFile}`);
+            console.error(`  Run 'npm install' first to install bootswatch and bootstrap.`);
+            process.exit(1);
+        }
+
+        fs.copyFileSync(srcFile, destFile);
+        const sizeKb = (fs.statSync(destFile).size / 1024).toFixed(1);
+        console.log(`  ${theme}.min.css (${sizeKb} KB)`);
+    }
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -179,29 +185,27 @@ async function main() {
     // 1. Bootstrap JS
     await downloadBootstrapJs();
 
-    // 2. Shared base bundle: Bootstrap Icons + Bootstrap CSS → base.min.css
+    // 2. Base bundle: Bootstrap Icons only → base.min.css
     const baseDest = path.join(THEMES_DIR, 'base.min.css');
-    if (fs.existsSync(baseDest)) {
-        console.log('base.min.css already exists, skipping download');
-    } else {
-        const iconsCss = await downloadBootstrapIcons();
-        const bootstrapCss = await downloadBootstrapCss();
+    const iconsCss = await downloadBootstrapIcons();
+    const baseBundle = `/* bootstrap-icons@${BS_ICONS_VER} */\n${iconsCss}`;
+    fs.writeFileSync(baseDest, baseBundle, 'utf8');
+    const baseSizeKb = (fs.statSync(baseDest).size / 1024).toFixed(1);
+    console.log(`  Saved base bundle (icons only): ${path.relative(REPO_ROOT, baseDest)} (${baseSizeKb} KB)`);
 
-        const baseBundle = `/* bootstrap-icons@${BS_ICONS_VER} */\n${iconsCss}\n\n/* bootstrap@${BOOTSTRAP_CSS_VER} */\n${bootstrapCss}`;
-        fs.writeFileSync(baseDest, baseBundle, 'utf8');
-        console.log(`  Saved base bundle: ${path.relative(REPO_ROOT, baseDest)}`);
-    }
+    // 3. Bootswatch themes (each is a complete Bootstrap CSS with theme applied)
+    copyBootswatchThemes();
 
-    // 3. BMW theme files (minimal CSS-variable-only overrides)
-    console.log('\nWriting BMW theme files...');
-    for (const [themeName, css] of Object.entries(BMW_THEMES)) {
-        const destFile = path.join(THEMES_DIR, `${themeName}.min.css`);
-        if (fs.existsSync(destFile)) {
-            console.log(`Theme ${themeName}.min.css already exists, skipping`);
-            continue;
+    // 4. Clean up old BMW CSS-variable theme files that are no longer used
+    const oldThemes = ['light', 'dark', 'colourful', 'muted', 'highviz',
+        'ocean', 'forest', 'sunset', 'midnight', 'rose'];
+    for (const old of oldThemes) {
+        if (THEMES.includes(old)) continue;
+        const oldFile = path.join(THEMES_DIR, `${old}.min.css`);
+        if (fs.existsSync(oldFile)) {
+            fs.unlinkSync(oldFile);
+            console.log(`  Removed old theme: ${old}.min.css`);
         }
-        fs.writeFileSync(destFile, css, 'utf8');
-        console.log(`  Saved theme: ${path.relative(REPO_ROOT, destFile)}`);
     }
 
     console.log('\n=== Done ===');
