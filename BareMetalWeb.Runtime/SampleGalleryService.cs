@@ -88,14 +88,16 @@ public static class SampleGalleryService
         if (Interlocked.CompareExchange(ref _registered, 1, 0) != 0)
             return;
 
-        DataScaffold.RegisterEntity<EntityDefinition>();
-        DataScaffold.RegisterEntity<FieldDefinition>();
-        DataScaffold.RegisterEntity<IndexDefinition>();
-        DataScaffold.RegisterEntity<ActionDefinition>();
-        DataScaffold.RegisterEntity<ActionCommandDefinition>();
-        DataScaffold.RegisterEntity<AggregationDefinition>();
-        DataScaffold.RegisterEntity<ScheduledActionDefinition>();
-        DataScaffold.RegisterEntity<DomainEventSubscription>();
+        DataScaffold.RegisterEntity("EntityDefinition", SystemEntitySchemas.EntityDefinition,
+            DataScaffold.BuildStoreHandlers("EntityDefinition", () => new EntityDefinition()));
+        DataScaffold.RegisterEntity("FieldDefinition", SystemEntitySchemas.FieldDefinition,
+            DataScaffold.BuildStoreHandlers("FieldDefinition", () => new FieldDefinition()));
+        DataScaffold.RegisterEntity("IndexDefinition", SystemEntitySchemas.IndexDefinition,
+            DataScaffold.BuildStoreHandlers("IndexDefinition", () => new IndexDefinition()));
+
+        BinaryObjectSerializer.RegisterKnownType(typeof(EntityDefinition), () => new EntityDefinition());
+        BinaryObjectSerializer.RegisterKnownType(typeof(FieldDefinition), () => new FieldDefinition());
+        BinaryObjectSerializer.RegisterKnownType(typeof(IndexDefinition), () => new IndexDefinition());
     }
 
     // ── Deployment ───────────────────────────────────────────────────────────
@@ -237,72 +239,65 @@ public static class SampleGalleryService
             }
 
             // Import actions that belong to this entity
-            foreach (var srcAction in package.Actions)
+            if (DataScaffold.TryGetEntity("action-definitions", out var actionMeta))
             {
-                if (srcAction.EntityId != oldEntityId) continue;
-                var newAction = new ActionDefinition
+                foreach (var srcAction in package.Actions)
                 {
-                    EntityId = newEntity.EntityId,
-                    Name = srcAction.Name,
-                    Label = srcAction.Label,
-                    Icon = srcAction.Icon,
-                    Permission = srcAction.Permission,
-                    EnabledWhen = srcAction.EnabledWhen,
-                    Operations = srcAction.Operations,
-                    Version = srcAction.Version
-                };
-                await store.SaveAsync(newAction, cancellationToken).ConfigureAwait(false);
+                    if (F(actionMeta, srcAction, "EntityId") != oldEntityId) continue;
+                    var newAction = (BaseDataObject)actionMeta.Handlers.Create();
+                    CopyFields(actionMeta, srcAction, newAction);
+                    actionMeta.FindField("EntityId")?.SetValueFn(newAction, newEntity.EntityId);
+                    await DataScaffold.ApplyAutoIdAsync(actionMeta, newAction, cancellationToken).ConfigureAwait(false);
+                    await actionMeta.Handlers.SaveAsync(newAction, cancellationToken).ConfigureAwait(false);
 
-                // Import action commands that belong to this action (matched by Name)
-                foreach (var srcCmd in package.ActionCommands)
-                {
-                    if (srcCmd.ActionId != srcAction.Name) continue;
-                    var newCmd = new ActionCommandDefinition
+                    // Import action commands that belong to this action (matched by Name)
+                    if (DataScaffold.TryGetEntity("action-commands", out var cmdMeta))
                     {
-                        ActionId = newAction.Key.ToString(),
-                        CommandType = srcCmd.CommandType,
-                        Order = srcCmd.Order,
-                        Condition = srcCmd.Condition,
-                        FieldId = srcCmd.FieldId,
-                        ValueExpression = srcCmd.ValueExpression,
-                        Severity = srcCmd.Severity,
-                        ErrorCode = srcCmd.ErrorCode,
-                        Message = srcCmd.Message
-                    };
-                    await store.SaveAsync(newCmd, cancellationToken).ConfigureAwait(false);
+                        foreach (var srcCmd in package.ActionCommands)
+                        {
+                            if (F(cmdMeta, srcCmd, "ActionId") != F(actionMeta, srcAction, "Name")) continue;
+                            var newCmd = (BaseDataObject)cmdMeta.Handlers.Create();
+                            CopyFields(cmdMeta, srcCmd, newCmd);
+                            cmdMeta.FindField("ActionId")?.SetValueFn(newCmd, newAction.Key.ToString());
+                            await DataScaffold.ApplyAutoIdAsync(cmdMeta, newCmd, cancellationToken).ConfigureAwait(false);
+                            await cmdMeta.Handlers.SaveAsync(newCmd, cancellationToken).ConfigureAwait(false);
+                        }
+                    }
                 }
             }
 
             // Import reports that reference this entity slug
-            foreach (var srcReport in package.Reports)
+            if (DataScaffold.TryGetEntity("report-definitions", out var reportMeta))
             {
-                if (!string.Equals(srcReport.RootEntity, srcEntity.Slug, StringComparison.OrdinalIgnoreCase)) continue;
-                var newReport = new ReportDefinition
+                foreach (var srcReport in package.Reports)
                 {
-                    Name = srcReport.Name,
-                    Description = srcReport.Description,
-                    RootEntity = newEntity.Slug,
-                    ColumnsJson = srcReport.ColumnsJson,
-                    FiltersJson = srcReport.FiltersJson,
-                    ParametersJson = srcReport.ParametersJson,
-                    SortField = srcReport.SortField,
-                    SortDescending = srcReport.SortDescending
-                };
-                await store.SaveAsync(newReport, cancellationToken).ConfigureAwait(false);
+                    if (!string.Equals(srcReport.RootEntity, srcEntity.Slug, StringComparison.OrdinalIgnoreCase)) continue;
+                    var newReport = (BaseDataObject)reportMeta.Handlers.Create();
+                    reportMeta.FindField("Name")?.SetValueFn(newReport, srcReport.Name);
+                    reportMeta.FindField("Description")?.SetValueFn(newReport, srcReport.Description);
+                    reportMeta.FindField("RootEntity")?.SetValueFn(newReport, newEntity.Slug);
+                    reportMeta.FindField("ColumnsJson")?.SetValueFn(newReport, srcReport.ColumnsJson);
+                    reportMeta.FindField("FiltersJson")?.SetValueFn(newReport, srcReport.FiltersJson);
+                    reportMeta.FindField("ParametersJson")?.SetValueFn(newReport, srcReport.ParametersJson);
+                    reportMeta.FindField("SortField")?.SetValueFn(newReport, srcReport.SortField);
+                    reportMeta.FindField("SortDescending")?.SetValueFn(newReport, srcReport.SortDescending);
+                    await DataScaffold.ApplyAutoIdAsync(reportMeta, newReport, cancellationToken).ConfigureAwait(false);
+                    await reportMeta.Handlers.SaveAsync(newReport, cancellationToken).ConfigureAwait(false);
+                }
             }
 
             // Import aggregation definitions for this entity
-            foreach (var srcAgg in package.Aggregations)
+            if (DataScaffold.TryGetEntity("aggregation-definitions", out var aggMeta))
             {
-                if (srcAgg.EntityId != oldEntityId) continue;
-                var newAgg = new AggregationDefinition
+                foreach (var srcAgg in package.Aggregations)
                 {
-                    EntityId = newEntity.EntityId,
-                    Name = srcAgg.Name,
-                    GroupByFields = srcAgg.GroupByFields,
-                    Measures = srcAgg.Measures
-                };
-                await store.SaveAsync(newAgg, cancellationToken).ConfigureAwait(false);
+                    if (F(aggMeta, srcAgg, "EntityId") != oldEntityId) continue;
+                    var newAgg = (BaseDataObject)aggMeta.Handlers.Create();
+                    CopyFields(aggMeta, srcAgg, newAgg);
+                    aggMeta.FindField("EntityId")?.SetValueFn(newAgg, newEntity.EntityId);
+                    await DataScaffold.ApplyAutoIdAsync(aggMeta, newAgg, cancellationToken).ConfigureAwait(false);
+                    await aggMeta.Handlers.SaveAsync(newAgg, cancellationToken).ConfigureAwait(false);
+                }
             }
 
             // Import scheduled action definitions for this entity
@@ -310,14 +305,10 @@ public static class SampleGalleryService
             {
                 foreach (var srcSched in package.ScheduledActions)
                 {
-                    if (srcSched.EntityId != oldEntityId) continue;
+                    if (F(schedMeta, srcSched, "EntityId") != oldEntityId) continue;
                     var newSched = (BaseDataObject)schedMeta.Handlers.Create();
+                    CopyFields(schedMeta, srcSched, newSched);
                     schedMeta.FindField("EntityId")?.SetValueFn(newSched, newEntity.EntityId);
-                    schedMeta.FindField("Name")?.SetValueFn(newSched, srcSched.Name);
-                    schedMeta.FindField("ActionName")?.SetValueFn(newSched, srcSched.ActionName);
-                    schedMeta.FindField("Schedule")?.SetValueFn(newSched, srcSched.Schedule);
-                    schedMeta.FindField("FilterExpression")?.SetValueFn(newSched, srcSched.FilterExpression);
-                    schedMeta.FindField("Enabled")?.SetValueFn(newSched, srcSched.Enabled);
                     await DataScaffold.ApplyAutoIdAsync(schedMeta, newSched, cancellationToken).ConfigureAwait(false);
                     await schedMeta.Handlers.SaveAsync(newSched, cancellationToken).ConfigureAwait(false);
                 }
@@ -328,17 +319,10 @@ public static class SampleGalleryService
             {
                 foreach (var srcRule in package.WorkflowRules)
                 {
-                    if (!string.Equals(srcRule.SourceEntity, srcEntity.Slug, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!string.Equals(F(ruleMeta, srcRule, "SourceEntity"), srcEntity.Slug, StringComparison.OrdinalIgnoreCase)) continue;
                     var newRule = (BaseDataObject)ruleMeta.Handlers.Create();
-                    ruleMeta.FindField("Name")?.SetValueFn(newRule, srcRule.Name);
+                    CopyFields(ruleMeta, srcRule, newRule);
                     ruleMeta.FindField("SourceEntity")?.SetValueFn(newRule, newEntity.Slug);
-                    ruleMeta.FindField("WatchField")?.SetValueFn(newRule, srcRule.WatchField);
-                    ruleMeta.FindField("FromValue")?.SetValueFn(newRule, srcRule.FromValue);
-                    ruleMeta.FindField("TriggerValue")?.SetValueFn(newRule, srcRule.TriggerValue);
-                    ruleMeta.FindField("TargetAction")?.SetValueFn(newRule, srcRule.TargetAction);
-                    ruleMeta.FindField("TargetResolution")?.SetValueFn(newRule, srcRule.TargetResolution);
-                    ruleMeta.FindField("Priority")?.SetValueFn(newRule, srcRule.Priority);
-                    ruleMeta.FindField("Enabled")?.SetValueFn(newRule, srcRule.Enabled);
                     await DataScaffold.ApplyAutoIdAsync(ruleMeta, newRule, cancellationToken).ConfigureAwait(false);
                     await ruleMeta.Handlers.SaveAsync(newRule, cancellationToken).ConfigureAwait(false);
                 }
@@ -349,13 +333,16 @@ public static class SampleGalleryService
             int indexCount = 0;
             foreach (var ix in package.Indexes) if (ix.EntityId == oldEntityId) indexCount++;
             int actionCount = 0;
-            foreach (var a in package.Actions) if (a.EntityId == oldEntityId) actionCount++;
+            if (DataScaffold.TryGetEntity("action-definitions", out var actCountMeta))
+                foreach (var a in package.Actions) if (F(actCountMeta, a, "EntityId") == oldEntityId) actionCount++;
             int reportCount = 0;
             foreach (var r in package.Reports) if (string.Equals(r.RootEntity, srcEntity.Slug, StringComparison.OrdinalIgnoreCase)) reportCount++;
             int aggCount = 0;
-            foreach (var a in package.Aggregations) if (a.EntityId == oldEntityId) aggCount++;
+            if (DataScaffold.TryGetEntity("aggregation-definitions", out var aggCountMeta))
+                foreach (var a in package.Aggregations) if (F(aggCountMeta, a, "EntityId") == oldEntityId) aggCount++;
             int ruleCount = 0;
-            foreach (var rule in package.WorkflowRules) if (string.Equals(rule.SourceEntity, srcEntity.Slug, StringComparison.OrdinalIgnoreCase)) ruleCount++;
+            if (DataScaffold.TryGetEntity("domain-event-subscriptions", out var ruleCountMeta))
+                foreach (var rule in package.WorkflowRules) if (string.Equals(F(ruleCountMeta, rule, "SourceEntity"), srcEntity.Slug, StringComparison.OrdinalIgnoreCase)) ruleCount++;
             logger?.Invoke($"Deployed '{srcEntity.Name}': {fieldCount} field(s), {indexCount} index(es), {actionCount} action(s), {reportCount} report(s), {aggCount} aggregation(s), {ruleCount} workflow rule(s).");
             deployed.Add(srcEntity.Name);
             deployedSlugs.Add(slug);
@@ -572,17 +559,23 @@ public static class SampleGalleryService
         {
             Clauses = { new QueryClause { Field = "EntityId", Operator = QueryOperator.Equals, Value = entityDefId } }
         };
-        var actions = new List<ActionDefinition>(await store.QueryAsync<ActionDefinition>(actionQuery, ct).ConfigureAwait(false));
-        foreach (var action in actions)
+        if (DataScaffold.TryGetEntity("action-definitions", out var actionMeta2))
         {
-            var cmdQuery = new QueryDefinition
+            var actions = new List<BaseDataObject>(await actionMeta2.Handlers.QueryAsync(actionQuery, ct).ConfigureAwait(false));
+            foreach (var action in actions)
             {
-                Clauses = { new QueryClause { Field = "ActionId", Operator = QueryOperator.Equals, Value = action.Key } }
-            };
-            var cmds = new List<ActionCommandDefinition>(await store.QueryAsync<ActionCommandDefinition>(cmdQuery, ct).ConfigureAwait(false));
-            foreach (var cmd in cmds)
-                await store.DeleteAsync<ActionCommandDefinition>(cmd.Key, ct).ConfigureAwait(false);
-            await store.DeleteAsync<ActionDefinition>(action.Key, ct).ConfigureAwait(false);
+                if (DataScaffold.TryGetEntity("action-commands", out var cmdMeta2))
+                {
+                    var cmdQuery = new QueryDefinition
+                    {
+                        Clauses = { new QueryClause { Field = "ActionId", Operator = QueryOperator.Equals, Value = action.Key } }
+                    };
+                    var cmds = new List<BaseDataObject>(await cmdMeta2.Handlers.QueryAsync(cmdQuery, ct).ConfigureAwait(false));
+                    foreach (var cmd in cmds)
+                        await cmdMeta2.Handlers.DeleteAsync(cmd.Key, ct).ConfigureAwait(false);
+                }
+                await actionMeta2.Handlers.DeleteAsync(action.Key, ct).ConfigureAwait(false);
+            }
         }
 
         // Delete reports whose root entity matches this entity's slug
@@ -590,14 +583,20 @@ public static class SampleGalleryService
         {
             Clauses = { new QueryClause { Field = "RootEntity", Operator = QueryOperator.Equals, Value = entitySlug } }
         };
-        var reports = new List<ReportDefinition>(await store.QueryAsync<ReportDefinition>(reportQuery, ct).ConfigureAwait(false));
-        foreach (var report in reports)
-            await store.DeleteAsync<ReportDefinition>(report.Key, ct).ConfigureAwait(false);
+        if (DataScaffold.TryGetEntity("report-definitions", out var reportMeta2))
+        {
+            var reports = new List<BaseDataObject>(await reportMeta2.Handlers.QueryAsync(reportQuery, ct).ConfigureAwait(false));
+            foreach (var report in reports)
+                await reportMeta2.Handlers.DeleteAsync(report.Key, ct).ConfigureAwait(false);
+        }
 
         // Delete aggregation definitions
-        var aggs = new List<AggregationDefinition>(await store.QueryAsync<AggregationDefinition>(entityIdQuery, ct).ConfigureAwait(false));
-        foreach (var agg in aggs)
-            await store.DeleteAsync<AggregationDefinition>(agg.Key, ct).ConfigureAwait(false);
+        if (DataScaffold.TryGetEntity("aggregation-definitions", out var aggMeta2))
+        {
+            var aggs = new List<BaseDataObject>(await aggMeta2.Handlers.QueryAsync(entityIdQuery, ct).ConfigureAwait(false));
+            foreach (var agg in aggs)
+                await aggMeta2.Handlers.DeleteAsync(agg.Key, ct).ConfigureAwait(false);
+        }
 
         // Delete scheduled actions
         if (DataScaffold.TryGetEntity("scheduled-actions", out var schedMeta))
@@ -617,6 +616,21 @@ public static class SampleGalleryService
             var rules = new List<BaseDataObject>(await ruleMeta.Handlers.QueryAsync(rulesQuery, ct).ConfigureAwait(false));
             foreach (var rule in rules)
                 await ruleMeta.Handlers.DeleteAsync(rule.Key, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Read a field value as string from a BaseDataObject using metadata.</summary>
+    private static string F(DataEntityMetadata meta, BaseDataObject obj, string fieldName)
+        => meta.FindField(fieldName)?.GetValueFn(obj)?.ToString() ?? string.Empty;
+
+    /// <summary>Copy all non-core field values from source to target using metadata.</summary>
+    private static void CopyFields(DataEntityMetadata meta, BaseDataObject source, BaseDataObject target)
+    {
+        foreach (var field in meta.Fields)
+        {
+            var val = field.GetValueFn(source);
+            if (val != null)
+                field.SetValueFn(target, val);
         }
     }
 }

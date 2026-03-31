@@ -115,6 +115,19 @@ public sealed record DataEntityMetadata(
     bool EnableGetIngress = false
 )
 {
+    /// <summary>
+    /// Dense ordinal assigned at registration time. Used for O(1) entity dispatch
+    /// in the store layer — the ordinal-based path is the hot path.
+    /// -1 means the entity has not been registered in DataScaffold yet.
+    /// </summary>
+    public int EntityOrdinal { get; internal set; } = -1;
+
+    /// <summary>
+    /// The <see cref="EntitySchema"/> for this entity, built at registration time.
+    /// Used by the non-generic WAL path (DataRecord-based Save/Load/Query/Delete).
+    /// </summary>
+    public EntitySchema? Schema { get; internal set; }
+
     private DataFieldMetadata[]? _listFields;
     private DataFieldMetadata[]? _viewFields;
     private DataFieldMetadata[]? _createFields;
@@ -176,6 +189,49 @@ public static class DataScaffold
     private static readonly ConcurrentDictionary<Type, DataEntityMetadata> EntitiesByType = new();
     private static readonly ConcurrentDictionary<string, LookupCacheEntry> LookupCache = new(StringComparer.OrdinalIgnoreCase);
 
+    // ── Entity ordinal dispatch ─────────────────────────────────────────
+    // Every registered entity gets a dense ordinal. O(1) array-indexed
+    // lookup is the hot path; string-based resolves to ordinal first.
+    private static DataEntityMetadata?[] _entityByOrdinal = new DataEntityMetadata?[64];
+    private static int _nextEntityOrdinal;
+    private static readonly object _ordinalLock = new();
+
+    /// <summary>O(1) entity lookup by ordinal. Returns null if ordinal is out of range.</summary>
+    public static DataEntityMetadata? GetEntityByOrdinal(int ordinal)
+    {
+        var arr = _entityByOrdinal;
+        return (uint)ordinal < (uint)arr.Length ? arr[ordinal] : null;
+    }
+
+    /// <summary>Resolves entity name → ordinal. Returns -1 if not found.</summary>
+    public static int GetEntityOrdinal(string entityName)
+    {
+        if (EntitiesByName.TryGetValue(entityName, out var meta))
+            return meta.EntityOrdinal;
+        return -1;
+    }
+
+    /// <summary>Total number of registered entities (ordinals 0..EntityCount-1).</summary>
+    public static int EntityCount => _nextEntityOrdinal;
+
+    /// <summary>Assigns the next ordinal and stores the metadata in the ordinal array.</summary>
+    private static int AssignEntityOrdinal(DataEntityMetadata metadata)
+    {
+        lock (_ordinalLock)
+        {
+            int ordinal = _nextEntityOrdinal++;
+            if (ordinal >= _entityByOrdinal.Length)
+            {
+                var bigger = new DataEntityMetadata?[_entityByOrdinal.Length * 2];
+                Array.Copy(_entityByOrdinal, bigger, _entityByOrdinal.Length);
+                _entityByOrdinal = bigger;
+            }
+            _entityByOrdinal[ordinal] = metadata;
+            metadata.EntityOrdinal = ordinal;
+            return ordinal;
+        }
+    }
+
     /// <summary>
     /// Callback invoked when entity or field metadata changes.
     /// Used by the intelligence module to rebuild the trimmed model.
@@ -216,7 +272,7 @@ public static class DataScaffold
 
     /// <summary>
     /// Pre-registers <c>List&lt;T&gt;</c> and instance factories for a child entity type.
-    /// Called at startup by <see cref="AttributeMetadataBuilder"/> so the hot path
+    /// Called at startup so the hot path
     /// never needs <c>MakeGenericType</c> or <c>Activator.CreateInstance</c>.
     /// </summary>
     internal static void PreRegisterChildFactories(Type childType, Func<object> listFactory, Func<object> instanceFactory)
@@ -287,54 +343,76 @@ public static class DataScaffold
     /// <summary>Invalidates the cached entity list. Called when entities are registered.</summary>
     private static void InvalidateEntityListCache() => _cachedEntityList = null;
 
-    public static bool RegisterEntity<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicMethods | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] T>() where T : BaseDataObject, new()
+    /// <summary>
+    /// Builds standard CRUD handlers that delegate to the current data store
+    /// using entity-name-based (non-generic) APIs. Used when registering entities
+    /// without a compiled CLR type.
+    /// </summary>
+    public static DataEntityHandlers BuildStoreHandlers(string entityName, Func<BaseDataObject> create)
     {
-        var type = typeof(T);
-        var metadata = AttributeMetadataBuilder.BuildEntityMetadata<T>();
-        if (metadata == null)
-            return false;
-
-        // Build EntitySchema for compiled entities so every instance carries its
-        // entity name via BaseDataObject.Schema — eliminating .GetType() lookups.
-        var schema = BuildSchemaFromMetadata(metadata);
-        var originalCreate = metadata.Handlers.Create;
-        var wrappedHandlers = metadata.Handlers with
-        {
-            Create = () =>
-            {
-                var instance = originalCreate();
-                instance.Schema = schema;
-                return instance;
-            }
-        };
-        var enriched = metadata with { Handlers = wrappedHandlers };
-
-        EntitiesBySlug[enriched.Slug] = enriched;
-        EntitiesByName[enriched.Name] = enriched;
-        EntitiesByType[type] = enriched;
-        InvalidateEntityListCache();
-
-        // Ensure the serializer can instantiate this type without reflection
-        BinaryObjectSerializer.RegisterKnownType<T>();
-
-        return true;
+        return new DataEntityHandlers(
+            Create: create,
+            LoadAsync: (key, ct) => DataStoreProvider.Current.LoadAsync(entityName, key, ct),
+            SaveAsync: (obj, ct) => DataStoreProvider.Current.SaveAsync(entityName, obj, ct),
+            DeleteAsync: (key, ct) => DataStoreProvider.Current.DeleteAsync(entityName, key, ct),
+            QueryAsync: (q, ct) => DataStoreProvider.Current.QueryAsync(entityName, q, ct),
+            CountAsync: (q, ct) => DataStoreProvider.Current.CountAsync(entityName, q, ct)
+        );
     }
 
     /// <summary>
-    /// Registers a pre-built <see cref="DataEntityMetadata"/> directly.
-    /// Used for virtual entities whose metadata is constructed from JSON rather than
-    /// compiled C# attributes. The entity is indexed by slug only (not by CLR type).
+    /// Registers an entity by name using an existing <see cref="EntitySchema"/>.
+    /// Returns the entity ordinal. For entities defined in SystemEntitySchemas or
+    /// SystemCatalog metadata — no CLR type required.
     /// </summary>
-    public static bool RegisterVirtualEntity(DataEntityMetadata metadata)
+    public static int RegisterEntity(string entityName, EntitySchema schema, DataEntityHandlers handlers)
     {
-        if (metadata == null)
-            return false;
+        var metadata = new DataEntityMetadata(
+            Type: typeof(DataRecord),
+            Name: entityName,
+            Slug: schema.Slug,
+            Permissions: string.Empty,
+            ShowOnNav: false,
+            NavGroup: null,
+            NavOrder: 0,
+            IdGeneration: AutoIdStrategy.Sequential,
+            ViewType: ViewType.Table,
+            ParentField: null,
+            Fields: Array.Empty<DataFieldMetadata>(),
+            Handlers: handlers,
+            Commands: Array.Empty<RemoteCommandMetadata>()
+        );
+        metadata.Schema = schema;
+        int ordinal = AssignEntityOrdinal(metadata);
 
         EntitiesBySlug[metadata.Slug] = metadata;
         EntitiesByName[metadata.Name] = metadata;
         InvalidateEntityListCache();
 
-        return true;
+        return ordinal;
+    }
+
+    /// <summary>
+    /// Registers a pre-built <see cref="DataEntityMetadata"/> directly.
+    /// Returns the entity ordinal. Used for virtual entities whose metadata is
+    /// constructed from JSON rather than compiled C# attributes.
+    /// </summary>
+    public static int RegisterVirtualEntity(DataEntityMetadata metadata)
+    {
+        if (metadata == null)
+            return -1;
+
+        // Build schema if not already set (compiled entities have it, virtual may not)
+        metadata.Schema ??= BuildSchemaFromMetadata(metadata);
+
+        // Assign dense ordinal for O(1) dispatch
+        int ordinal = AssignEntityOrdinal(metadata);
+
+        EntitiesBySlug[metadata.Slug] = metadata;
+        EntitiesByName[metadata.Name] = metadata;
+        InvalidateEntityListCache();
+
+        return ordinal;
     }
 
     public static async ValueTask<object?> LoadAsync(DataEntityMetadata metadata, uint key, CancellationToken cancellationToken = default)
@@ -2615,27 +2693,6 @@ public static class DataScaffold
 
         return slug.Trim('-');
     }
-
-    internal static async ValueTask<BaseDataObject?> LoadTypedAsync<T>(uint key, CancellationToken cancellationToken) where T : BaseDataObject
-        => await DataStoreProvider.Current.LoadAsync<T>(key, cancellationToken);
-
-    internal static async ValueTask SaveTypedAsync<T>(BaseDataObject instance, CancellationToken cancellationToken) where T : BaseDataObject
-        => await DataStoreProvider.Current.SaveAsync((T)instance, cancellationToken);
-
-    internal static async ValueTask DeleteTypedAsync<T>(uint key, CancellationToken cancellationToken) where T : BaseDataObject
-        => await DataStoreProvider.Current.DeleteAsync<T>(key, cancellationToken);
-
-    internal static async ValueTask<IEnumerable<BaseDataObject>> QueryTypedAsync<T>(QueryDefinition? query, CancellationToken cancellationToken) where T : BaseDataObject
-    {
-        var results = await DataStoreProvider.Current.QueryAsync<T>(query, cancellationToken);
-        var list = new List<BaseDataObject>();
-        foreach (var item in results)
-            list.Add(item);
-        return list;
-    }
-
-    internal static async ValueTask<int> CountTypedAsync<T>(QueryDefinition? query, CancellationToken cancellationToken) where T : BaseDataObject
-        => await DataStoreProvider.Current.CountAsync<T>(query, cancellationToken);
 
     /// <summary>
     /// Evaluates all calculated fields on an entity instance server-side.

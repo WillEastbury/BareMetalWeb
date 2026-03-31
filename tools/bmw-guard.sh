@@ -20,7 +20,7 @@
 # Allowed exceptions:
 #   - Test projects (*.Tests/) and benchmarks are excluded
 #   - Build artifacts (obj/, bin/) are excluded
-#   - AttributeMetadataBuilder / DataScaffold use startup-time reflection (documented)
+#   - DataScaffold uses startup-time reflection (documented)
 #   - Utf8JsonWriter, JsonDocument, JsonElement are allowed (low-level, AOT-safe)
 
 set -e
@@ -91,11 +91,11 @@ check_with_exclude "dynamic " "dynamic keyword detected" \
 
 # Activator.CreateInstance (use typed factories or metadata-driven construction)
 check_with_exclude "Activator\.CreateInstance" "Activator.CreateInstance detected" \
-  "DataScaffold\.cs\|AttributeMetadataBuilder\.cs\|//\|///"
+  "DataScaffold\.cs\|//\|///"
 
 # MakeGenericType / MakeGenericMethod (NativeAOT-incompatible)
 check_with_exclude "MakeGenericType" "Type.MakeGenericType detected (NativeAOT incompatible)" \
-  "DataScaffold\.cs\|AttributeMetadataBuilder\.cs\|//\|///"
+  "DataScaffold\.cs\|//\|///"
 check "MakeGenericMethod" "MethodInfo.MakeGenericMethod detected (NativeAOT incompatible)"
 
 # Reflection.Emit (NativeAOT-incompatible)

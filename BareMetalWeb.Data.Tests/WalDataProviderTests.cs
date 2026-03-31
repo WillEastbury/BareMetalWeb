@@ -20,7 +20,9 @@ public sealed class WalDataProviderTests : IDisposable
     {
         _dir = Path.Combine(Path.GetTempPath(), "BmwWalProviderTests_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_dir);
-        BareMetalWeb.Core.DataScaffold.RegisterEntity<AppSetting>();
+        BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting,
+            BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => new AppSetting()));
+        BinaryObjectSerializer.RegisterKnownType(typeof(AppSetting), () => new AppSetting());
     }
 
     public void Dispose()
@@ -136,7 +138,7 @@ public sealed class WalDataProviderTests : IDisposable
     public void Query_WithEqualityFilter_ReturnsMatchingRecords()
     {
         // AppSetting must be registered with DataScaffold for filter evaluation
-        BareMetalWeb.Core.DataScaffold.RegisterEntity<AppSetting>();
+        BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting, BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => new AppSetting()));
 
         using var provider = new WalDataProvider(_dir);
         var s1 = MakeSetting("needle",  "yes");
@@ -369,7 +371,7 @@ public sealed class WalDataProviderTests : IDisposable
     {
         // AppSetting.SettingId is decorated with [DataIndex], so WalDataProvider
         // must populate the secondary index on Save and consult it on Query.
-        BareMetalWeb.Core.DataScaffold.RegisterEntity<AppSetting>();
+        BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting, BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => new AppSetting()));
         using var provider = new WalDataProvider(_dir);
 
         const int total = 20;
@@ -397,7 +399,7 @@ public sealed class WalDataProviderTests : IDisposable
     [Fact]
     public void Query_IndexedFieldEquals_NoMatch_ReturnsEmpty()
     {
-        BareMetalWeb.Core.DataScaffold.RegisterEntity<AppSetting>();
+        BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting, BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => new AppSetting()));
         using var provider = new WalDataProvider(_dir);
         for (int i = 0; i < 5; i++)
         {
@@ -421,7 +423,7 @@ public sealed class WalDataProviderTests : IDisposable
     [Fact]
     public void Query_IndexedField_AfterDelete_ExcludesDeletedRecord()
     {
-        BareMetalWeb.Core.DataScaffold.RegisterEntity<AppSetting>();
+        BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting, BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => new AppSetting()));
         using var provider = new WalDataProvider(_dir);
 
         var s1 = MakeSetting("del_target", "to_be_deleted");
@@ -450,7 +452,7 @@ public sealed class WalDataProviderTests : IDisposable
     [Fact]
     public void Query_IndexedField_AfterUpdate_ReflectsNewValue()
     {
-        BareMetalWeb.Core.DataScaffold.RegisterEntity<AppSetting>();
+        BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting, BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => new AppSetting()));
         using var provider = new WalDataProvider(_dir);
 
         var s = MakeSetting("old_id", "v");
@@ -489,7 +491,7 @@ public sealed class WalDataProviderTests : IDisposable
     {
         // Ensure that the secondary index paged files are persisted so a fresh
         // WalDataProvider instance can still accelerate queries.
-        BareMetalWeb.Core.DataScaffold.RegisterEntity<AppSetting>();
+        BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting, BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => new AppSetting()));
         string settingId;
 
         using (var p1 = new WalDataProvider(_dir))
