@@ -173,6 +173,19 @@ public static class FieldDefinitionFields
     public const int LookupValueField = BaseDataObject.BaseFieldCount + 22;
     public const int LookupDisplayField = BaseDataObject.BaseFieldCount + 23;
     public const int Multiline = BaseDataObject.BaseFieldCount + 24;
+    public const int ChildEntitySlug = BaseDataObject.BaseFieldCount + 25;
+    public const int LookupCopyFields = BaseDataObject.BaseFieldCount + 26;
+    public const int CalculatedExpression = BaseDataObject.BaseFieldCount + 27;
+    public const int CalculatedDisplayFormat = BaseDataObject.BaseFieldCount + 28;
+    public const int CopyFromParentField = BaseDataObject.BaseFieldCount + 29;
+    public const int CopyFromParentSlug = BaseDataObject.BaseFieldCount + 30;
+    public const int CopyFromParentSourceField = BaseDataObject.BaseFieldCount + 31;
+    public const int RelatedDocumentSlug = BaseDataObject.BaseFieldCount + 32;
+    public const int RelatedDocumentDisplayField = BaseDataObject.BaseFieldCount + 33;
+    public const int CascadeFromField = BaseDataObject.BaseFieldCount + 34;
+    public const int CascadeFilterField = BaseDataObject.BaseFieldCount + 35;
+    public const int FieldGroup = BaseDataObject.BaseFieldCount + 36;
+    public const int ColumnSpan = BaseDataObject.BaseFieldCount + 37;
 }
 
 /// <summary>Ordinal constants for IndexDefinition fields.</summary>

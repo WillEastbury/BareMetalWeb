@@ -116,11 +116,13 @@ public class SystemEntitySchemaTests
     public void FieldDefinitionSchema_OrdinalsMatchConstants()
     {
         var s = SystemEntitySchemas.FieldDefinition;
-        Assert.Equal(25, s.FieldCount);
+        Assert.Equal(38, s.FieldCount);
         Assert.Equal(FieldDefinitionFields.FieldId, Ord(s, "FieldId"));
         Assert.Equal(FieldDefinitionFields.Name, Ord(s, "Name"));
         Assert.Equal(FieldDefinitionFields.Ordinal, Ord(s, "Ordinal"));
         Assert.Equal(FieldDefinitionFields.Multiline, Ord(s, "Multiline"));
+        Assert.Equal(FieldDefinitionFields.ChildEntitySlug, Ord(s, "ChildEntitySlug"));
+        Assert.Equal(FieldDefinitionFields.ColumnSpan, Ord(s, "ColumnSpan"));
     }
 
     // ── ActionCommandDefinition ───────────────────────────────────────────

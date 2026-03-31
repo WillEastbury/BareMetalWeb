@@ -153,21 +153,28 @@ internal static class DeviceIdentity
             NetworkInterfaceType.Slip     or
             NetworkInterfaceType.GenericModem;
 
-        var candidate = NetworkInterface.GetAllNetworkInterfaces()
-            .Where(n => !IsVirtual(n.NetworkInterfaceType))
-            .OrderBy(n => NicPriority(n.NetworkInterfaceType))
-            .ThenBy(n => n.Name, StringComparer.Ordinal)
-            .FirstOrDefault(n =>
-            {
-                var addr = n.GetPhysicalAddress();
-                return addr is not null && !addr.Equals(PhysicalAddress.None)
-                    && addr.ToString().Length >= 12;
-            });
-
-        if (candidate is not null)
+        try
         {
-            var mac = candidate.GetPhysicalAddress().ToString();
-            if (mac.Length >= 12) return mac;
+            var candidate = NetworkInterface.GetAllNetworkInterfaces()
+                .Where(n => !IsVirtual(n.NetworkInterfaceType))
+                .OrderBy(n => NicPriority(n.NetworkInterfaceType))
+                .ThenBy(n => n.Name, StringComparer.Ordinal)
+                .FirstOrDefault(n =>
+                {
+                    var addr = n.GetPhysicalAddress();
+                    return addr is not null && !addr.Equals(PhysicalAddress.None)
+                        && addr.ToString().Length >= 12;
+                });
+
+            if (candidate is not null)
+            {
+                var mac = candidate.GetPhysicalAddress().ToString();
+                if (mac.Length >= 12) return mac;
+            }
+        }
+        catch (NetworkInformationException)
+        {
+            // Permission denied in restricted environments (containers, Termux, etc.)
         }
 
         return "000000000000";
