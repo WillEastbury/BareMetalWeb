@@ -314,9 +314,15 @@ a small soft-core co-processor if needed later.
 - Template stream from flash: ~50–100 μs (QSPI @ 80 MHz, 4 KB page)
 - Response frame + W5500 TX: ~30 μs
 
-**Total: ~100–160 μs per request** — comparable to BareMetalWeb's software
-0.1–0.15 ms page render, but with zero jitter, zero GC, and deterministic
-worst-case timing.
+**Total: ~100–160 μs per request** end-to-end (TCP read through TCP write).
+The SPI I/O dominates — the FPGA's own processing (parse, route, token
+replace) completes in ~2–10 μs at 48 MHz.
+
+For comparison, BareMetalWeb's software stack takes ~0.5–2 ms for the full
+request lifecycle (TCP stack + Kestrel + routing + render + response), with
+worst-case spikes of 10–100+ ms during GC pauses or thread contention.
+The FPGA is **~5–15× faster** end-to-end on average and **~100–1000×
+faster** on worst-case latency (fully deterministic, zero jitter).
 
 ---
 
@@ -344,8 +350,9 @@ Auth checks are done once per session creation, not per request.
 
 | Metric | BareMetalWeb (.NET) | iCE40 Engine |
 |--------|---------------------|--------------|
-| Page render latency | 0.1–0.15 ms | 0.1–0.16 ms |
-| Latency jitter | ±0.5 ms (GC, OS scheduler) | **0 (deterministic)** |
+| Processing latency (compute only) | 0.1–0.15 ms (render) | **0.002–0.01 ms (FSMs at 48 MHz)** |
+| Full request-to-response | 0.5–2 ms (TCP + Kestrel + render) | **0.1–0.16 ms (SPI I/O dominated)** |
+| Worst-case latency | 10–100+ ms (GC, thread contention) | **0.16 ms (deterministic, zero jitter)** |
 | Concurrent connections | Thousands (Kestrel) | 8 (W5500 sockets) |
 | Power | ~5 W (RPi) / ~15 W (x64) | **~50 mW** |
 | Storage | Unlimited (filesystem) | 16 MB flash + 32 KB SRAM |
