@@ -36,11 +36,10 @@ Just Kestrel, explicit routing, streaming HTML templates, a custom binary serial
 
 [![1 · CI1 — Tests & JIT Build](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/unit-tests.yml/badge.svg)](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/unit-tests.yml)
 [![2 · CI2 — AOT & Containers](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/container.yml/badge.svg)](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/container.yml)
-[![3 · CD1 — Canary & Extended Tests](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/cd-canary.yml/badge.svg)](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/cd-canary.yml)
-[![4 · CD2 — Early Adopters](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/cd-early-adopters.yml/badge.svg)](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/cd-early-adopters.yml)
-[![5 · CD3 — Full Rollout](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/cd-full-rollout.yml/badge.svg)](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/cd-full-rollout.yml)
+[![BMW Guard](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/bmw-guard.yml/badge.svg)](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/bmw-guard.yml)
 [![Build CLI](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/build-cli.yml/badge.svg)](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/build-cli.yml)
 [![Large Performance Stress Tests](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/perf-large.yml/badge.svg)](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/perf-large.yml)
+[![CodeQL](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/codeql.yml/badge.svg)](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/codeql.yml)
 
 📚 **[Full Documentation Index →](docs/index.md)** | 🗺️ **[Architecture Diagrams →](docs/architecture/system-overview.md)**
 
@@ -64,13 +63,6 @@ BareMetalWeb is a lean, mean web server that uses ASP.NET Core **only** for HTTP
 - **Static file serving** — streaming with ETag/Last-Modified/Cache-Control, MIME mapping
 - **Reverse proxy** — route-based forwarding with cookie stripping
 - **Native AOT CLI tool** — `metal` binary for managing any BareMetalWeb instance from the terminal
-
-### Live Instances
-
-| Environment | URL |
-|-------------|-----|
-| Development | https://baremetalweb.azurewebsites.net |
-| Production  | https://baremetalweb-prod.azurewebsites.net |
 
 ---
 
@@ -104,9 +96,17 @@ The first run triggers the **Out-of-Box Experience (OOBE)** setup wizard at `htt
 | `BareMetalWeb.Rendering` | SSR HTML fragment rendering |
 | `BareMetalWeb.Runtime` | Runtime/virtual entity definitions |
 | `BareMetalWeb.API` | REST API controller layer |
+| `BareMetalWeb.AI` | AI-assisted admin and entity designer tools (`Microsoft.Extensions.AI`) |
 | `BareMetalWeb.Intelligence` | BitNet b1.58 ternary inference engine (zero-dependency, AOT-safe) |
 | `BareMetalWeb.Intelligence.CLI` | Interactive REPL for testing the inference engine |
 | `BareMetalWeb.CLI` | Native AOT `metal` command-line tool |
+| `BareMetalWeb.Agent` | Node agent — self-registration, attestation, and runtime polling |
+| `BareMetalWeb.BootstrapAgent` | Bootstrap agent — runtime download, verification, and process management |
+| `BareMetalWeb.ControlPlane` | Telemetry streaming, heartbeats, and control-plane client |
+| `BareMetalWeb.Benchmarks` | BenchmarkDotNet micro-benchmarks |
+| `BareMetalWeb.*.Tests` | xUnit unit tests for each library |
+| `BareMetalWeb.IntegrationTests` | End-to-end integration tests |
+| `BareMetalWeb.PerformanceTests` | Performance benchmarking console app |
 
 ---
 

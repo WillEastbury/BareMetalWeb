@@ -17,6 +17,10 @@ Conceptual documentation explaining how the system works.
 - [UI Rendering](architecture/rendering.md) — SSR template pipeline, VNext SPA path, form rendering, report rendering
 - [Auth & Session](architecture/auth.md) — Login flow, session validation, permission model, CSRF lifecycle, API keys
 - [Intelligence Engine](architecture/intelligence.md) — BitNet b1.58 ternary inference, semantic pruning, BMWM snapshots, SIMD dot product
+- [Cluster State](architecture/cluster-state.md) — Distributed cluster state management and node coordination
+- [Hosting](architecture/hosting.md) — Kestrel hosting configuration, startup lifecycle, and request pipeline
+- [SIMD Optimizations](architecture/simd-optimizations.md) — Hardware-accelerated operations, Vector128/256, and performance patterns
+- [System Invariants](architecture/system-invariants.md) — Architectural constraints, non-negotiable rules, and design invariants
 
 ---
 
@@ -66,8 +70,7 @@ Detailed guides for specific features and view types.
 
 Guides for deploying and operating BareMetalWeb in production.
 
-- [CI Migration Deployment](CIMIGRATE_DEPLOYMENT.md) — Setup guide for the CI migration deployment workflow
-- [CI Reset Deployment](CIRESET_DEPLOYMENT.md) — Setup guide for the CI reset deployment workflow
+- [CI/CD Pipeline](CI-CD-PIPELINE.md) — CI-only pipeline: unit tests, AOT builds, container images, and artifact publishing
 
 ---
 

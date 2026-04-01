@@ -1,6 +1,6 @@
-# CI/CD Pipeline
+# CI Pipeline
 
-BareMetalWeb uses a 5-workflow pipeline that chains automated CI with gated CD rollouts. Each workflow triggers the next, with manual gates at the production deployment stages.
+BareMetalWeb uses a CI-only pipeline. Automated CD workflows were removed — deployment is handled manually or via local scripts. The pipeline validates every push and PR through tests, architectural guards, AOT builds, and container image publishing.
 
 ## Pipeline Flow
 
@@ -14,60 +14,27 @@ BareMetalWeb uses a 5-workflow pipeline that chains automated CI with gated CD r
                            │ workflow_run (success, main only)
                            ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│  CI2 · Build & Container Push (container.yml)                      │
-│  ───────────────────────────────────────────                        │
-│  JIT publish AnyCPU (deploy-package for Web Apps)                  │
-│  AOT publish linux-arm64 → Build thin container (Dockerfile.prebuilt) │
+│  CI2 · AOT & Containers (container.yml)                            │
+│  ───────────────────────────────────────                            │
+│  JIT publish AnyCPU (deploy-package artifact)                      │
+│  AOT publish linux-arm64 → Build thin container (Dockerfile.prebuilt)│
 │  → Push to ACR with version tag + OCI labels                       │
+│  → Build Agent container (Dockerfile.agent)                        │
 │  → Upload JIT deploy-package + AOT aot-linux-arm64 artifacts       │
-└──────────────────────────┬──────────────────────────────────────────┘
-                           │ workflow_run (success, main only)
-                           ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  CD1 · Canary Deploy & Extended Tests (cd-canary.yml)              │
-│  ────────────────────────────────────────────────────               │
-│  Deploy container to AKS → health check                            │
-│  → Setup test (fresh deploy + Playwright smoke)                    │
-│  → Upgrade test (existing data + integration tests)                │
-│  → Performance test (small + large datasets)                       │
-│  ■ STOPS HERE — review results before proceeding                   │
-└──────────────────────────┬──────────────────────────────────────────┘
-                           │ manual workflow_dispatch (image_tag)
-                           ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  CD2 · Early Adopter Rollout (cd-early-adopters.yml)               │
-│  ───────────────────────────────────────────────────                │
-│  Generate release notes → create GitHub Release                    │
-│  → Deploy to early-access tenants (from deploy-list.json)          │
-│  ■ STOPS HERE — validate early adopter tenants                     │
-└──────────────────────────┬──────────────────────────────────────────┘
-                           │ manual workflow_dispatch (image_tag)
-                           ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│  CD3 · Full Production Rollout (cd-full-rollout.yml)               │
-│  ───────────────────────────────────────────────────                │
-│  Gated by "production-rollout" environment (manual approval)       │
-│  → Deploy to remaining production tenants                          │
-│  → Deploy to AKS production                                       │
-│  → Health check + summary                                          │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-## Concurrency & Cancellation
+## Supporting Workflows
 
-CI1, CI2, and CD1 share a single concurrency group (`deploy-pipeline-<ref>`). When a new
-push lands on `main`, any in-progress run across those three stages is **cancelled** and
-the pipeline restarts from CI1. This guarantees only the latest commit is ever being
-validated or deployed — no overlapping or stale deployments.
+These workflows run independently of the CI1 → CI2 chain:
 
-| Workflows | Concurrency group | cancel-in-progress |
-|-----------|------------------|--------------------|
-| CI1, CI2, CD1 | `deploy-pipeline-${{ github.ref }}` | **true** — new push abandons old run |
-| CD2 | `cd2-early-adopters` | **false** — queues if already running |
-| CD3 | `cd3-full-rollout` | **false** — queues if already running |
-
-PR runs of CI1 are in their own group (`deploy-pipeline-refs/pull/…`) so they never
-cancel or block the main-branch pipeline.
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| `bmw-guard.yml` | Push, PRs | Scans for forbidden APIs and architectural violations |
+| `build-cli.yml` | Push to `BareMetalWeb.CLI/`, manual | Cross-platform Native AOT CLI binary builds |
+| `codeql.yml` | Nightly schedule, manual | GitHub CodeQL security scanning |
+| `perf-large.yml` | Nightly schedule, manual | Heavy stress tests with large datasets (trend analysis) |
+| `download-static-assets.yml` | Manual | Downloads Bootstrap themes, fonts, JS from CDNs |
 
 ## Workflow Details
 
@@ -77,7 +44,6 @@ cancel or block the main-branch pipeline.
 |-------------|-------|
 | **Trigger** | Push to main, pull requests, workflow_dispatch |
 | **Runners** | ubuntu-latest |
-| **Duration** | ~3–5 minutes |
 
 Builds the solution in Debug mode, then fans out to parallel test shards:
 - Data tests
@@ -86,93 +52,43 @@ Builds the solution in Debug mode, then fans out to parallel test shards:
 - Runtime tests
 - Core tests
 - API tests
+- Intelligence tests
 - Jest tests (JavaScript)
 
 All shards must pass for the `tests-passed` gate job to succeed, which triggers CI2.
 
-### CI2 · Build & Container Push (`container.yml`)
+### CI2 · AOT & Containers (`container.yml`)
 
 | Property    | Value |
 |-------------|-------|
 | **Trigger** | CI1 success on main, workflow_dispatch |
 | **Runners** | ubuntu-latest (JIT + summary), ubuntu-24.04-arm (arm64 AOT + container) |
-| **Duration** | ~5–8 minutes |
 
 Two parallel builds:
 
-1. **JIT AnyCPU Publish** — Produces a framework-dependent Release package (`deploy-package`) for Azure Web App deployments (no runtime, no AOT, runs anywhere .NET 10 is installed).
-2. **AOT Publish (linux-arm64)** — Produces a native self-contained binary on the native ARM runner, then packaged into a thin container using `Dockerfile.prebuilt` (no SDK layer — just copies the pre-built binary into `runtime-deps:10.0-noble-chiseled`).
+1. **JIT AnyCPU Publish** — Produces a framework-dependent Release package (`deploy-package`) — runs anywhere .NET 10 is installed.
+2. **AOT Publish (linux-arm64)** — Produces a native self-contained binary on the native ARM runner, then packaged into a thin container using `Dockerfile.prebuilt` (just copies the pre-built binary into `runtime-deps:10.0-noble-chiseled`).
 
-The container image is tagged `{version}-linux-arm64` and pushed to:
-   - Azure Container Registry (`metalclusterregistry.azurecr.io`)
+The host container image is tagged `{version}-linux-arm64` and pushed to Azure Container Registry (`metalclusterregistry.azurecr.io`).
 
-**Artifacts uploaded:** `deploy-package` (JIT, 3-day retention), `aot-linux-arm64` (3-day retention).
+The agent container is built from `Dockerfile.agent` and the agent binary artifact is uploaded separately.
 
-### CD1 · Canary Deploy & Extended Tests (`cd-canary.yml`)
+**Artifacts uploaded:** `deploy-package` (JIT, 3-day retention), `aot-linux-arm64` (3-day retention), `agent-linux-arm64` (3-day retention).
 
-| Property    | Value |
-|-------------|-------|
-| **Trigger** | CI2 success on main, workflow_dispatch (explicit `image_tag`) |
-| **Environment** | AKS canary (same namespace) |
-| **Duration** | ~15–30 minutes |
+## Local Script Equivalents
 
-When triggered automatically by CI2, CD1 derives the container tag from the triggering CI2 run metadata, so it deploys the exact image CI2 just built and pushed. When run manually, `image_tag` must be supplied explicitly. After deployment it runs three extended test stages:
-
-| Test | Purpose | Method |
-|------|---------|--------|
-| **Setup Test** | Fresh deploy validation | Deploys to `baremetalweb-cireset` with `reset-data.flag`, runs Playwright smoke tests |
-| **Upgrade Test** | Migration path validation | Deploys to `baremetalweb-upgrade` (preserves data), runs integration test suite |
-| **Performance Test** | Regression check | Runs performance benchmarks with small (100 addresses) and large (10K addresses) datasets |
-
-If any test fails, the pipeline stops and CD2 is not available.
-
-### CD2 · Early Adopter Rollout (`cd-early-adopters.yml`)
-
-| Property    | Value |
-|-------------|-------|
-| **Trigger** | Manual workflow_dispatch |
-| **Input** | `image_tag` — the tag validated by CD1 |
-| **Duration** | ~5–10 minutes |
-
-1. Verifies the image tag exists in ACR.
-2. Generates release notes by scanning merged PRs since the last `v*` tag. Categorizes into Features, Bug Fixes, and Other Changes.
-3. Creates a GitHub Release with the release notes.
-4. Reads `deploy-list.json` for tenants with `"ring": "early-access"` and deploys to each in parallel using the reusable `deploy-tenant.yml` workflow.
-5. Health-checks each tenant after deployment.
-
-### CD3 · Full Production Rollout (`cd-full-rollout.yml`)
-
-| Property    | Value |
-|-------------|-------|
-| **Trigger** | Manual workflow_dispatch |
-| **Input** | `image_tag` — same tag from CD2 |
-| **Gate** | `production-rollout` GitHub Environment (requires manual approval) |
-| **Duration** | ~10–15 minutes |
-
-## Local script equivalents
-
-For Linux/ARM local development, the GitHub Actions pipeline now maps cleanly to bash scripts under `infra/`:
+For Linux/ARM local development, the GitHub Actions pipeline maps to bash scripts under `infra/`:
 
 | Workflow | Local script | Purpose |
 |----------|--------------|---------|
 | `unit-tests.yml` (CI1) | `./infra/local-ci.sh` | Restore, Debug build, run .NET test shards, run Jest |
 | `container.yml` (CI2) | `./infra/local-ci2.sh` | Compute version, JIT publish, AOT publish (`linux-arm64`), optional Docker build/push |
-| `cd-canary.yml` (CD1) | `./infra/local-cd.sh --mode canary --image-tag <tag>` | Verify ACR tag, deploy to AKS, optionally run setup/upgrade/perf checks |
-| `deploy-tenant.yml` | `./infra/local-deploy-tenant.sh ...` | Deploy one local publish package to one Azure Web App |
-| `cd-early-adopters.yml` (CD2) | `./infra/local-cd.sh --mode early-access --image-tag <tag>` | Roll out to `early-access` targets from `deploy-list.json` |
-| `cd-full-rollout.yml` (CD3) | `./infra/local-cd.sh --mode production --image-tag <tag>` | Roll out to `production` targets and AKS |
 
 These scripts are intentionally simpler than the Actions workflows:
 
 - no artifact upload/download between jobs
-- no GitHub release creation or tagging
 - sequential execution instead of matrix fan-out
 - local environment variables replace GitHub secrets/contexts
-
-1. Verifies the image tag exists in ACR (gated by environment approval).
-2. Reads `deploy-list.json` for tenants with `"ring": "production"` and deploys in parallel.
-3. Deploys the same image to the AKS production StatefulSet.
-4. Health-checks everything and produces a final summary.
 
 ## Version Tagging
 
@@ -184,68 +100,18 @@ All versions follow the format: `{MAJOR}.{YYYYMMDD}.{BUILD_NUMBER}`
 
 Container image tags append the platform: `1.20260309.42-linux-arm64`
 
-## Tenant Deployment Rings
-
-Defined in `deploy-list.json` at the repository root:
-
-| Ring | Stage | Deployment |
-|------|-------|------------|
-| `ci-reset` | CD1 | Fresh deploy with data wipe |
-| `ci-upgrade` | CD1 | Upgrade deploy preserving data |
-| `canary` | CD1 | AKS canary pod |
-| `early-access` | CD2 | Early adopter tenants (parallel) |
-| `production` | CD3 | Remaining tenants (parallel, gated) |
-
 ## Required Secrets
 
 | Secret | Used by | Purpose |
 |--------|---------|---------|
-| `AZURE_CLIENT_ID` | CI2, CD1, CD3 | OIDC app registration for ACR + AKS |
-| `AZURE_TENANT_ID` | CI2, CD1, CD3 | Azure AD tenant |
-| `AZURE_SUBSCRIPTION_ID` | CI2, CD1, CD3 | Azure subscription |
-| `AZURE_CREDENTIALS` | CD1 | SP for baremetalweb-cireset (setup test) |
-| `AZURE_CREDENTIALS_UPGRADE` | CD1 | SP for baremetalweb-upgrade (upgrade test) |
-| `AZURE_CREDENTIALS_TENANTS` | CD2, CD3 | SP for tenant Web Apps |
-| `CIMIGRATE_TEST_USERNAME` | CD1 | Test user login |
-| `CIMIGRATE_TEST_DISPLAYNAME` | CD1 | Test user display name |
-| `CIMIGRATE_TEST_PASSWORD` | CD1 | Test user password |
-
-## Required GitHub Environments
-
-| Environment | Workflow | Purpose |
-|-------------|----------|---------|
-| `production-rollout` | CD3 | Manual approval gate before full production deploy |
+| `AZURE_CLIENT_ID` | CI2 | OIDC app registration for ACR |
+| `AZURE_TENANT_ID` | CI2 | Azure AD tenant |
+| `AZURE_SUBSCRIPTION_ID` | CI2 | Azure subscription |
 
 ## Dockerfiles
 
 | File | Purpose |
 |------|---------|
-| `Dockerfile` | Original multi-stage (SDK → AOT → chiseled). Retained for local development. |
-| `Dockerfile.prebuilt` | Thin single-stage (chiseled only). Used by CI2 for the linux-arm64 container. |
-| `Dockerfile.windows` | Original multi-stage for Windows Nano Server. Retained for local development. |
-| `Dockerfile.windows.prebuilt` | Thin single-stage for Windows. Retained for local development. |
-
-## How to Deploy Manually
-
-### Deploy a specific version to early adopters
-1. Go to **Actions** → **CD2 · Early Adopter Rollout** → **Run workflow**
-2. Enter the image tag (e.g., `1.20260309.42-linux-arm64`)
-3. Click **Run workflow**
-
-### Deploy to full production
-1. Go to **Actions** → **CD3 · Full Production Rollout** → **Run workflow**
-2. Enter the same image tag used in CD2
-3. Click **Run workflow**
-4. Approve the `production-rollout` environment when prompted
-
-## Other Workflows
-
-These workflows run independently of the main pipeline:
-
-| Workflow | Trigger | Purpose |
-|----------|---------|---------|
-| `build-cli.yml` | Push to `BareMetalWeb.CLI/`, manual | Cross-platform CLI binary builds |
-| `codeql.yml` | Nightly schedule, manual | GitHub CodeQL security scanning |
-| `deploy-tenant.yml` | Reusable (called by CD2/CD3) | Template for deploying to a single Azure tenant |
-| `download-static-assets.yml` | Manual | Downloads Bootstrap themes, fonts, JS from CDNs |
-| `perf-large.yml` | Nightly schedule, manual | Heavy stress tests with large datasets (trend analysis) |
+| `Dockerfile` | Multi-stage (SDK → AOT → chiseled). For local development. |
+| `Dockerfile.prebuilt` | Thin single-stage (chiseled only). Used by CI2 for the linux-arm64 host container. |
+| `Dockerfile.agent` | Agent container image built by CI2. |
