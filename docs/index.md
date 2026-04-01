@@ -93,6 +93,7 @@ Internal notes, reviews, and issue tracking for contributors.
 ## 🔧 Hardware / FPGA
 
 - [iCE40 Minimum Engine](fpga/ice40-minimum-engine.md) — Design exploration: BareMetalWeb request pipeline on a Lattice iCE40UP5K FPGA with W5500, ATECC508A, AS6C6256, and QSPI flash
+- [Pico + FPGA Accelerator](fpga/pico-fpga-accelerator.md) — Pico W/2W as CPU with iCE40UP5K as hardware rendering and indexing coprocessor over 16-bit PIO parallel bus
 
 ---
 
