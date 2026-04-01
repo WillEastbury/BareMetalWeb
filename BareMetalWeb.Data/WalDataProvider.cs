@@ -627,6 +627,28 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
     }
 
     /// <summary>
+    /// If a typed factory is registered for this entity (e.g. EntityDefinition),
+    /// creates a new typed instance and copies the _values array from the DataRecord.
+    /// This allows callers to cast results to the expected typed entity.
+    /// Returns the original record if no factory is registered.
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _typedFactoryCache = new(StringComparer.OrdinalIgnoreCase);
+
+    private static BaseDataObject? HydrateTyped(DataRecord? record, string entityTypeName)
+    {
+        if (record is null) return null;
+        var meta = BareMetalWeb.Core.DataScaffold.GetEntityByName(entityTypeName);
+        if (meta is null) return record;
+        // Check (and cache) whether the factory produces a typed entity or raw DataRecord
+        bool isTyped = _typedFactoryCache.GetOrAdd(entityTypeName, _ => meta.Handlers.Create() is not DataRecord);
+        if (!isTyped) return record;
+        var typed = meta.Handlers.Create();
+        typed.EnsureCapacity(record.FieldCount);
+        System.Array.Copy(record._values, typed._values, record.FieldCount);
+        return typed;
+    }
+
+    /// <summary>
     /// Ensures <paramref name="obj"/> is a <see cref="DataRecord"/> compatible with
     /// <paramref name="schema"/>.  If it already is one, returns it directly; otherwise
     /// copies base + entity field values into a new record.
@@ -684,7 +706,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
     public BaseDataObject? Load(string entityTypeName, uint key)
     {
         var schema = ResolveSchemaByName(entityTypeName);
-        return LoadRecord(key, schema);
+        return HydrateTyped(LoadRecord(key, schema), entityTypeName);
     }
 
     /// <inheritdoc />
@@ -695,7 +717,18 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
     public IEnumerable<BaseDataObject> Query(string entityTypeName, QueryDefinition? query = null)
     {
         var schema = ResolveSchemaByName(entityTypeName);
-        return QueryRecords(schema, query);
+        var records = QueryRecords(schema, query);
+        var meta = BareMetalWeb.Core.DataScaffold.GetEntityByName(entityTypeName);
+        if (meta is null) return records;
+        bool isTyped = _typedFactoryCache.GetOrAdd(entityTypeName, _ => meta.Handlers.Create() is not DataRecord);
+        if (!isTyped) return records;
+        return HydrateAll(records, entityTypeName);
+    }
+
+    private static IEnumerable<BaseDataObject> HydrateAll(IEnumerable<DataRecord> records, string entityTypeName)
+    {
+        foreach (var r in records)
+            yield return HydrateTyped(r, entityTypeName)!;
     }
 
     /// <inheritdoc />

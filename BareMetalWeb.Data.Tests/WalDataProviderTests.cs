@@ -36,8 +36,6 @@ public sealed class WalDataProviderTests : IDisposable
     private static AppSetting MakeSetting(string settingId, string value = "v")
         => new() { SettingId = settingId, Value = value, Description = "desc" };
 
-    private static readonly EntitySchema _schema = SystemEntitySchemas.AppSetting;
-
     // ── Save / Load ───────────────────────────────────────────────────────────
 
     [Fact]
@@ -50,12 +48,12 @@ public sealed class WalDataProviderTests : IDisposable
 
         // Act
         provider.Save("AppSetting", setting);
-        var loaded = provider.Load("AppSetting", setting.Key) as DataRecord;
+        var loaded = (AppSetting?)provider.Load("AppSetting", setting.Key);
 
         // Assert
         Assert.NotNull(loaded);
-        Assert.Equal("key1",  loaded!.GetField(_schema, "SettingId"));
-        Assert.Equal("hello", loaded!.GetField(_schema, "Value"));
+        Assert.Equal("key1",  loaded!.SettingId);
+        Assert.Equal("hello", loaded.Value);
     }
 
     [Fact]
@@ -73,11 +71,11 @@ public sealed class WalDataProviderTests : IDisposable
 
         // Act: read with a completely separate provider (simulates app restart)
         using var p2 = new WalDataProvider(_dir);
-        var loaded = p2.Load("AppSetting", key) as DataRecord;
+        var loaded = (AppSetting?)p2.Load("AppSetting", key);
 
         // Assert
         Assert.NotNull(loaded);
-        Assert.Equal("k2", loaded!.GetField(_schema, "SettingId"));
+        Assert.Equal("k2", loaded!.SettingId);
     }
 
     [Fact]
@@ -99,9 +97,9 @@ public sealed class WalDataProviderTests : IDisposable
         setting.Value = "updated";
         provider.Save("AppSetting", setting);
 
-        var loaded = provider.Load("AppSetting", setting.Key) as DataRecord;
+        var loaded = (AppSetting?)provider.Load("AppSetting", setting.Key);
         Assert.NotNull(loaded);
-        Assert.Equal("updated", loaded!.GetField(_schema, "Value"));
+        Assert.Equal("updated", loaded!.Value);
     }
 
     // ── Query ─────────────────────────────────────────────────────────────────
@@ -158,9 +156,9 @@ public sealed class WalDataProviderTests : IDisposable
             }
         };
 
-        var results = provider.Query("AppSetting", query).Cast<DataRecord>().ToList();
+        var results = provider.Query("AppSetting", query).Cast<AppSetting>().ToList();
         Assert.Single(results);
-        Assert.Equal("needle", results[0].GetField(_schema, "SettingId"));
+        Assert.Equal("needle", results[0].SettingId);
     }
 
     // ── Count ─────────────────────────────────────────────────────────────────
@@ -207,9 +205,9 @@ public sealed class WalDataProviderTests : IDisposable
 
         provider.Delete("AppSetting", s2.Key);
 
-        var results = provider.Query("AppSetting").Cast<DataRecord>().ToList();
+        var results = provider.Query("AppSetting").Cast<AppSetting>().ToList();
         Assert.Single(results);
-        Assert.Equal("keep", results[0].GetField(_schema, "SettingId"));
+        Assert.Equal("keep", results[0].SettingId);
     }
 
     [Fact]
@@ -248,10 +246,10 @@ public sealed class WalDataProviderTests : IDisposable
         var s = MakeSetting("async_key", "async_val");
         s.Key = provider.NextSequentialKey("AppSetting");
         await provider.SaveAsync("AppSetting", s);
-        var loaded = await provider.LoadAsync("AppSetting", s.Key) as DataRecord;
+        var loaded = (AppSetting?)await provider.LoadAsync("AppSetting", s.Key);
 
         Assert.NotNull(loaded);
-        Assert.Equal("async_val", loaded!.GetField(_schema, "Value"));
+        Assert.Equal("async_val", loaded!.Value);
     }
 
     [Fact]
@@ -382,10 +380,10 @@ public sealed class WalDataProviderTests : IDisposable
             }
         };
 
-        var results = provider.Query("AppSetting", query).Cast<DataRecord>().ToList();
+        var results = provider.Query("AppSetting", query).Cast<AppSetting>().ToList();
 
         Assert.Single(results);
-        Assert.Equal("sid_5", results[0].GetField(_schema, "SettingId"));
+        Assert.Equal("sid_5", results[0].SettingId);
     }
 
     [Fact]
@@ -408,7 +406,7 @@ public sealed class WalDataProviderTests : IDisposable
             }
         };
 
-        var results = provider.Query("AppSetting", query).Cast<DataRecord>().ToList();
+        var results = provider.Query("AppSetting", query).Cast<AppSetting>().ToList();
         Assert.Empty(results);
     }
 
@@ -437,7 +435,7 @@ public sealed class WalDataProviderTests : IDisposable
             }
         };
 
-        var results = provider.Query("AppSetting", query).Cast<DataRecord>().ToList();
+        var results = provider.Query("AppSetting", query).Cast<AppSetting>().ToList();
         Assert.Empty(results);
     }
 
@@ -463,7 +461,7 @@ public sealed class WalDataProviderTests : IDisposable
                 new() { Field = nameof(AppSetting.SettingId), Operator = QueryOperator.Equals, Value = "old_id" }
             }
         };
-        Assert.Empty(provider.Query("AppSetting", queryOld).Cast<DataRecord>().ToList());
+        Assert.Empty(provider.Query("AppSetting", queryOld).Cast<AppSetting>().ToList());
 
         // new value must be found
         var queryNew = new QueryDefinition
@@ -473,9 +471,9 @@ public sealed class WalDataProviderTests : IDisposable
                 new() { Field = nameof(AppSetting.SettingId), Operator = QueryOperator.Equals, Value = "new_id" }
             }
         };
-        var results = provider.Query("AppSetting", queryNew).Cast<DataRecord>().ToList();
+        var results = provider.Query("AppSetting", queryNew).Cast<AppSetting>().ToList();
         Assert.Single(results);
-        Assert.Equal("new_id", results[0].GetField(_schema, "SettingId"));
+        Assert.Equal("new_id", results[0].SettingId);
     }
 
     [Fact]
@@ -503,8 +501,8 @@ public sealed class WalDataProviderTests : IDisposable
             }
         };
 
-        var results = p2.Query("AppSetting", query).Cast<DataRecord>().ToList();
+        var results = p2.Query("AppSetting", query).Cast<AppSetting>().ToList();
         Assert.Single(results);
-        Assert.Equal(settingId, results[0].GetField(_schema, "SettingId"));
+        Assert.Equal(settingId, results[0].SettingId);
     }
 }
