@@ -39,14 +39,14 @@ public static class UserAuth
             return null;
         }
 
-        var session = DataStoreProvider.Current.Load<UserSession>(sessionKey);
+        var session = DataStoreProvider.Current.Load("UserSession", sessionKey) as UserSession;
         if (session == null)
             return null;
 
         if (string.IsNullOrWhiteSpace(session.UserId))
         {
             session.IsRevoked = true;
-            DataStoreProvider.Current.Save(session);
+            DataStoreProvider.Current.Save(session.EntityTypeName, session);
             context.DeleteCookie(SessionCookieName);
             return null;
         }
@@ -54,7 +54,7 @@ public static class UserAuth
         if (session.IsExpired(DateTime.UtcNow))
         {
             session.IsRevoked = true;
-            DataStoreProvider.Current.Save(session);
+            DataStoreProvider.Current.Save(session.EntityTypeName, session);
             context.DeleteCookie(SessionCookieName);
             return null;
         }
@@ -75,7 +75,7 @@ public static class UserAuth
                 try
                 {
                     session.ExpiresUtc = newExpiry;
-                    DataStoreProvider.Current.Save(session);
+                    DataStoreProvider.Current.Save(session.EntityTypeName, session);
                     if (session.RememberMe)
                         ReissueCookie(context, protectedSessionId, session.ExpiresUtc);
                 }
@@ -111,14 +111,14 @@ public static class UserAuth
             return null;
         }
 
-        var session = await DataStoreProvider.Current.LoadAsync<UserSession>(sessionKey, cancellationToken).ConfigureAwait(false);
+        var session = (UserSession?)(await DataStoreProvider.Current.LoadAsync("UserSession", sessionKey, cancellationToken).ConfigureAwait(false));
         if (session == null)
             return null;
 
         if (string.IsNullOrWhiteSpace(session.UserId))
         {
             session.IsRevoked = true;
-            await DataStoreProvider.Current.SaveAsync(session, cancellationToken).ConfigureAwait(false);
+            await DataStoreProvider.Current.SaveAsync(session.EntityTypeName, session, cancellationToken).ConfigureAwait(false);
             context.DeleteCookie(SessionCookieName);
             return null;
         }
@@ -126,7 +126,7 @@ public static class UserAuth
         if (session.IsExpired(DateTime.UtcNow))
         {
             session.IsRevoked = true;
-            await DataStoreProvider.Current.SaveAsync(session, cancellationToken).ConfigureAwait(false);
+            await DataStoreProvider.Current.SaveAsync(session.EntityTypeName, session, cancellationToken).ConfigureAwait(false);
             context.DeleteCookie(SessionCookieName);
             return null;
         }
@@ -147,7 +147,7 @@ public static class UserAuth
                 try
                 {
                     session.ExpiresUtc = newExpiry;
-                    await DataStoreProvider.Current.SaveAsync(session, cancellationToken).ConfigureAwait(false);
+                    await DataStoreProvider.Current.SaveAsync(session.EntityTypeName, session, cancellationToken).ConfigureAwait(false);
                     if (session.RememberMe)
                         ReissueCookie(context, protectedSessionId, session.ExpiresUtc);
                 }
@@ -236,7 +236,7 @@ public static class UserAuth
             UpdatedBy = userName
         };
 
-        await DataStoreProvider.Current.SaveAsync(session, cancellationToken).ConfigureAwait(false);
+        await DataStoreProvider.Current.SaveAsync(session.EntityTypeName, session, cancellationToken).ConfigureAwait(false);
 
         var options = new CookieOptions
         {
@@ -260,7 +260,7 @@ public static class UserAuth
         if (session != null)
         {
             session.IsRevoked = true;
-            await DataStoreProvider.Current.SaveAsync(session, cancellationToken).ConfigureAwait(false);
+            await DataStoreProvider.Current.SaveAsync(session.EntityTypeName, session, cancellationToken).ConfigureAwait(false);
         }
 
         context.DeleteCookie(SessionCookieName);

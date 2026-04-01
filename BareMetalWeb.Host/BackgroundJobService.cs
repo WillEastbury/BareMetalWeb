@@ -248,7 +248,7 @@ public sealed class BackgroundJobService
                 ResultUrl    = entry.ResultUrl,
                 InstanceId   = InstanceId
             };
-            await store.SaveAsync(walJob).ConfigureAwait(false);
+            await store.SaveAsync(walJob.EntityTypeName, walJob).ConfigureAwait(false);
         }
         catch
         {

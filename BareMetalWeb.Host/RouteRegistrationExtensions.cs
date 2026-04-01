@@ -1716,7 +1716,7 @@ public static class RouteRegistrationExtensions
                 if (!new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase).Contains("admin"))
                 { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
 
-                var reports = new List<ReportDefinition>(DataStoreProvider.Current.Query<ReportDefinition>(null));
+                var reports = DataStoreProvider.Current.Query("ReportDefinition", null).Cast<ReportDefinition>().ToList();
                 reports.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));
 
                 context.Response.ContentType = "application/json";
@@ -1787,7 +1787,7 @@ public static class RouteRegistrationExtensions
                     return;
                 }
 
-                var def = await DataStoreProvider.Current.LoadAsync<ReportDefinition>(parsedId, context.RequestAborted).ConfigureAwait(false);
+                var def = (ReportDefinition?)(await DataStoreProvider.Current.LoadAsync("ReportDefinition", parsedId, context.RequestAborted).ConfigureAwait(false));
                 if (def == null)
                 {
                     context.Response.StatusCode = 404;
@@ -2479,7 +2479,7 @@ public static class RouteRegistrationExtensions
                 if (!new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase).Contains("admin"))
                 { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
 
-                var dashboards = new List<DashboardDefinition>(DataStoreProvider.Current.Query<DashboardDefinition>(null));
+                var dashboards = DataStoreProvider.Current.Query("DashboardDefinition", null).Cast<DashboardDefinition>().ToList();
                 dashboards.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));
                 var list = dashboards.Select(d => new Dictionary<string, object?>
                 {
@@ -2509,7 +2509,7 @@ public static class RouteRegistrationExtensions
                 if (string.IsNullOrWhiteSpace(id) || !uint.TryParse(id, out var dashId))
                 { context.Response.StatusCode = 400; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Invalid dashboard id\"}"); return; }
 
-                var def = await DataStoreProvider.Current.LoadAsync<DashboardDefinition>(dashId, context.RequestAborted).ConfigureAwait(false);
+                var def = (DashboardDefinition?)(await DataStoreProvider.Current.LoadAsync("DashboardDefinition", dashId, context.RequestAborted).ConfigureAwait(false));
                 if (def == null)
                 { context.Response.StatusCode = 404; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Dashboard not found\"}"); return; }
 
@@ -2849,7 +2849,7 @@ public static class RouteRegistrationExtensions
                 },
                 Top = 50
             };
-            var sessions = DataStoreProvider.Current.Query<Runtime.ChatSession>(query).ToList();
+            var sessions = DataStoreProvider.Current.Query("ChatSession", query).Cast<Runtime.ChatSession>().ToList();
 
             context.Response.ContentType = "application/json";
             var payload = new Dictionary<string, object?>[sessions.Count];
@@ -2898,7 +2898,7 @@ public static class RouteRegistrationExtensions
                 MessageCount = 0,
                 Status = "active"
             };
-            await DataStoreProvider.Current.SaveAsync(session, context.RequestAborted).ConfigureAwait(false);
+            await DataStoreProvider.Current.SaveAsync(session.EntityTypeName, session, context.RequestAborted).ConfigureAwait(false);
 
             context.Response.StatusCode = 201;
             context.Response.ContentType = "application/json";
@@ -2922,7 +2922,7 @@ public static class RouteRegistrationExtensions
             if (!uint.TryParse(idStr, out var sessionId))
             { context.Response.StatusCode = 400; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Invalid session id\"}"); return; }
 
-            var session = await DataStoreProvider.Current.LoadAsync<Runtime.ChatSession>(sessionId, context.RequestAborted).ConfigureAwait(false);
+            var session = (Runtime.ChatSession?)(await DataStoreProvider.Current.LoadAsync("ChatSession", sessionId, context.RequestAborted).ConfigureAwait(false));
             if (session == null || !string.Equals(session.UserName, (UserAuth.GetUserName(user) ?? user.Key.ToString()), StringComparison.OrdinalIgnoreCase))
             { context.Response.StatusCode = 404; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Session not found\"}"); return; }
 
@@ -2938,7 +2938,7 @@ public static class RouteRegistrationExtensions
                 },
                 Top = 200
             };
-            var messages = DataStoreProvider.Current.Query<Runtime.ChatMessage>(msgQuery).ToList();
+            var messages = DataStoreProvider.Current.Query("ChatMessage", msgQuery).Cast<Runtime.ChatMessage>().ToList();
 
             context.Response.ContentType = "application/json";
             await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
@@ -2984,7 +2984,7 @@ public static class RouteRegistrationExtensions
             if (!uint.TryParse(idStr, out var sessionId))
             { context.Response.StatusCode = 400; return; }
 
-            var session = await DataStoreProvider.Current.LoadAsync<Runtime.ChatSession>(sessionId, context.RequestAborted).ConfigureAwait(false);
+            var session = (Runtime.ChatSession?)(await DataStoreProvider.Current.LoadAsync("ChatSession", sessionId, context.RequestAborted).ConfigureAwait(false));
             if (session == null || !string.Equals(session.UserName, (UserAuth.GetUserName(user) ?? user.Key.ToString()), StringComparison.OrdinalIgnoreCase))
             { context.Response.StatusCode = 404; return; }
 
@@ -2996,11 +2996,11 @@ public static class RouteRegistrationExtensions
                     new() { Field = "SessionId", Operator = QueryOperator.Equals, Value = sessionId }
                 }
             };
-            var messages = DataStoreProvider.Current.Query<Runtime.ChatMessage>(msgQuery).ToList();
+            var messages = DataStoreProvider.Current.Query("ChatMessage", msgQuery).ToList();
             foreach (var msg in messages)
-                await DataStoreProvider.Current.DeleteAsync<Runtime.ChatMessage>(msg.Key, context.RequestAborted).ConfigureAwait(false);
+                await DataStoreProvider.Current.DeleteAsync("ChatMessage", msg.Key, context.RequestAborted).ConfigureAwait(false);
 
-            await DataStoreProvider.Current.DeleteAsync<Runtime.ChatSession>(sessionId, context.RequestAborted).ConfigureAwait(false);
+            await DataStoreProvider.Current.DeleteAsync("ChatSession", sessionId, context.RequestAborted).ConfigureAwait(false);
 
             context.Response.StatusCode = 200;
             context.Response.ContentType = "application/json";
@@ -3020,7 +3020,7 @@ public static class RouteRegistrationExtensions
             if (!uint.TryParse(idStr, out var sessionId))
             { context.Response.StatusCode = 400; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Invalid session id\"}"); return; }
 
-            var session = await DataStoreProvider.Current.LoadAsync<Runtime.ChatSession>(sessionId, context.RequestAborted).ConfigureAwait(false);
+            var session = (Runtime.ChatSession?)(await DataStoreProvider.Current.LoadAsync("ChatSession", sessionId, context.RequestAborted).ConfigureAwait(false));
             if (session == null || !string.Equals(session.UserName, (UserAuth.GetUserName(user) ?? user.Key.ToString()), StringComparison.OrdinalIgnoreCase))
             { context.Response.StatusCode = 404; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Session not found\"}"); return; }
 
@@ -3043,7 +3043,7 @@ public static class RouteRegistrationExtensions
                 TimestampUtc = DateTime.UtcNow,
                 TokenCount = EstimateTokens(content)
             };
-            await DataStoreProvider.Current.SaveAsync(userMsg, context.RequestAborted).ConfigureAwait(false);
+            await DataStoreProvider.Current.SaveAsync(userMsg.EntityTypeName, userMsg, context.RequestAborted).ConfigureAwait(false);
 
             // Invoke the IntelligenceOrchestrator
             var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -3071,14 +3071,14 @@ public static class RouteRegistrationExtensions
                 ResolvedIntent = aiResponse.ResolvedIntent,
                 Confidence = (decimal)aiResponse.Confidence
             };
-            await DataStoreProvider.Current.SaveAsync(assistantMsg, context.RequestAborted).ConfigureAwait(false);
+            await DataStoreProvider.Current.SaveAsync(assistantMsg.EntityTypeName, assistantMsg, context.RequestAborted).ConfigureAwait(false);
 
             // Update session
             session.MessageCount += 2;
             session.UpdatedAtUtc = DateTime.UtcNow;
             if (session.MessageCount == 2 && session.Title == "New Chat")
                 session.Title = content.Length > 60 ? content[..57] + "..." : content;
-            await DataStoreProvider.Current.SaveAsync(session, context.RequestAborted).ConfigureAwait(false);
+            await DataStoreProvider.Current.SaveAsync(session.EntityTypeName, session, context.RequestAborted).ConfigureAwait(false);
 
             // Return the assistant response
             context.Response.ContentType = "application/json";
@@ -3115,7 +3115,7 @@ public static class RouteRegistrationExtensions
             if (!uint.TryParse(idStr, out var sessionId))
             { context.Response.StatusCode = 400; return; }
 
-            var session = await DataStoreProvider.Current.LoadAsync<Runtime.ChatSession>(sessionId, context.RequestAborted).ConfigureAwait(false);
+            var session = (Runtime.ChatSession?)(await DataStoreProvider.Current.LoadAsync("ChatSession", sessionId, context.RequestAborted).ConfigureAwait(false));
             if (session == null || !string.Equals(session.UserName, (UserAuth.GetUserName(user) ?? user.Key.ToString()), StringComparison.OrdinalIgnoreCase))
             { context.Response.StatusCode = 404; return; }
 
@@ -3136,7 +3136,7 @@ public static class RouteRegistrationExtensions
                 Skip = skip,
                 Top = top
             };
-            var messages = DataStoreProvider.Current.Query<Runtime.ChatMessage>(msgQuery).ToList();
+            var messages = DataStoreProvider.Current.Query("ChatMessage", msgQuery).Cast<Runtime.ChatMessage>().ToList();
 
             context.Response.ContentType = "application/json";
             var payload = new Dictionary<string, object?>[messages.Count];
@@ -3196,7 +3196,7 @@ public static class RouteRegistrationExtensions
                 var userPermissions = new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase);
                 if (!userPermissions.Contains("admin")) { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
 
-                var views = new List<ViewDefinition>(DataStoreProvider.Current.Query<ViewDefinition>(null));
+                var views = DataStoreProvider.Current.Query("ViewDefinition", null).Cast<ViewDefinition>().ToList();
                 views.Sort((a, b) => string.Compare(a.ViewName, b.ViewName, StringComparison.Ordinal));
 
                 var items = new object[views.Count];
@@ -3240,7 +3240,7 @@ public static class RouteRegistrationExtensions
                     return;
                 }
 
-                var def = await DataStoreProvider.Current.LoadAsync<ViewDefinition>(viewKey, context.RequestAborted).ConfigureAwait(false);
+                var def = (ViewDefinition?)(await DataStoreProvider.Current.LoadAsync("ViewDefinition", viewKey, context.RequestAborted).ConfigureAwait(false));
                 if (def == null)
                 {
                     context.Response.StatusCode = 404;
@@ -3644,14 +3644,14 @@ public static class RouteRegistrationExtensions
             var secret = authHeader.AsSpan(7).ToString();
 
             // Find the node
-            var nodes = DataStoreProvider.Current.Query<DeploymentNode>(new QueryDefinition
+            var nodes = DataStoreProvider.Current.Query("DeploymentNode", new QueryDefinition
             {
                 Clauses = new List<QueryClause>
                 {
                     new() { Field = "NodeId", Operator = QueryOperator.Equals, Value = nodeId }
                 },
                 Top = 1
-            }).ToList();
+            }).Cast<DeploymentNode>().ToList();
 
             if (nodes.Count == 0) { context.Response.StatusCode = 404; return; }
             var node = nodes[0];
@@ -3675,11 +3675,11 @@ public static class RouteRegistrationExtensions
             var reportedArch = context.HttpRequest.Headers["X-BMW-Architecture"].ToString();
             if (!string.IsNullOrEmpty(reportedArch))
                 node.Architecture = reportedArch;
-            await DataStoreProvider.Current.SaveAsync(node, context.RequestAborted).ConfigureAwait(false);
+            await DataStoreProvider.Current.SaveAsync(node.EntityTypeName, node, context.RequestAborted).ConfigureAwait(false);
 
             // Find the desired release for this node's ring + architecture
             var arch = string.IsNullOrEmpty(node.Architecture) ? "Arm64" : node.Architecture;
-            var releases = DataStoreProvider.Current.Query<RuntimeRelease>(new QueryDefinition
+            var releases = DataStoreProvider.Current.Query("RuntimeRelease", new QueryDefinition
             {
                 Clauses = new List<QueryClause>
                 {
@@ -3691,7 +3691,7 @@ public static class RouteRegistrationExtensions
                     new() { Field = "PublishedAtUtc", Direction = SortDirection.Desc }
                 },
                 Top = 20
-            }).ToList();
+            }).Cast<RuntimeRelease>().ToList();
 
             // Match: release targets this node's ring or "all"
             var release = releases.FirstOrDefault(r =>
@@ -3734,7 +3734,7 @@ public static class RouteRegistrationExtensions
             if (string.IsNullOrEmpty(arch)) arch = "Arm64";
 
             // Find the release
-            var releases = DataStoreProvider.Current.Query<RuntimeRelease>(new QueryDefinition
+            var releases = DataStoreProvider.Current.Query("RuntimeRelease", new QueryDefinition
             {
                 Clauses = new List<QueryClause>
                 {
@@ -3743,7 +3743,7 @@ public static class RouteRegistrationExtensions
                     new() { Field = "IsActive", Operator = QueryOperator.Equals, Value = true }
                 },
                 Top = 1
-            }).ToList();
+            }).Cast<RuntimeRelease>().ToList();
 
             if (releases.Count == 0) { context.Response.StatusCode = 404; return; }
             var release = releases[0];
@@ -3753,7 +3753,7 @@ public static class RouteRegistrationExtensions
             var secretHash = Convert.ToHexString(
                 System.Security.Cryptography.SHA256.HashData(
                     System.Text.Encoding.UTF8.GetBytes(secret))).ToLowerInvariant();
-            var validNode = DataStoreProvider.Current.Query<DeploymentNode>(new QueryDefinition
+            var validNode = DataStoreProvider.Current.Query("DeploymentNode", new QueryDefinition
             {
                 Clauses = new List<QueryClause>
                 {
@@ -3808,7 +3808,7 @@ public static class RouteRegistrationExtensions
             await File.WriteAllBytesAsync(binaryPath, data, context.RequestAborted).ConfigureAwait(false);
 
             // Create or update release entity
-            var existing = DataStoreProvider.Current.Query<RuntimeRelease>(new QueryDefinition
+            var existing = DataStoreProvider.Current.Query("RuntimeRelease", new QueryDefinition
             {
                 Clauses = new List<QueryClause>
                 {
@@ -3816,7 +3816,7 @@ public static class RouteRegistrationExtensions
                     new() { Field = "Architecture", Operator = QueryOperator.Equals, Value = arch }
                 },
                 Top = 1
-            }).FirstOrDefault();
+            }).Cast<RuntimeRelease>().FirstOrDefault();
 
             var release = existing ?? new RuntimeRelease();
             release.Version = version;
@@ -3826,7 +3826,7 @@ public static class RouteRegistrationExtensions
             release.PublishedAtUtc = DateTime.UtcNow;
             release.TargetRing = ring;
             release.IsActive = true;
-            await DataStoreProvider.Current.SaveAsync(release, context.RequestAborted).ConfigureAwait(false);
+            await DataStoreProvider.Current.SaveAsync(release.EntityTypeName, release, context.RequestAborted).ConfigureAwait(false);
 
             context.Response.ContentType = "application/json";
             await using var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions);
@@ -3846,14 +3846,14 @@ public static class RouteRegistrationExtensions
             var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
             if (user == null) { context.Response.StatusCode = 401; return; }
 
-            var releases = DataStoreProvider.Current.Query<RuntimeRelease>(new QueryDefinition
+            var releases = DataStoreProvider.Current.Query("RuntimeRelease", new QueryDefinition
             {
                 Sorts = new List<SortClause>
                 {
                     new() { Field = "PublishedAtUtc", Direction = SortDirection.Desc }
                 },
                 Top = 100
-            }).ToList();
+            }).Cast<RuntimeRelease>().ToList();
 
             context.Response.ContentType = "application/json";
             await using var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions);
@@ -3896,14 +3896,14 @@ public static class RouteRegistrationExtensions
             }
 
             // Find existing or create new
-            var existing = DataStoreProvider.Current.Query<DeploymentNode>(new QueryDefinition
+            var existing = DataStoreProvider.Current.Query("DeploymentNode", new QueryDefinition
             {
                 Clauses = new List<QueryClause>
                 {
                     new() { Field = "NodeId", Operator = QueryOperator.Equals, Value = nodeId }
                 },
                 Top = 1
-            }).FirstOrDefault();
+            }).Cast<DeploymentNode>().FirstOrDefault();
 
             var node = existing ?? new DeploymentNode { NodeId = nodeId };
 
@@ -3921,7 +3921,7 @@ public static class RouteRegistrationExtensions
             if (root.TryGetProperty("displayName", out var dn)) node.DisplayName = dn.GetString() ?? "";
             if (root.TryGetProperty("clusterEndpoint", out var ce)) node.ClusterEndpoint = ce.GetString() ?? "";
 
-            await DataStoreProvider.Current.SaveAsync(node, context.RequestAborted).ConfigureAwait(false);
+            await DataStoreProvider.Current.SaveAsync(node.EntityTypeName, node, context.RequestAborted).ConfigureAwait(false);
 
             context.Response.ContentType = "application/json";
             await using var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions);
@@ -3941,14 +3941,14 @@ public static class RouteRegistrationExtensions
             var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
             if (user == null) { context.Response.StatusCode = 401; return; }
 
-            var nodes = DataStoreProvider.Current.Query<DeploymentNode>(new QueryDefinition
+            var nodes = DataStoreProvider.Current.Query("DeploymentNode", new QueryDefinition
             {
                 Sorts = new List<SortClause>
                 {
                     new() { Field = "NodeId", Direction = SortDirection.Asc }
                 },
                 Top = 500
-            }).ToList();
+            }).Cast<DeploymentNode>().ToList();
 
             context.Response.ContentType = "application/json";
             await using var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions);
@@ -3981,7 +3981,7 @@ public static class RouteRegistrationExtensions
             var idStr = GetRouteParam(context, "id");
             if (!uint.TryParse(idStr, out var key)) { context.Response.StatusCode = 400; return; }
 
-            await DataStoreProvider.Current.DeleteAsync<DeploymentNode>(key, context.RequestAborted).ConfigureAwait(false);
+            await DataStoreProvider.Current.DeleteAsync("DeploymentNode", key, context.RequestAborted).ConfigureAwait(false);
             context.Response.StatusCode = 204;
         }));
 
@@ -4000,14 +4000,14 @@ public static class RouteRegistrationExtensions
             }
             var secret = authHeader.AsSpan(7).ToString();
 
-            var nodes = DataStoreProvider.Current.Query<DeploymentNode>(new QueryDefinition
+            var nodes = DataStoreProvider.Current.Query("DeploymentNode", new QueryDefinition
             {
                 Clauses = new List<QueryClause>
                 {
                     new() { Field = "NodeId", Operator = QueryOperator.Equals, Value = nodeId }
                 },
                 Top = 1
-            }).ToList();
+            }).Cast<DeploymentNode>().ToList();
 
             if (nodes.Count == 0)
             {
@@ -4080,7 +4080,7 @@ public static class RouteRegistrationExtensions
             if (riskScore >= 80)
             {
                 node.Status = NodeStatus.Quarantined;
-                await DataStoreProvider.Current.SaveAsync(node, context.RequestAborted).ConfigureAwait(false);
+                await DataStoreProvider.Current.SaveAsync(node.EntityTypeName, node, context.RequestAborted).ConfigureAwait(false);
                 await WriteCapsuleDenied(context, 403, CapsuleDenialReason.NetworkPolicyViolation, riskScore);
                 return;
             }
@@ -4113,7 +4113,7 @@ public static class RouteRegistrationExtensions
             if (!string.IsNullOrEmpty(requestRegion)) node.LastKnownRegion = requestRegion;
             node.LastCapsuleIssuedUtc = now;
             node.LastHeartbeatUtc = now;
-            await DataStoreProvider.Current.SaveAsync(node, context.RequestAborted).ConfigureAwait(false);
+            await DataStoreProvider.Current.SaveAsync(node.EntityTypeName, node, context.RequestAborted).ConfigureAwait(false);
 
             // ── 8. Write capsule response ──
             context.Response.StatusCode = 200;

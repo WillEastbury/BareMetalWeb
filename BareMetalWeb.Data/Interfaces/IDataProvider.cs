@@ -21,19 +21,8 @@ public interface IDataProvider
     string IndexLogExtension { get; }
     string IndexSnapshotExtension { get; }
     string IndexTempExtension { get; }
-    bool CanHandle(Type type);
-    void Save<T>(T obj) where T : BaseDataObject;
-    ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject;
-    T? Load<T>(uint key) where T : BaseDataObject;
-    ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject;
-    IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject;
-    ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject;
-    int Count<T>(QueryDefinition? query = null) where T : BaseDataObject;
-    ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject;
-    void Delete<T>(uint key) where T : BaseDataObject;
-    ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject;
 
-    // ── Entity-name-based overloads (no generic type required) ──────────
+    // ── Entity-name-based CRUD (canonical API) ──────────────────────────
     void Save(string entityTypeName, BaseDataObject obj);
     ValueTask SaveAsync(string entityTypeName, BaseDataObject obj, CancellationToken cancellationToken = default);
     BaseDataObject? Load(string entityTypeName, uint key);

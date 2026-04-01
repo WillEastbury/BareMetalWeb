@@ -55,8 +55,8 @@ public static class SystemCatalog
         Action<string>? logger = null,
         CancellationToken ct = default)
     {
-        var existing = new List<EntityDefinition>(
-            await store.QueryAsync<EntityDefinition>(null, ct).ConfigureAwait(false));
+        var existing = (await store.QueryAsync("EntityDefinition", null, ct).ConfigureAwait(false))
+            .Cast<EntityDefinition>().ToList();
         var bySlug = new Dictionary<string, EntityDefinition>(StringComparer.OrdinalIgnoreCase);
         foreach (var e in existing)
         {
@@ -74,11 +74,11 @@ public static class SystemCatalog
                 continue;
             }
 
-            await store.SaveAsync(entry.Entity, ct).ConfigureAwait(false);
+            await store.SaveAsync(entry.Entity.EntityTypeName, entry.Entity, ct).ConfigureAwait(false);
             foreach (var f in entry.Fields)
-                await store.SaveAsync(f, ct).ConfigureAwait(false);
+                await store.SaveAsync(f.EntityTypeName, f, ct).ConfigureAwait(false);
             foreach (var i in entry.Indexes)
-                await store.SaveAsync(i, ct).ConfigureAwait(false);
+                await store.SaveAsync(i.EntityTypeName, i, ct).ConfigureAwait(false);
 
             logger?.Invoke(
                 $"System catalog: seeded '{entry.Entity.Name}' ({entry.Fields.Count} fields, {entry.Indexes.Count} indexes).");

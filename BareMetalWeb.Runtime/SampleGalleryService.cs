@@ -130,8 +130,8 @@ public static class SampleGalleryService
         var deployedSlugs = new List<string>();
 
         // Load existing EntityDefinitions so we can skip or overwrite
-        var existingDefs = new List<EntityDefinition>(await store.QueryAsync<EntityDefinition>(null, cancellationToken)
-            .ConfigureAwait(false));
+        var existingDefs = (await store.QueryAsync("EntityDefinition", null, cancellationToken)
+            .ConfigureAwait(false)).Cast<EntityDefinition>().ToList();
 
         var existingBySlug = new Dictionary<string, EntityDefinition>(StringComparer.OrdinalIgnoreCase);
         foreach (var e in existingDefs)
@@ -186,7 +186,7 @@ public static class SampleGalleryService
                 newEntity.Key = existing.Key;
             }
 
-            await store.SaveAsync(newEntity, cancellationToken).ConfigureAwait(false);
+            await store.SaveAsync(newEntity.EntityTypeName, newEntity, cancellationToken).ConfigureAwait(false);
 
             // Import fields that belong to this entity (matched by old entity Id from the JSON)
             foreach (var srcField in package.Fields)
@@ -221,7 +221,7 @@ public static class SampleGalleryService
                     Multiline = srcField.Multiline
                 };
 
-                await store.SaveAsync(newField, cancellationToken).ConfigureAwait(false);
+                await store.SaveAsync(newField.EntityTypeName, newField, cancellationToken).ConfigureAwait(false);
             }
 
             // Import indexes that belong to this entity
@@ -235,7 +235,7 @@ public static class SampleGalleryService
                     Type = srcIndex.Type
                 };
 
-                await store.SaveAsync(newIndex, cancellationToken).ConfigureAwait(false);
+                await store.SaveAsync(newIndex.EntityTypeName, newIndex, cancellationToken).ConfigureAwait(false);
             }
 
             // Import actions that belong to this entity
@@ -546,13 +546,13 @@ public static class SampleGalleryService
             Clauses = { new QueryClause { Field = "EntityId", Operator = QueryOperator.Equals, Value = entityDefId } }
         };
 
-        var fields = new List<FieldDefinition>(await store.QueryAsync<FieldDefinition>(entityIdQuery, ct).ConfigureAwait(false));
+        var fields = (await store.QueryAsync("FieldDefinition", entityIdQuery, ct).ConfigureAwait(false)).Cast<FieldDefinition>().ToList();
         foreach (var f in fields)
-            await store.DeleteAsync<FieldDefinition>(f.Key, ct).ConfigureAwait(false);
+            await store.DeleteAsync("FieldDefinition", f.Key, ct).ConfigureAwait(false);
 
-        var idxs = new List<IndexDefinition>(await store.QueryAsync<IndexDefinition>(entityIdQuery, ct).ConfigureAwait(false));
+        var idxs = (await store.QueryAsync("IndexDefinition", entityIdQuery, ct).ConfigureAwait(false)).Cast<IndexDefinition>().ToList();
         foreach (var idx in idxs)
-            await store.DeleteAsync<IndexDefinition>(idx.Key, ct).ConfigureAwait(false);
+            await store.DeleteAsync("IndexDefinition", idx.Key, ct).ConfigureAwait(false);
 
         // Also delete actions and their commands
         var actionQuery = new QueryDefinition

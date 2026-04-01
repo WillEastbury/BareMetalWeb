@@ -23,13 +23,6 @@ public sealed class ReportQuery
         return this;
     }
 
-    /// <summary>Specifies the root entity by its CLR type.</summary>
-    public ReportQuery From<T>() where T : BaseDataObject
-    {
-        _rootEntity = DataScaffold.GetEntityByType(typeof(T))?.Slug ?? typeof(T).Name.ToSlug();
-        return this;
-    }
-
     /// <summary>Adds an INNER JOIN between two entity fields.</summary>
     public ReportQuery Join(string fromEntity, string fromField, string toEntity, string toField)
         => AddJoin(fromEntity, fromField, toEntity, toField, JoinType.Inner);
@@ -55,26 +48,6 @@ public sealed class ReportQuery
             ToEntity = toEntity,
             ToField = toField,
             Type = type
-        });
-        return this;
-    }
-
-    /// <summary>Adds an INNER JOIN using CLR type accessors.</summary>
-    public ReportQuery Join<TFrom, TTo>(
-        System.Linq.Expressions.Expression<Func<TFrom, object?>> fromField,
-        System.Linq.Expressions.Expression<Func<TTo, object?>> toField)
-        where TFrom : BaseDataObject
-        where TTo : BaseDataObject
-    {
-        var fromFieldName = GetMemberName(fromField);
-        var toFieldName = GetMemberName(toField);
-        _joins.Add(new ReportJoin
-        {
-            FromEntity = DataScaffold.GetEntityByType(typeof(TFrom))?.Slug ?? typeof(TFrom).Name.ToSlug(),
-            FromField = fromFieldName,
-            ToEntity = DataScaffold.GetEntityByType(typeof(TTo))?.Slug ?? typeof(TTo).Name.ToSlug(),
-            ToField = toFieldName,
-            Type = JoinType.Inner
         });
         return this;
     }
@@ -145,34 +118,4 @@ public sealed class ReportQuery
     internal string? SortField => _sortField;
     internal bool SortDescending => _sortDescending;
     internal int? QueryLimit => _limit;
-
-    private static string GetMemberName<T>(System.Linq.Expressions.Expression<Func<T, object?>> expr)
-    {
-        if (expr.Body is System.Linq.Expressions.MemberExpression memberExpr)
-            return memberExpr.Member.Name;
-        if (expr.Body is System.Linq.Expressions.UnaryExpression unary &&
-            unary.Operand is System.Linq.Expressions.MemberExpression memberExpr2)
-            return memberExpr2.Member.Name;
-        throw new ArgumentException("Expression must be a simple member access (e.g. x => x.PropertyName).");
-    }
-}
-
-internal static class StringSlugExtensions
-{
-    internal static string ToSlug(this string name)
-    {
-        // Mirrors DataScaffold slug generation: lowercase + hyphenate on camel-case boundaries
-        if (string.IsNullOrEmpty(name))
-            return name;
-
-        var sb = new System.Text.StringBuilder();
-        for (int i = 0; i < name.Length; i++)
-        {
-            var c = name[i];
-            if (char.IsUpper(c) && i > 0)
-                sb.Append('-');
-            sb.Append(char.ToLowerInvariant(c));
-        }
-        return sb.ToString();
-    }
 }

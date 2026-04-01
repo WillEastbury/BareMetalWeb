@@ -352,7 +352,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 CreatedBy = userName,
                 UpdatedBy = userName
             };
-            await DataStoreProvider.Current.SaveAsync(challenge);
+            await DataStoreProvider.Current.SaveAsync(challenge.EntityTypeName, challenge);
             context.SetCookie(MfaChallengeCookieName, challenge.Key.ToString(), new CookieOptions
             {
                 HttpOnly = true,
@@ -475,7 +475,7 @@ public sealed class RouteHandlers : IRouteHandlers
             RegisterSuccess(BuildMfaAttemptKey("challenge:ip", remoteIp));
 
             challenge.IsUsed = true;
-            await DataStoreProvider.Current.SaveAsync(challenge);
+            await DataStoreProvider.Current.SaveAsync(challenge.EntityTypeName, challenge);
             context.DeleteCookie(MfaChallengeCookieName);
 
             await UserAuth.SignInAsync(context, user, challenge.RememberMe);
@@ -1501,7 +1501,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private async ValueTask EnsureDefaultReports(string createdBy)
     {
-        var existing = await DataStoreProvider.Current.QueryAsync<ReportDefinition>(null).ConfigureAwait(false);
+        var existing = (await DataStoreProvider.Current.QueryAsync("ReportDefinition", null).ConfigureAwait(false)).Cast<ReportDefinition>();
         var existingNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var r in existing)
             existingNames.Add(r.Name);
@@ -1563,7 +1563,7 @@ public sealed class RouteHandlers : IRouteHandlers
             if (existingNames.Contains(report.Name))
                 continue;
 
-            await DataStoreProvider.Current.SaveAsync(report).ConfigureAwait(false);
+            await DataStoreProvider.Current.SaveAsync(report.EntityTypeName, report).ConfigureAwait(false);
         }
     }
 
@@ -4332,8 +4332,8 @@ public sealed class RouteHandlers : IRouteHandlers
 
             // Determine which packages are already deployed (have at least one EntityDefinition with matching slug)
             var deployedSlugs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var existingDefsRaw = await DataStoreProvider.Current.QueryAsync<EntityDefinition>(null, ctx.RequestAborted)
-                .ConfigureAwait(false);
+            var existingDefsRaw = (await DataStoreProvider.Current.QueryAsync("EntityDefinition", null, ctx.RequestAborted)
+                .ConfigureAwait(false)).Cast<EntityDefinition>();
             var existingDefs = new List<EntityDefinition>();
             foreach (var def in existingDefsRaw)
                 existingDefs.Add(def);
@@ -4494,8 +4494,8 @@ public sealed class RouteHandlers : IRouteHandlers
             }
 
             // Check which are already deployed locally
-            var existingDefs = await DataStoreProvider.Current
-                .QueryAsync<EntityDefinition>(null, ctx.RequestAborted).ConfigureAwait(false);
+            var existingDefs = (await DataStoreProvider.Current
+                .QueryAsync("EntityDefinition", null, ctx.RequestAborted).ConfigureAwait(false)).Cast<EntityDefinition>();
             var existingSlugs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var def in existingDefs)
             {
@@ -6140,13 +6140,13 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!uint.TryParse(challengeId, out var parsedChallengeId))
             return null;
 
-        var challenge = await DataStoreProvider.Current.LoadAsync<MfaChallenge>(parsedChallengeId, cancellationToken).ConfigureAwait(false);
+        var challenge = (MfaChallenge?)(await DataStoreProvider.Current.LoadAsync("MfaChallenge", parsedChallengeId, cancellationToken).ConfigureAwait(false));
         if (challenge == null || challenge.IsExpired())
         {
             if (challenge != null)
             {
                 challenge.IsUsed = true;
-                await DataStoreProvider.Current.SaveAsync(challenge, cancellationToken).ConfigureAwait(false);
+                await DataStoreProvider.Current.SaveAsync(challenge.EntityTypeName, challenge, cancellationToken).ConfigureAwait(false);
             }
             context.DeleteCookie(MfaChallengeCookieName);
             return null;
@@ -6323,7 +6323,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 var msg = cmdResult.Success ? "Command executed." : cmdResult.Error;
 
                 if (instance is BaseDataObject bdoRuntime)
-                    await _auditService.AuditRemoteCommandAsync(bdoRuntime, commandName, userName, null,
+                    await _auditService.AuditRemoteCommandAsync(meta.Name, bdoRuntime, commandName, userName, null,
                         new RemoteCommandResult(cmdResult.Success, msg ?? string.Empty),
                         context.RequestAborted).ConfigureAwait(false);
 
@@ -6348,7 +6348,7 @@ public sealed class RouteHandlers : IRouteHandlers
             // Audit the remote command execution
             if (instance is BaseDataObject baseDataObject)
             {
-                await _auditService.AuditRemoteCommandAsync(baseDataObject, commandName, userName, null, result, context.RequestAborted).ConfigureAwait(false);
+                await _auditService.AuditRemoteCommandAsync(meta.Name, baseDataObject, commandName, userName, null, result, context.RequestAborted).ConfigureAwait(false);
             }
 
             context.Response.StatusCode = result.Success ? StatusCodes.Status200OK : StatusCodes.Status422UnprocessableEntity;
@@ -6594,9 +6594,9 @@ public sealed class RouteHandlers : IRouteHandlers
         // WAL-persisted jobs from all instances — provides cross-instance visibility.
         try
         {
-            var walJobs = await DataStoreProvider.Current
-                .QueryAsync<WalPersistedJob>(null, context.RequestAborted)
-                .ConfigureAwait(false);
+            var walJobs = (await DataStoreProvider.Current
+                .QueryAsync("WalPersistedJob", null, context.RequestAborted)
+                .ConfigureAwait(false)).Cast<WalPersistedJob>();
 
             foreach (var walJob in walJobs)
             {

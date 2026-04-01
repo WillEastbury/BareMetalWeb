@@ -668,6 +668,9 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             record.Key = NextSequentialKey(entityTypeName);
         SaveRecord(record, schema);
         obj.Key = record.Key;
+        obj.ETag = record.ETag;
+        obj.CreatedOnUtc = record.CreatedOnUtc;
+        obj.UpdatedOnUtc = record.UpdatedOnUtc;
     }
 
     /// <inheritdoc />

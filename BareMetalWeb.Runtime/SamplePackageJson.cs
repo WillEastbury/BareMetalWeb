@@ -39,11 +39,11 @@ public static class SamplePackageJson
         };
 
         if (root.TryGetProperty("entities", out var entities))
-            pkg.Entities = ReadEntityList<EntityDefinition>(entities);
+            pkg.Entities = ReadEntityList<EntityDefinition>("EntityDefinition", entities);
         if (root.TryGetProperty("fields", out var fields))
-            pkg.Fields = ReadEntityList<FieldDefinition>(fields);
+            pkg.Fields = ReadEntityList<FieldDefinition>("FieldDefinition", fields);
         if (root.TryGetProperty("indexes", out var indexes))
-            pkg.Indexes = ReadEntityList<IndexDefinition>(indexes);
+            pkg.Indexes = ReadEntityList<IndexDefinition>("IndexDefinition", indexes);
         if (root.TryGetProperty("actions", out var actions))
             pkg.Actions = ReadEntityListBySlug("action-definitions", actions);
         if (root.TryGetProperty("actionCommands", out var cmds))
@@ -104,13 +104,13 @@ public static class SamplePackageJson
     /// setter delegates to populate entity properties from JSON without reflection.
     /// The entity type must be registered with DataScaffold before calling this method.
     /// </summary>
-    private static List<T> ReadEntityList<T>(JsonElement arr) where T : BaseDataObject, new()
+    private static List<T> ReadEntityList<T>(string entityName, JsonElement arr) where T : BaseDataObject, new()
     {
         if (arr.ValueKind != JsonValueKind.Array) return new List<T>();
 
-        var meta = DataScaffold.GetEntityByType(typeof(T)) ?? DataScaffold.GetEntityByName(typeof(T).Name)
+        var meta = DataScaffold.GetEntityByName(entityName)
             ?? throw new InvalidOperationException(
-                $"Entity type '{typeof(T).Name}' is not registered with DataScaffold. " +
+                $"Entity '{entityName}' is not registered with DataScaffold. " +
                 "Register it before deserializing sample packages.");
 
         var list = new List<T>(arr.GetArrayLength());

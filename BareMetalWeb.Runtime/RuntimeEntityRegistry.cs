@@ -164,11 +164,11 @@ public sealed class RuntimeEntityRegistry
         var registry = new RuntimeEntityRegistry();
 
         // Load all schema records in parallel
-        var entityDefsTask = store.QueryAsync<EntityDefinition>();
-        var fieldsTask = store.QueryAsync<FieldDefinition>();
-        var indexesTask = store.QueryAsync<IndexDefinition>();
-        var actionsTask = store.QueryAsync<ActionDefinition>();
-        var actionCommandsTask = store.QueryAsync<ActionCommandDefinition>();
+        var entityDefsTask = store.QueryAsync("EntityDefinition");
+        var fieldsTask = store.QueryAsync("FieldDefinition");
+        var indexesTask = store.QueryAsync("IndexDefinition");
+        var actionsTask = store.QueryAsync("ActionDefinition");
+        var actionCommandsTask = store.QueryAsync("ActionCommandDefinition");
         await Task.WhenAll(
             entityDefsTask.AsTask(),
             fieldsTask.AsTask(),
@@ -176,7 +176,7 @@ public sealed class RuntimeEntityRegistry
             actionsTask.AsTask(),
             actionCommandsTask.AsTask()).ConfigureAwait(false);
 
-        var entityDefs = new List<EntityDefinition>(entityDefsTask.Result);
+        var entityDefs = entityDefsTask.Result.Cast<EntityDefinition>().ToList();
         if (entityDefs.Count == 0)
         {
             registry.Freeze();
@@ -184,10 +184,10 @@ public sealed class RuntimeEntityRegistry
             return registry;
         }
 
-        var allFields = new List<FieldDefinition>(fieldsTask.Result);
-        var allIndexes = new List<IndexDefinition>(indexesTask.Result);
-        var allActions = new List<ActionDefinition>(actionsTask.Result);
-        var allActionCommands = new List<ActionCommandDefinition>(actionCommandsTask.Result);
+        var allFields = fieldsTask.Result.Cast<FieldDefinition>().ToList();
+        var allIndexes = indexesTask.Result.Cast<IndexDefinition>().ToList();
+        var allActions = actionsTask.Result.Cast<ActionDefinition>().ToList();
+        var allActionCommands = actionCommandsTask.Result.Cast<ActionCommandDefinition>().ToList();
 
         foreach (var entityDef in entityDefs)
         {
@@ -252,7 +252,7 @@ public sealed class RuntimeEntityRegistry
                 entityDef.SchemaHash = model.SchemaHash;
                 try
                 {
-                    await store.SaveAsync(entityDef).ConfigureAwait(false);
+                    await store.SaveAsync(entityDef.EntityTypeName, entityDef).ConfigureAwait(false);
                     logger?.Invoke($"Schema hash updated for '{entityDef.Name}' (version {entityDef.Version}).");
                 }
                 catch (Exception ex)
