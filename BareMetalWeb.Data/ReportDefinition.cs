@@ -9,7 +9,7 @@ namespace BareMetalWeb.Data;
 [DataEntity("Report Definitions", Slug = "report-definitions", ShowOnNav = false, Permissions = "admin", NavGroup = "Admin", NavOrder = 90)]
 public sealed class ReportDefinition : BaseDataObject
 {
-    public override string EntityTypeName => "Report Definitions";
+    public override string EntityTypeName => "ReportDefinition";
     private const int Ord_Name = BaseFieldCount + 0;
     private const int Ord_Description = BaseFieldCount + 1;
     private const int Ord_RootEntity = BaseFieldCount + 2;

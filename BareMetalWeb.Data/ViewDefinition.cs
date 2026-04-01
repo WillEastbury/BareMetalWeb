@@ -12,7 +12,7 @@ namespace BareMetalWeb.Data;
     Permissions = "admin", NavGroup = "Admin", NavOrder = 95)]
 public sealed class ViewDefinition : BaseDataObject
 {
-    public override string EntityTypeName => "View Definitions";
+    public override string EntityTypeName => "ViewDefinition";
     private const int Ord_ViewName = BaseFieldCount + 0;
     private const int Ord_RootEntity = BaseFieldCount + 1;
     private const int Ord_ProjectionsJson = BaseFieldCount + 2;

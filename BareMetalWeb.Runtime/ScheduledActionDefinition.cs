@@ -10,7 +10,7 @@ namespace BareMetalWeb.Runtime;
 [DataEntity("Scheduled Actions", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1006)]
 public class ScheduledActionDefinition : BaseDataObject
 {
-    public override string EntityTypeName => "Scheduled Actions";
+    public override string EntityTypeName => "ScheduledActionDefinition";
     private const int Ord_EntityId = BaseFieldCount + 0;
     private const int Ord_Name = BaseFieldCount + 1;
     private const int Ord_ActionName = BaseFieldCount + 2;

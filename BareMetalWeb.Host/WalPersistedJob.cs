@@ -13,7 +13,7 @@ namespace BareMetalWeb.Host;
     NavGroup = "Admin", NavOrder = 99, Permissions = "admin")]
 public sealed class WalPersistedJob : BaseDataObject
 {
-    public override string EntityTypeName => "Background Jobs";
+    public override string EntityTypeName => "WalPersistedJob";
     private const int Ord_JobId = BaseFieldCount + 0;
     private const int Ord_OperationName = BaseFieldCount + 1;
     private const int Ord_Status = BaseFieldCount + 2;

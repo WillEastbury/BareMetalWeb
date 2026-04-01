@@ -10,7 +10,7 @@ namespace BareMetalWeb.Runtime;
 [DataEntity("Chat Sessions", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1010)]
 public class ChatSession : BaseDataObject
 {
-    public override string EntityTypeName => "Chat Sessions";
+    public override string EntityTypeName => "ChatSession";
     private const int Ord_UserName = BaseFieldCount + 0;
     private const int Ord_Title = BaseFieldCount + 1;
     private const int Ord_CreatedAtUtc = BaseFieldCount + 2;

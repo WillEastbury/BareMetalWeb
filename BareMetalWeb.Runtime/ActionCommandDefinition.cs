@@ -15,7 +15,7 @@ namespace BareMetalWeb.Runtime;
 [DataEntity("Action Commands", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1004)]
 public class ActionCommandDefinition : BaseDataObject
 {
-    public override string EntityTypeName => "Action Commands";
+    public override string EntityTypeName => "ActionCommandDefinition";
     private const int Ord_ActionId = BaseFieldCount + 0;
     private const int Ord_CommandType = BaseFieldCount + 1;
     private const int Ord_Order = BaseFieldCount + 2;

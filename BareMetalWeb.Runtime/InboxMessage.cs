@@ -10,7 +10,7 @@ namespace BareMetalWeb.Runtime;
 [DataEntity("Inbox Messages", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1008)]
 public class InboxMessage : BaseDataObject
 {
-    public override string EntityTypeName => "Inbox Messages";
+    public override string EntityTypeName => "InboxMessage";
     private const int Ord_RecipientUserName = BaseFieldCount + 0;
     private const int Ord_Subject = BaseFieldCount + 1;
     private const int Ord_Body = BaseFieldCount + 2;

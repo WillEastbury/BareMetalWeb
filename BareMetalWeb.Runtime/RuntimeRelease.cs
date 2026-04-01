@@ -10,7 +10,7 @@ namespace BareMetalWeb.Runtime;
 [DataEntity("Runtime Releases", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1020)]
 public class RuntimeRelease : BaseDataObject
 {
-    public override string EntityTypeName => "Runtime Releases";
+    public override string EntityTypeName => "RuntimeRelease";
     private new const int Ord_Version = BaseFieldCount + 0;
     private const int Ord_Architecture = BaseFieldCount + 1;
     private const int Ord_Sha256 = BaseFieldCount + 2;
