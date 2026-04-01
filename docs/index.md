@@ -90,6 +90,12 @@ Internal notes, reviews, and issue tracking for contributors.
 
 ---
 
+## 🔧 Hardware / FPGA
+
+- [iCE40 Minimum Engine](fpga/ice40-minimum-engine.md) — Design exploration: BareMetalWeb request pipeline on a Lattice iCE40UP5K FPGA with W5500, ATECC508A, AS6C6256, and QSPI flash
+
+---
+
 ## 📋 Release Notes
 
 - [V1.20260224.5](releases/V1.20260224.5-v1.20260224.222.md)
