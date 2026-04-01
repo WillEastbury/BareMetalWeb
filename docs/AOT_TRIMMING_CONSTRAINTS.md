@@ -8,28 +8,27 @@ Any usage of the following in production code is a violation. Test code is exemp
 
 | # | Banned API / Pattern | Category | Why It Breaks |
 |---|---|---|---|
-| 1 | `System.Reflection` (any usage beyond one-time startup caching) | Reflection | Types/members stripped by trimmer; runtime failures in AOT |
+| 1 | `System.Reflection` (any usage AT ALL, USE THE METADATA SYSTEM INSTEAD) | Reflection | Types/members stripped by trimmer; runtime failures in AOT |
 | 2 | `Activator.CreateInstance` | Reflection | Runtime type construction; trimmer cannot see the dependency |
 | 3 | `Type.MakeGenericType` | Reflection | Runtime generic instantiation; not AOT-safe |
 | 4 | `MethodInfo.MakeGenericMethod` | Reflection | Runtime generic instantiation; not AOT-safe |
 | 5 | `dynamic` / DLR | Code generation | Requires `System.Linq.Expressions` and runtime IL emit |
-| 6 | `System.Text.Json.JsonSerializer` (all overloads) | Serialization | Reflection-based by default; source-gen context not used here |
+| 6 | `System.Text.Json.JsonSerializer` (all overloads) | Serialization | Reflection-based by default; source-gen context not used here, Use our custom streaming metadata based serializers (BinaryObjectSerializer, BmwJsonSerializer only|
 | 7 | `System.Reflection.Emit` (`AssemblyBuilder`, `TypeBuilder`, etc.) | Code generation | Not available in NativeAOT; generates types at runtime |
 | 8 | `AppDomain.CurrentDomain.GetAssemblies()` | Assembly scanning | Not trim-safe; scanned types may be stripped |
 | 9 | `Type.GetType(string)` with dynamic names | Reflection | Trimmer cannot preserve types referenced only by string |
 | 10 | Runtime type discovery or construction (any pattern) | Architecture | Use `DataRecord` and metadata services instead |
+| 11 | Static generic methods followed by typeof(T) | Generics | Antipattern where reflection and dynamic typing hides - use metadata instead and / or use a switch with hardcoded, predictable known types of T |
+| 12 | `Span<T>`, `Memory<T>`, blittable structs | Generics | Data processing without heap allocation is good, but use a known type so AOT is happy and we can trim heavily to reduce memory usage and compiler bloat |
+| 13 | Pre-compiled delegates cached at startup | Reflection | Dont do this, it's just redirection - and we want the trimmer to eliminate System.Reflection if possible |
+| `[DynamicallyAccessedMembers]` annotations | Reflection | Dont do this - same as above, the whole point of this platform is to use a dispatch jump table for metadata access over linear scan / ordinal based lookup for speed. 
 
-## Allowed Patterns
+## Allowed Patterns that are OK
 
 | Pattern | When to Use |
-|---|---|
 | Closed generics known at compile time | `List<Customer>`, `Dictionary<string, int>` — types resolved at compile time |
-| Static generic methods where `T` is known at call site | `Serialize<Customer>(obj)` — compiler resolves `T` |
-| `Span<T>`, `Memory<T>`, blittable structs | Data processing without heap allocation |
 | `switch` / dictionary dispatch | Type discrimination without reflection |
-| Pre-compiled delegates cached at startup | One-time reflection to build `Func<>` delegates, then cached forever |
-| `[DynamicallyAccessedMembers]` annotations | When startup reflection is unavoidable, annotate to guide the trimmer |
-
+| Ordinal based lookup through arrays | The metadata system / allows usage and serialization of compact primitive object types that act like structs but are transferrable across systems and are guaranteed to serialize in the same order and will be lightning fast and compact on the wire / in memory. 
 ## Design Principle
 
 **All behaviour must be resolvable at compile time.**
