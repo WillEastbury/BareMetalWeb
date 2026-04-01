@@ -93,7 +93,7 @@ jobs:
             --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration" \
             --results-directory TestResults --logger "trx"
       - name: Upload test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results-data
@@ -126,7 +126,7 @@ jobs:
             --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration" \
             --results-directory TestResults --logger "trx"
       - name: Upload test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results-host
@@ -159,7 +159,7 @@ jobs:
             --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration" \
             --results-directory TestResults --logger "trx"
       - name: Upload test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results-rendering
@@ -192,7 +192,7 @@ jobs:
             --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration" \
             --results-directory TestResults --logger "trx"
       - name: Upload test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results-runtime
@@ -224,7 +224,7 @@ jobs:
             --blame-hang-timeout 60s \
             --results-directory TestResults --logger "trx" 2>/dev/null || true
       - name: Upload test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results-core
@@ -256,7 +256,7 @@ jobs:
             --blame-hang-timeout 60s \
             --results-directory TestResults --logger "trx" 2>/dev/null || true
       - name: Upload test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results-api
