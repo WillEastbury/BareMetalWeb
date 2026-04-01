@@ -37,7 +37,7 @@ public class UserAuthTests : IDisposable
             IsActive = true
         };
         principal.AddApiKey(rawKey, iterations: 1);
-        await DataStoreProvider.Current.SaveAsync(principal);
+        await DataStoreProvider.Current.SaveAsync(principal.EntityTypeName, principal);
 
         var context = new DefaultHttpContext();
         context.Request.Headers["Authorization"] = $"Bearer {rawKey}";
@@ -66,7 +66,7 @@ public class UserAuthTests : IDisposable
             IsActive = true
         };
         principal.AddApiKey(rawKey, iterations: 1);
-        await DataStoreProvider.Current.SaveAsync(principal);
+        await DataStoreProvider.Current.SaveAsync(principal.EntityTypeName, principal);
 
         var context = new DefaultHttpContext();
         context.Request.Headers["Authorization"] = $"Bearer {rawKey}";
@@ -123,7 +123,7 @@ public class UserAuthTests : IDisposable
             IsActive = true
         };
         principal.AddApiKey(rawKey, iterations: 1);
-        await DataStoreProvider.Current.SaveAsync(principal);
+        await DataStoreProvider.Current.SaveAsync(principal.EntityTypeName, principal);
 
         var context = new DefaultHttpContext();
         context.Request.Headers["ApiKey"] = rawKey;
@@ -149,7 +149,7 @@ public class UserAuthTests : IDisposable
             IsActive = false
         };
         principal.AddApiKey(rawKey, iterations: 1);
-        await DataStoreProvider.Current.SaveAsync(principal);
+        await DataStoreProvider.Current.SaveAsync(principal.EntityTypeName, principal);
 
         var context = new DefaultHttpContext();
         context.Request.Headers["Authorization"] = $"Bearer {rawKey}";
@@ -193,7 +193,7 @@ public class UserAuthTests : IDisposable
             UpdatedBy = "testuser"
         };
 
-        await DataStoreProvider.Current.SaveAsync(session);
+        await DataStoreProvider.Current.SaveAsync(session.EntityTypeName, session);
 
         var context = CreateHttpContext(session.Key.ToString());
         var originalExpiresUtc = session.ExpiresUtc;
@@ -207,7 +207,7 @@ public class UserAuthTests : IDisposable
         Assert.Equal(session.Key, result.Key);
 
         // Reload session to check if it was updated
-        var updatedSession = await DataStoreProvider.Current.LoadAsync<UserSession>(session.Key);
+        var updatedSession = (UserSession?)(await DataStoreProvider.Current.LoadAsync("UserSession", session.Key));
         Assert.NotNull(updatedSession);
         
         // LastSeenUtc should be updated to now (or very close)
@@ -241,7 +241,7 @@ public class UserAuthTests : IDisposable
             UpdatedBy = "testuser"
         };
 
-        await DataStoreProvider.Current.SaveAsync(session);
+        await DataStoreProvider.Current.SaveAsync(session.EntityTypeName, session);
 
         var context = CreateHttpContext(session.Key.ToString());
         var originalExpiresUtc = session.ExpiresUtc;
@@ -253,7 +253,7 @@ public class UserAuthTests : IDisposable
         Assert.NotNull(result);
 
         // Reload session to check if it was updated
-        var updatedSession = await DataStoreProvider.Current.LoadAsync<UserSession>(session.Key);
+        var updatedSession = (UserSession?)(await DataStoreProvider.Current.LoadAsync("UserSession", session.Key));
         Assert.NotNull(updatedSession);
         
         // ExpiresUtc should be extended (30 days from LastSeenUtc for RememberMe)
@@ -283,7 +283,7 @@ public class UserAuthTests : IDisposable
             UpdatedBy = "testuser"
         };
 
-        DataStoreProvider.Current.Save(session);
+        DataStoreProvider.Current.Save(session.EntityTypeName, session);
 
         var context = CreateHttpContext(session.Key.ToString());
         var originalExpiresUtc = session.ExpiresUtc;
@@ -297,7 +297,7 @@ public class UserAuthTests : IDisposable
         Assert.Equal(session.Key, result.Key);
 
         // Reload session to check if it was updated
-        var updatedSession = DataStoreProvider.Current.Load<UserSession>(session.Key);
+        var updatedSession = (UserSession?)DataStoreProvider.Current.Load("UserSession", session.Key);
         Assert.NotNull(updatedSession);
         
         // LastSeenUtc should be updated
@@ -328,7 +328,7 @@ public class UserAuthTests : IDisposable
             UpdatedBy = "testuser"
         };
 
-        await DataStoreProvider.Current.SaveAsync(session);
+        await DataStoreProvider.Current.SaveAsync(session.EntityTypeName, session);
 
         var context = CreateHttpContext(session.Key.ToString());
 
@@ -339,7 +339,7 @@ public class UserAuthTests : IDisposable
         Assert.Null(result);
 
         // Session should be marked as revoked
-        var updatedSession = await DataStoreProvider.Current.LoadAsync<UserSession>(session.Key);
+        var updatedSession = (UserSession?)(await DataStoreProvider.Current.LoadAsync("UserSession", session.Key));
         Assert.NotNull(updatedSession);
         Assert.True(updatedSession.IsRevoked);
     }
@@ -380,7 +380,7 @@ public class UserAuthTests : IDisposable
             UpdatedBy = "testuser"
         };
 
-        await DataStoreProvider.Current.SaveAsync(session);
+        await DataStoreProvider.Current.SaveAsync(session.EntityTypeName, session);
 
         var context = CreateHttpContext(session.Key.ToString());
         var originalExpiresUtc = session.ExpiresUtc;
@@ -393,7 +393,7 @@ public class UserAuthTests : IDisposable
         Assert.Equal(session.Key, result.Key);
 
         // Session should NOT have been re-saved because the extension gain is < 1 minute
-        var storedSession = await DataStoreProvider.Current.LoadAsync<UserSession>(session.Key);
+        var storedSession = (UserSession?)(await DataStoreProvider.Current.LoadAsync("UserSession", session.Key));
         Assert.NotNull(storedSession);
         Assert.Equal(originalExpiresUtc, storedSession.ExpiresUtc);
     }
@@ -419,7 +419,7 @@ public class UserAuthTests : IDisposable
             UpdatedBy = "testuser"
         };
 
-        DataStoreProvider.Current.Save(session);
+        DataStoreProvider.Current.Save(session.EntityTypeName, session);
 
         var context = CreateHttpContext(session.Key.ToString());
         var originalExpiresUtc = session.ExpiresUtc;
@@ -431,7 +431,7 @@ public class UserAuthTests : IDisposable
         Assert.NotNull(result);
 
         // Session should NOT have been re-saved because the extension gain is < 1 minute
-        var storedSession = DataStoreProvider.Current.Load<UserSession>(session.Key);
+        var storedSession = (UserSession?)DataStoreProvider.Current.Load("UserSession", session.Key);
         Assert.NotNull(storedSession);
         Assert.Equal(originalExpiresUtc, storedSession.ExpiresUtc);
     }
@@ -451,7 +451,7 @@ public class UserAuthTests : IDisposable
             IsActive = true
         };
         root.SetPassword("rootpass");
-        await DataStoreProvider.Current.SaveAsync(root);
+        await DataStoreProvider.Current.SaveAsync(root.EntityTypeName, root);
 
         var secondUser = new User
         {
@@ -463,7 +463,7 @@ public class UserAuthTests : IDisposable
             IsActive = true
         };
         secondUser.SetPassword("sonpass");
-        await DataStoreProvider.Current.SaveAsync(secondUser);
+        await DataStoreProvider.Current.SaveAsync(secondUser.EntityTypeName, secondUser);
 
         // Act — look up by username
         var foundRoot = await Users.FindByEmailOrUserNameAsync("root");
@@ -494,7 +494,7 @@ public class UserAuthTests : IDisposable
             IsActive = true
         };
         root.SetPassword("rootpass");
-        await DataStoreProvider.Current.SaveAsync(root);
+        await DataStoreProvider.Current.SaveAsync(root.EntityTypeName, root);
 
         var secondUser = new User
         {
@@ -506,7 +506,7 @@ public class UserAuthTests : IDisposable
             IsActive = true
         };
         secondUser.SetPassword("sonpass");
-        await DataStoreProvider.Current.SaveAsync(secondUser);
+        await DataStoreProvider.Current.SaveAsync(secondUser.EntityTypeName, secondUser);
 
         // Act — look up by email
         var foundRoot = await Users.FindByEmailOrUserNameAsync("root@example.com");
@@ -536,7 +536,7 @@ public class UserAuthTests : IDisposable
             IsActive = true
         };
         root.SetPassword("AdminPass1!");
-        await DataStoreProvider.Current.SaveAsync(root);
+        await DataStoreProvider.Current.SaveAsync(root.EntityTypeName, root);
 
         var secondUser = new User
         {
@@ -548,7 +548,7 @@ public class UserAuthTests : IDisposable
             IsActive = true
         };
         secondUser.SetPassword("SonPass1!");
-        await DataStoreProvider.Current.SaveAsync(secondUser);
+        await DataStoreProvider.Current.SaveAsync(secondUser.EntityTypeName, secondUser);
 
         // Act — root login lookup after second user exists
         var found = await Users.FindByEmailOrUserNameAsync("admin");
@@ -571,7 +571,7 @@ public class UserAuthTests : IDisposable
             Email = "existing@example.com",
             IsActive = true
         };
-        await DataStoreProvider.Current.SaveAsync(user);
+        await DataStoreProvider.Current.SaveAsync(user.EntityTypeName, user);
 
         // Act
         var found = await Users.FindByUserNameAsync("nonexistent");
@@ -591,7 +591,7 @@ public class UserAuthTests : IDisposable
             Email = "test@example.com",
             IsActive = true
         };
-        await DataStoreProvider.Current.SaveAsync(user);
+        await DataStoreProvider.Current.SaveAsync(user.EntityTypeName, user);
 
         // Act
         var found = await Users.FindByEmailAsync("nobody@example.com");
@@ -616,7 +616,7 @@ public class UserAuthTests : IDisposable
             IsActive = true
         };
         original.SetPassword("AdminPass1!");
-        await DataStoreProvider.Current.SaveAsync(original);
+        await DataStoreProvider.Current.SaveAsync(original.EntityTypeName, original);
 
         // Act – the same username already exists; uniqueness check must catch it
         var exists = await Users.ExistsByEmailOrUserNameAsync("admin");
@@ -637,7 +637,7 @@ public class UserAuthTests : IDisposable
             IsActive = true
         };
         original.SetPassword("AlicePass1!");
-        await DataStoreProvider.Current.SaveAsync(original);
+        await DataStoreProvider.Current.SaveAsync(original.EntityTypeName, original);
 
         // Act
         var exists = await Users.ExistsByEmailOrUserNameAsync("alice@example.com");
@@ -660,7 +660,7 @@ public class UserAuthTests : IDisposable
             IsActive = true
         };
         original.SetPassword("CorrectPass1!");
-        await DataStoreProvider.Current.SaveAsync(original);
+        await DataStoreProvider.Current.SaveAsync(original.EntityTypeName, original);
 
         // Act – lookup must return the record whose password verifies
         var found = await Users.FindByUserNameAsync("admin");
@@ -686,10 +686,9 @@ public class UserAuthTests : IDisposable
         return context;
     }
 
-    // Simple in-memory data store for testing
     private class InMemoryDataStore : IDataObjectStore
     {
-        private readonly Dictionary<(Type, uint), BaseDataObject> _store = new();
+        private readonly Dictionary<(string, uint), BaseDataObject> _store = new();
 
         public IReadOnlyList<IDataProvider> Providers => Array.Empty<IDataProvider>();
 
@@ -697,55 +696,67 @@ public class UserAuthTests : IDisposable
         public void RegisterFallbackProvider(IDataProvider provider) { }
         public void ClearProviders() { }
 
-        public void Save<T>(T obj) where T : BaseDataObject
+        // ── String-based CRUD ──────────────────────────────────────────
+        public void Save(string entityTypeName, BaseDataObject obj)
         {
-            _store[(typeof(T), obj.Key)] = obj;
+            _store[(entityTypeName, obj.Key)] = obj;
         }
 
-        public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public ValueTask SaveAsync(string entityTypeName, BaseDataObject obj, CancellationToken cancellationToken = default)
         {
-            Save(obj);
+            Save(entityTypeName, obj);
             return ValueTask.CompletedTask;
         }
 
-        public T? Load<T>(uint key) where T : BaseDataObject
+        public BaseDataObject? Load(string entityTypeName, uint key)
         {
-            return _store.TryGetValue((typeof(T), key), out var obj) ? obj as T : null;
+            return _store.TryGetValue((entityTypeName, key), out var obj) ? obj : null;
         }
 
-        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public ValueTask<BaseDataObject?> LoadAsync(string entityTypeName, uint key, CancellationToken cancellationToken = default)
         {
-            return ValueTask.FromResult(Load<T>(key));
+            return ValueTask.FromResult(Load(entityTypeName, key));
         }
 
-        public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
+        public IEnumerable<BaseDataObject> Query(string entityTypeName, QueryDefinition? query = null)
         {
-            foreach (var obj in _store.Values)
+            foreach (var kv in _store)
             {
-                if (obj is T typedObj)
-                    yield return typedObj;
+                if (kv.Key.Item1 == entityTypeName)
+                    yield return kv.Value;
             }
         }
 
-        public ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public ValueTask<IEnumerable<BaseDataObject>> QueryAsync(string entityTypeName, QueryDefinition? query = null, CancellationToken cancellationToken = default)
         {
-            return ValueTask.FromResult(Query<T>(query));
+            return ValueTask.FromResult(Query(entityTypeName, query));
         }
 
-        public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public ValueTask<int> CountAsync(string entityTypeName, QueryDefinition? query = null, CancellationToken cancellationToken = default)
         {
-            return ValueTask.FromResult(Query<T>(query).Count());
+            return ValueTask.FromResult(Query(entityTypeName, query).Count());
         }
 
-        public void Delete<T>(uint key) where T : BaseDataObject
+        public void Delete(string entityTypeName, uint key)
         {
-            _store.Remove((typeof(T), key));
+            _store.Remove((entityTypeName, key));
         }
 
-        public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public ValueTask DeleteAsync(string entityTypeName, uint key, CancellationToken cancellationToken = default)
         {
-            Delete<T>(key);
+            Delete(entityTypeName, key);
             return ValueTask.CompletedTask;
         }
+
+        // ── Ordinal-based (delegate to string-based) ───────────────────
+        public void Save(int o, BaseDataObject obj) => Save(obj.EntityTypeName, obj);
+        public BaseDataObject? Load(int o, uint k) => throw new NotSupportedException("Ordinal Load not supported in test store");
+        public IEnumerable<BaseDataObject> Query(int o, QueryDefinition? q = null) => throw new NotSupportedException("Ordinal Query not supported in test store");
+        public void Delete(int o, uint k) => throw new NotSupportedException("Ordinal Delete not supported in test store");
+        public ValueTask SaveAsync(int o, BaseDataObject obj, CancellationToken ct = default) { Save(o, obj); return ValueTask.CompletedTask; }
+        public ValueTask<BaseDataObject?> LoadAsync(int o, uint k, CancellationToken ct = default) => throw new NotSupportedException("Ordinal LoadAsync not supported in test store");
+        public ValueTask<IEnumerable<BaseDataObject>> QueryAsync(int o, QueryDefinition? q = null, CancellationToken ct = default) => throw new NotSupportedException("Ordinal QueryAsync not supported in test store");
+        public ValueTask<int> CountAsync(int o, QueryDefinition? q = null, CancellationToken ct = default) => throw new NotSupportedException("Ordinal CountAsync not supported in test store");
+        public ValueTask DeleteAsync(int o, uint k, CancellationToken ct = default) => throw new NotSupportedException("Ordinal DeleteAsync not supported in test store");
     }
 }

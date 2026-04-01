@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+
 namespace BareMetalWeb.Data;
 
 /// <summary>
@@ -152,6 +154,19 @@ public static class SystemEntitySchemas
         .AddField("LookupValueField", FieldType.StringUtf8, typeof(string), nullable: true)
         .AddField("LookupDisplayField", FieldType.StringUtf8, typeof(string), nullable: true)
         .AddField("Multiline", FieldType.Bool, typeof(bool))
+        .AddField("ChildEntitySlug", FieldType.StringUtf8, typeof(string), nullable: true)
+        .AddField("LookupCopyFields", FieldType.StringUtf8, typeof(string), nullable: true)
+        .AddField("CalculatedExpression", FieldType.StringUtf8, typeof(string), nullable: true)
+        .AddField("CalculatedDisplayFormat", FieldType.StringUtf8, typeof(string), nullable: true)
+        .AddField("CopyFromParentField", FieldType.StringUtf8, typeof(string), nullable: true)
+        .AddField("CopyFromParentSlug", FieldType.StringUtf8, typeof(string), nullable: true)
+        .AddField("CopyFromParentSourceField", FieldType.StringUtf8, typeof(string), nullable: true)
+        .AddField("RelatedDocumentSlug", FieldType.StringUtf8, typeof(string), nullable: true)
+        .AddField("RelatedDocumentDisplayField", FieldType.StringUtf8, typeof(string), nullable: true)
+        .AddField("CascadeFromField", FieldType.StringUtf8, typeof(string), nullable: true)
+        .AddField("CascadeFilterField", FieldType.StringUtf8, typeof(string), nullable: true)
+        .AddField("FieldGroup", FieldType.StringUtf8, typeof(string), nullable: true)
+        .AddField("ColumnSpan", FieldType.Int32, typeof(int?), nullable: true)
         .Build();
 
     public static EntitySchema IndexDefinition { get; } = new EntitySchema.Builder("IndexDefinition", "index-definitions")
@@ -247,6 +262,52 @@ public static class SystemEntitySchemas
         .AddField("Notes", FieldType.StringUtf8, typeof(string))
         .Build();
 
+    public static EntitySchema DashboardDefinition { get; } = new EntitySchema.Builder("DashboardDefinition", "dashboard-definitions")
+        .AddField("Name", FieldType.StringUtf8, typeof(string), required: true)
+        .AddField("Description", FieldType.StringUtf8, typeof(string))
+        .AddField("TilesJson", FieldType.StringUtf8, typeof(string))
+        .Build();
+
+    public static EntitySchema ViewDefinition { get; } = new EntitySchema.Builder("ViewDefinition", "view-definitions")
+        .AddField("ViewName", FieldType.StringUtf8, typeof(string), required: true)
+        .AddField("RootEntity", FieldType.StringUtf8, typeof(string), required: true)
+        .AddField("ProjectionsJson", FieldType.StringUtf8, typeof(string))
+        .AddField("JoinsJson", FieldType.StringUtf8, typeof(string))
+        .AddField("FiltersJson", FieldType.StringUtf8, typeof(string))
+        .AddField("SortsJson", FieldType.StringUtf8, typeof(string))
+        .AddField("Limit", FieldType.Int32, typeof(int))
+        .AddField("Offset", FieldType.Int32, typeof(int))
+        .AddField("Materialised", FieldType.Bool, typeof(bool))
+        .Build();
+
+    public static EntitySchema SystemPrincipal { get; } = new EntitySchema.Builder("SystemPrincipal", "system-principals")
+        .AddField("UserName", FieldType.StringUtf8, typeof(string), required: true, indexed: true)
+        .AddField("DisplayName", FieldType.StringUtf8, typeof(string), required: true)
+        .AddField("Email", FieldType.StringUtf8, typeof(string), required: true, indexed: true)
+        .AddField("PasswordHash", FieldType.StringUtf8, typeof(string))
+        .AddField("PasswordSalt", FieldType.StringUtf8, typeof(string))
+        .AddField("PasswordIterations", FieldType.Int32, typeof(int))
+        .AddField("Permissions", FieldType.StringUtf8, typeof(string))
+        .AddField("IsActive", FieldType.Bool, typeof(bool))
+        .AddField("LastLoginUtc", FieldType.DateTime, typeof(DateTime?), nullable: true)
+        .AddField("FailedLoginCount", FieldType.Int32, typeof(int))
+        .AddField("LockoutUntilUtc", FieldType.DateTime, typeof(DateTime?), nullable: true)
+        .AddField("MfaEnabled", FieldType.Bool, typeof(bool))
+        .AddField("MfaSecret", FieldType.StringUtf8, typeof(string), nullable: true)
+        .AddField("MfaLastVerifiedStep", FieldType.Int64, typeof(long))
+        .AddField("MfaSecretEncrypted", FieldType.StringUtf8, typeof(string), nullable: true)
+        .AddField("MfaPendingSecret", FieldType.StringUtf8, typeof(string), nullable: true)
+        .AddField("MfaPendingExpiresUtc", FieldType.DateTime, typeof(DateTime?), nullable: true)
+        .AddField("MfaPendingFailedAttempts", FieldType.Int32, typeof(int))
+        .AddField("MfaPendingSecretEncrypted", FieldType.StringUtf8, typeof(string), nullable: true)
+        .AddField("MfaBackupCodeHashes", FieldType.StringUtf8, typeof(string))
+        .AddField("MfaBackupCodesGeneratedUtc", FieldType.DateTime, typeof(DateTime?), nullable: true)
+        .AddField("ApiKeyHashes", FieldType.StringUtf8, typeof(string))
+        .AddField("OwnerInstanceId", FieldType.StringUtf8, typeof(string))
+        .AddField("OwnerTenantId", FieldType.StringUtf8, typeof(string))
+        .AddField("Role", FieldType.StringUtf8, typeof(string))
+        .Build();
+
     public static EntitySchema DeploymentNode { get; } = new EntitySchema.Builder("DeploymentNode", "deployment-nodes")
         .AddField("NodeId", FieldType.StringUtf8, typeof(string), required: true, indexed: true)
         .AddField("SecretHash", FieldType.StringUtf8, typeof(string), required: true)
@@ -274,6 +335,28 @@ public static class SystemEntitySchemas
         ChatSession,
         ChatMessage,
         RuntimeRelease,
-        DeploymentNode
+        DeploymentNode,
+        DashboardDefinition,
+        ViewDefinition,
+        SystemPrincipal
     };
+
+    // ── Name-based lookup ────────────────────────────────────────────────────
+
+    private static readonly Dictionary<string, EntitySchema> s_byName = BuildByNameLookup();
+
+    private static Dictionary<string, EntitySchema> BuildByNameLookup()
+    {
+        var dict = new Dictionary<string, EntitySchema>(All.Count, System.StringComparer.OrdinalIgnoreCase);
+        foreach (var s in All)
+            dict[s.EntityName] = s;
+        return dict;
+    }
+
+    /// <summary>
+    /// Returns the system <see cref="EntitySchema"/> whose <see cref="EntitySchema.EntityName"/>
+    /// matches <paramref name="entityTypeName"/> (case-insensitive), or <c>null</c> if no match.
+    /// </summary>
+    public static EntitySchema? GetByName(string entityTypeName)
+        => s_byName.TryGetValue(entityTypeName, out var schema) ? schema : null;
 }

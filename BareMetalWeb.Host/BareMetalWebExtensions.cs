@@ -82,18 +82,22 @@ public static class BareMetalWebExtensions
         LookupApiHandlers.Init(logger);
         Console.WriteLine($"[BMW Startup] Binary API + Lookup handlers initialized");
 
-        // Register system entities explicitly (AOT-safe, no assembly scanning).
-        // Code-first registrations for entities that still have typed handler logic.
-        // Entities migrated to system catalog are loaded via RuntimeEntityRegistry.
-        DataScaffold.RegisterEntity<ReportDefinition>();
-        DataScaffold.RegisterEntity<EntityDefinition>();
-        DataScaffold.RegisterEntity<FieldDefinition>();
-        DataScaffold.RegisterEntity<IndexDefinition>();
-        DataScaffold.RegisterEntity<ActionDefinition>();
-        DataScaffold.RegisterEntity<ActionCommandDefinition>();
-        // Migrated to system catalog: AppSetting, FileAttachment, RecordComment, InboxMessage, DomainEventSubscription, ScheduledActionDefinition, NotificationDefinition, AuditEntry, User, SystemPrincipal
-        DataScaffold.RegisterEntity<DashboardDefinition>();
-        DataScaffold.RegisterEntity<ViewDefinition>();
+        // Register metadata-core entities explicitly (AOT-safe, no assembly scanning).
+        // Only EntityDefinition, FieldDefinition, IndexDefinition need compiled C# types
+        // because they define the metadata system itself.
+        DataScaffold.RegisterEntity("EntityDefinition", SystemEntitySchemas.EntityDefinition,
+            DataScaffold.BuildStoreHandlers("EntityDefinition", () => new EntityDefinition()));
+        DataScaffold.RegisterEntity("FieldDefinition", SystemEntitySchemas.FieldDefinition,
+            DataScaffold.BuildStoreHandlers("FieldDefinition", () => new FieldDefinition()));
+        DataScaffold.RegisterEntity("IndexDefinition", SystemEntitySchemas.IndexDefinition,
+            DataScaffold.BuildStoreHandlers("IndexDefinition", () => new IndexDefinition()));
+
+        BinaryObjectSerializer.RegisterKnownType(typeof(EntityDefinition), () => new EntityDefinition());
+        BinaryObjectSerializer.RegisterKnownType(typeof(FieldDefinition), () => new FieldDefinition());
+        BinaryObjectSerializer.RegisterKnownType(typeof(IndexDefinition), () => new IndexDefinition());
+
+        // All other system entities (reports, dashboards, views, actions, etc.) are
+        // metadata-driven virtual entities registered via SystemCatalog → RuntimeEntityRegistry.
         Console.WriteLine($"[BMW Startup] Registered {DataScaffold.Entities.Count} code-first entities + system catalog provides the rest");
 
         phaseSw.Restart();

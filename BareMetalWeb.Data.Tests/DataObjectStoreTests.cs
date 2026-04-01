@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data.Interfaces;
 using Xunit;
@@ -87,8 +88,7 @@ public class DataObjectStoreTests
 
     private class InMemoryDataProvider : IDataProvider
     {
-        private readonly Dictionary<(Type, uint), BaseDataObject> _store = new();
-        private readonly Func<Type, bool>? _canHandlePredicate;
+        private readonly Dictionary<(string, uint), BaseDataObject> _store = new();
 
         public string Name => "InMemory";
         public string IndexRootPath => string.Empty;
@@ -97,63 +97,56 @@ public class DataObjectStoreTests
         public string IndexSnapshotExtension => string.Empty;
         public string IndexTempExtension => string.Empty;
 
-        public InMemoryDataProvider(Func<Type, bool>? canHandlePredicate = null)
-        {
-            _canHandlePredicate = canHandlePredicate;
-        }
-
-        public bool CanHandle(Type type) => _canHandlePredicate?.Invoke(type) ?? true;
-
-        public void Save<T>(T obj) where T : BaseDataObject
+        public void Save(string entityTypeName, BaseDataObject obj)
         {
             if (obj is null) throw new ArgumentNullException(nameof(obj));
-            _store[(typeof(T), obj.Key)] = obj;
+            _store[(entityTypeName, obj.Key)] = obj;
         }
 
-        public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public ValueTask SaveAsync(string entityTypeName, BaseDataObject obj, CancellationToken cancellationToken = default)
         {
-            Save(obj);
+            Save(entityTypeName, obj);
             return ValueTask.CompletedTask;
         }
 
-        public T? Load<T>(uint key) where T : BaseDataObject
+        public BaseDataObject? Load(string entityTypeName, uint key)
         {
-            return _store.TryGetValue((typeof(T), key), out var obj) ? obj as T : null;
+            return _store.TryGetValue((entityTypeName, key), out var obj) ? obj : null;
         }
 
-        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public ValueTask<BaseDataObject?> LoadAsync(string entityTypeName, uint key, CancellationToken cancellationToken = default)
         {
-            return ValueTask.FromResult(Load<T>(key));
+            return ValueTask.FromResult(Load(entityTypeName, key));
         }
 
-        public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
+        public IEnumerable<BaseDataObject> Query(string entityTypeName, QueryDefinition? query = null)
         {
-            return _store.Values.OfType<T>();
+            return _store.Where(kv => kv.Key.Item1 == entityTypeName).Select(kv => kv.Value);
         }
 
-        public ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public ValueTask<IEnumerable<BaseDataObject>> QueryAsync(string entityTypeName, QueryDefinition? query = null, CancellationToken cancellationToken = default)
         {
-            return ValueTask.FromResult(Query<T>(query));
+            return ValueTask.FromResult(Query(entityTypeName, query));
         }
 
-        public int Count<T>(QueryDefinition? query = null) where T : BaseDataObject
+        public int Count(string entityTypeName, QueryDefinition? query = null)
         {
-            return Query<T>(query).Count();
+            return Query(entityTypeName, query).Count();
         }
 
-        public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public ValueTask<int> CountAsync(string entityTypeName, QueryDefinition? query = null, CancellationToken cancellationToken = default)
         {
-            return ValueTask.FromResult(Count<T>(query));
+            return ValueTask.FromResult(Count(entityTypeName, query));
         }
 
-        public void Delete<T>(uint key) where T : BaseDataObject
+        public void Delete(string entityTypeName, uint key)
         {
-            _store.Remove((typeof(T), key));
+            _store.Remove((entityTypeName, key));
         }
 
-        public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public ValueTask DeleteAsync(string entityTypeName, uint key, CancellationToken cancellationToken = default)
         {
-            Delete<T>(key);
+            Delete(entityTypeName, key);
             return ValueTask.CompletedTask;
         }
 
@@ -196,10 +189,10 @@ public class DataObjectStoreTests
         var product = new TestProduct { Key = 1, Name = "Test Product", Price = 99.99m };
 
         // Act
-        store.Save(product);
+        store.Save("TestProduct", product);
 
         // Assert
-        var loaded = store.Load<TestProduct>(product.Key);
+        var loaded = (TestProduct?)store.Load("TestProduct", product.Key);
         Assert.NotNull(loaded);
         Assert.Equal("Test Product", loaded.Name);
         Assert.Equal(99.99m, loaded.Price);
@@ -214,7 +207,7 @@ public class DataObjectStoreTests
         store.RegisterProvider(provider);
 
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => store.Save<TestProduct>(null!));
+        Assert.Throws<ArgumentNullException>(() => store.Save("TestProduct", (BaseDataObject)null!));
     }
 
     [Fact]
@@ -228,10 +221,10 @@ public class DataObjectStoreTests
         var product = new TestProduct { Key = 1, Name = "Async Product", Price = 49.99m };
 
         // Act
-        await store.SaveAsync(product);
+        await store.SaveAsync("TestProduct", product);
 
         // Assert
-        var loaded = await store.LoadAsync<TestProduct>(product.Key);
+        var loaded = (TestProduct?)(await store.LoadAsync("TestProduct", product.Key));
         Assert.NotNull(loaded);
         Assert.Equal("Async Product", loaded.Name);
         Assert.Equal(49.99m, loaded.Price);
@@ -246,7 +239,7 @@ public class DataObjectStoreTests
         store.RegisterProvider(provider);
 
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentNullException>(() => store.SaveAsync<TestProduct>(null!).AsTask());
+        await Assert.ThrowsAsync<ArgumentNullException>(() => store.SaveAsync("TestProduct", (BaseDataObject)null!).AsTask());
     }
 
     [Fact]
@@ -258,10 +251,10 @@ public class DataObjectStoreTests
         store.RegisterProvider(provider);
 
         var product = new TestProduct { Key = 123, Name = "Loaded Product", Price = 199.99m };
-        store.Save(product);
+        store.Save("TestProduct", product);
 
         // Act
-        var loaded = store.Load<TestProduct>(123);
+        var loaded = (TestProduct?)store.Load("TestProduct", 123);
 
         // Assert
         Assert.NotNull(loaded);
@@ -278,7 +271,7 @@ public class DataObjectStoreTests
         store.RegisterProvider(provider);
 
         // Act
-        var loaded = store.Load<TestProduct>(999);
+        var loaded = (TestProduct?)store.Load("TestProduct", 999);
 
         // Assert
         Assert.Null(loaded);
@@ -293,7 +286,7 @@ public class DataObjectStoreTests
         store.RegisterProvider(provider);
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => store.Load<TestProduct>(0));
+        Assert.Throws<ArgumentException>(() => (TestProduct?)store.Load("TestProduct", 0));
     }
 
     [Fact]
@@ -305,10 +298,10 @@ public class DataObjectStoreTests
         store.RegisterProvider(provider);
 
         var product = new TestProduct { Key = 456, Name = "Async Loaded", Price = 299.99m };
-        await store.SaveAsync(product);
+        await store.SaveAsync("TestProduct", product);
 
         // Act
-        var loaded = await store.LoadAsync<TestProduct>(456);
+        var loaded = (TestProduct?)(await store.LoadAsync("TestProduct", 456));
 
         // Assert
         Assert.NotNull(loaded);
@@ -325,7 +318,7 @@ public class DataObjectStoreTests
         store.RegisterProvider(provider);
 
         // Act
-        var loaded = await store.LoadAsync<TestProduct>(999);
+        var loaded = (TestProduct?)(await store.LoadAsync("TestProduct", 999));
 
         // Assert
         Assert.Null(loaded);
@@ -340,7 +333,7 @@ public class DataObjectStoreTests
         store.RegisterProvider(provider);
 
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentException>(() => store.LoadAsync<TestProduct>(0).AsTask());
+        await Assert.ThrowsAsync<ArgumentException>(() => store.LoadAsync("TestProduct", 0).AsTask());
     }
 
     [Fact]
@@ -355,12 +348,12 @@ public class DataObjectStoreTests
         var product2 = new TestProduct { Key = 2, Name = "Product 2", Price = 20m };
         var product3 = new TestProduct { Key = 3, Name = "Product 3", Price = 30m };
 
-        store.Save(product1);
-        store.Save(product2);
-        store.Save(product3);
+        store.Save("TestProduct", product1);
+        store.Save("TestProduct", product2);
+        store.Save("TestProduct", product3);
 
         // Act
-        var results = store.Query<TestProduct>().ToList();
+        var results = store.Query("TestProduct").Cast<TestProduct>().ToList();
 
         // Assert
         Assert.Equal(3, results.Count);
@@ -378,7 +371,7 @@ public class DataObjectStoreTests
         store.RegisterProvider(provider);
 
         // Act
-        var results = store.Query<TestProduct>().ToList();
+        var results = store.Query("TestProduct").Cast<TestProduct>().ToList();
 
         // Assert
         Assert.Empty(results);
@@ -395,12 +388,12 @@ public class DataObjectStoreTests
         var product = new TestProduct { Key = 1, Name = "Product", Price = 100m };
         var customer = new TestCustomer { Key = 1, CompanyName = "Acme Corp", Email = "test@acme.com" };
 
-        store.Save(product);
-        store.Save(customer);
+        store.Save("TestProduct", product);
+        store.Save("TestCustomer", customer);
 
         // Act
-        var products = store.Query<TestProduct>().ToList();
-        var customers = store.Query<TestCustomer>().ToList();
+        var products = store.Query("TestProduct").Cast<TestProduct>().ToList();
+        var customers = store.Query("TestCustomer").Cast<TestCustomer>().ToList();
 
         // Assert
         Assert.Single(products);
@@ -420,11 +413,11 @@ public class DataObjectStoreTests
         var product1 = new TestProduct { Key = 1, Name = "Async 1", Price = 10m };
         var product2 = new TestProduct { Key = 2, Name = "Async 2", Price = 20m };
 
-        await store.SaveAsync(product1);
-        await store.SaveAsync(product2);
+        await store.SaveAsync("TestProduct", product1);
+        await store.SaveAsync("TestProduct", product2);
 
         // Act
-        var results = (await store.QueryAsync<TestProduct>()).ToList();
+        var results = (await store.QueryAsync("TestProduct")).Cast<TestProduct>().ToList();
 
         // Assert
         Assert.Equal(2, results.Count);
@@ -440,12 +433,12 @@ public class DataObjectStoreTests
         var provider = new InMemoryDataProvider();
         store.RegisterProvider(provider);
 
-        await store.SaveAsync(new TestProduct { Key = 1, Name = "P1", Price = 10m });
-        await store.SaveAsync(new TestProduct { Key = 2, Name = "P2", Price = 20m });
-        await store.SaveAsync(new TestProduct { Key = 3, Name = "P3", Price = 30m });
+        await store.SaveAsync("TestProduct", new TestProduct { Key = 1, Name = "P1", Price = 10m });
+        await store.SaveAsync("TestProduct", new TestProduct { Key = 2, Name = "P2", Price = 20m });
+        await store.SaveAsync("TestProduct", new TestProduct { Key = 3, Name = "P3", Price = 30m });
 
         // Act
-        var count = await store.CountAsync<TestProduct>();
+        var count = await store.CountAsync("TestProduct");
 
         // Assert
         Assert.Equal(3, count);
@@ -460,7 +453,7 @@ public class DataObjectStoreTests
         store.RegisterProvider(provider);
 
         // Act
-        var count = await store.CountAsync<TestProduct>();
+        var count = await store.CountAsync("TestProduct");
 
         // Assert
         Assert.Equal(0, count);
@@ -475,13 +468,13 @@ public class DataObjectStoreTests
         store.RegisterProvider(provider);
 
         var product = new TestProduct { Key = 100, Name = "To Delete", Price = 50m };
-        store.Save(product);
+        store.Save("TestProduct", product);
 
         // Act
-        store.Delete<TestProduct>(100);
+        store.Delete("TestProduct", 100);
 
         // Assert
-        var loaded = store.Load<TestProduct>(100);
+        var loaded = (TestProduct?)store.Load("TestProduct", 100);
         Assert.Null(loaded);
     }
 
@@ -494,7 +487,7 @@ public class DataObjectStoreTests
         store.RegisterProvider(provider);
 
         // Act & Assert (should not throw)
-        store.Delete<TestProduct>(999);
+        store.Delete("TestProduct", 999);
     }
 
     [Fact]
@@ -506,7 +499,7 @@ public class DataObjectStoreTests
         store.RegisterProvider(provider);
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => store.Delete<TestProduct>(0));
+        Assert.Throws<ArgumentException>(() => store.Delete("TestProduct", 0));
     }
 
     [Fact]
@@ -518,13 +511,13 @@ public class DataObjectStoreTests
         store.RegisterProvider(provider);
 
         var product = new TestProduct { Key = 200, Name = "Async Delete", Price = 75m };
-        await store.SaveAsync(product);
+        await store.SaveAsync("TestProduct", product);
 
         // Act
-        await store.DeleteAsync<TestProduct>(200);
+        await store.DeleteAsync("TestProduct", 200);
 
         // Assert
-        var loaded = await store.LoadAsync<TestProduct>(200);
+        var loaded = (TestProduct?)(await store.LoadAsync("TestProduct", 200));
         Assert.Null(loaded);
     }
 
@@ -537,7 +530,7 @@ public class DataObjectStoreTests
         store.RegisterProvider(provider);
 
         // Act & Assert (should not throw)
-        await store.DeleteAsync<TestProduct>(999);
+        await store.DeleteAsync("TestProduct", 999);
     }
 
     [Fact]
@@ -549,7 +542,7 @@ public class DataObjectStoreTests
         store.RegisterProvider(provider);
 
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentException>(() => store.DeleteAsync<TestProduct>(0).AsTask());
+        await Assert.ThrowsAsync<ArgumentException>(() => store.DeleteAsync("TestProduct", 0).AsTask());
     }
 
     [Fact]
@@ -564,11 +557,11 @@ public class DataObjectStoreTests
         var product2 = new TestProduct { Key = 300, Name = "Updated", Price = 200m };
 
         // Act
-        store.Save(product1);
-        store.Save(product2);
+        store.Save("TestProduct", product1);
+        store.Save("TestProduct", product2);
 
         // Assert
-        var loaded = store.Load<TestProduct>(300);
+        var loaded = (TestProduct?)store.Load("TestProduct", 300);
         Assert.NotNull(loaded);
         Assert.Equal("Updated", loaded.Name);
         Assert.Equal(200m, loaded.Price);
@@ -630,12 +623,12 @@ public class DataObjectStoreTests
         // Act
         store.RegisterFallbackProvider(fallback);
         var product = new TestProduct { Key = 1, Name = "Fallback Test", Price = 99m };
-        store.Save(product);
+        store.Save("TestProduct", product);
 
         // Assert
-        var loaded = store.Load<TestProduct>(product.Key);
+        var loaded = (TestProduct?)store.Load("TestProduct", product.Key);
         Assert.NotNull(loaded);
-        Assert.Equal("Fallback Test", loaded.Name);
+        Assert.Equal("Fallback Test", ((TestProduct)loaded).Name);
     }
 
     [Fact]
@@ -671,7 +664,7 @@ public class DataObjectStoreTests
         var product = new TestProduct { Key = 1, Name = "No Provider", Price = 99m };
 
         // Act & Assert
-        var ex = Assert.Throws<InvalidOperationException>(() => store.Save(product));
+        var ex = Assert.Throws<InvalidOperationException>(() => store.Save("TestProduct", product));
         Assert.Contains("No IDataProvider registered", ex.Message);
         Assert.Contains("no fallback provider configured", ex.Message);
     }
@@ -681,22 +674,22 @@ public class DataObjectStoreTests
     {
         // Arrange
         var store = new DataObjectStore();
-        var productProvider = new InMemoryDataProvider(t => t == typeof(TestProduct));
-        var customerProvider = new InMemoryDataProvider(t => t == typeof(TestCustomer));
+        var provider1 = new InMemoryDataProvider();
+        var provider2 = new InMemoryDataProvider();
 
-        store.RegisterProvider(productProvider);
-        store.RegisterProvider(customerProvider);
+        store.RegisterProvider(provider1);
+        store.RegisterProvider(provider2);
 
         var product = new TestProduct { Key = 1, Name = "Product", Price = 100m };
         var customer = new TestCustomer { Key = 1, CompanyName = "Customer Co", Email = "test@customer.com" };
 
         // Act
-        store.Save(product);
-        store.Save(customer);
+        store.Save("TestProduct", product);
+        store.Save("TestCustomer", customer);
 
         // Assert
-        var loadedProduct = store.Load<TestProduct>(product.Key);
-        var loadedCustomer = store.Load<TestCustomer>(customer.Key);
+        var loadedProduct = (TestProduct?)store.Load("TestProduct", product.Key);
+        var loadedCustomer = (TestCustomer?)store.Load("TestCustomer", customer.Key);
 
         Assert.NotNull(loadedProduct);
         Assert.NotNull(loadedCustomer);
@@ -709,19 +702,18 @@ public class DataObjectStoreTests
     {
         // Arrange
         var store = new DataObjectStore();
-        var specificProvider = new InMemoryDataProvider(t => t == typeof(TestCustomer));
+        // No primary providers — only fallback
         var fallbackProvider = new InMemoryDataProvider();
 
-        store.RegisterProvider(specificProvider);
         store.RegisterFallbackProvider(fallbackProvider);
 
         var product = new TestProduct { Key = 1, Name = "Fallback Product", Price = 50m };
 
         // Act
-        store.Save(product);
+        store.Save("TestProduct", product);
 
         // Assert
-        var loaded = store.Load<TestProduct>(product.Key);
+        var loaded = (TestProduct?)store.Load("TestProduct", product.Key);
         Assert.NotNull(loaded);
         Assert.Equal("Fallback Product", loaded.Name);
     }
@@ -731,19 +723,19 @@ public class DataObjectStoreTests
     {
         // Arrange
         var store = new DataObjectStore();
-        var productProvider = new InMemoryDataProvider(t => t == typeof(TestProduct));
-        var customerProvider = new InMemoryDataProvider(t => t == typeof(TestCustomer));
+        var provider1 = new InMemoryDataProvider();
+        var provider2 = new InMemoryDataProvider();
 
-        store.RegisterProvider(productProvider);
-        store.RegisterProvider(customerProvider);
+        store.RegisterProvider(provider1);
+        store.RegisterProvider(provider2);
 
-        store.Save(new TestProduct { Key = 1, Name = "P1", Price = 10m });
-        store.Save(new TestProduct { Key = 2, Name = "P2", Price = 20m });
-        store.Save(new TestCustomer { Key = 1, CompanyName = "C1", Email = "c1@test.com" });
+        store.Save("TestProduct", new TestProduct { Key = 1, Name = "P1", Price = 10m });
+        store.Save("TestProduct", new TestProduct { Key = 2, Name = "P2", Price = 20m });
+        store.Save("TestCustomer", new TestCustomer { Key = 1, CompanyName = "C1", Email = "c1@test.com" });
 
         // Act
-        var products = store.Query<TestProduct>().ToList();
-        var customers = store.Query<TestCustomer>().ToList();
+        var products = store.Query("TestProduct").Cast<TestProduct>().ToList();
+        var customers = store.Query("TestCustomer").Cast<TestCustomer>().ToList();
 
         // Assert
         Assert.Equal(2, products.Count);

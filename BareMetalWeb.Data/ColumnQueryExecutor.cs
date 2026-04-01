@@ -51,13 +51,14 @@ internal static class ColumnQueryExecutor
     /// <paramref name="skip"/> and <paramref name="top"/> for pagination.
     /// </summary>
     internal static List<T> Filter<T>(
+        string entityName,
         IReadOnlyList<T> rows,
         QueryDefinition query,
         int skip = 0,
         int top = int.MaxValue)
         where T : BaseDataObject
     {
-        var meta = DataScaffold.GetEntityByType(typeof(T));
+        var meta = DataScaffold.GetEntityByName(entityName);
         if (meta == null)
             return ScalarFallback(rows, query, skip, top);
 

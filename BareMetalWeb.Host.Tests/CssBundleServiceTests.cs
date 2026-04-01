@@ -52,16 +52,16 @@ public class CssBundleServiceTests : IDisposable
     }
 
     [Theory]
-    [InlineData("light")]
-    [InlineData("dark")]
-    [InlineData("colourful")]
-    [InlineData("muted")]
-    [InlineData("highviz")]
-    [InlineData("ocean")]
-    [InlineData("forest")]
-    [InlineData("sunset")]
-    [InlineData("midnight")]
-    [InlineData("rose")]
+    [InlineData("default")]
+    [InlineData("cerulean")]
+    [InlineData("cosmo")]
+    [InlineData("darkly")]
+    [InlineData("flatly")]
+    [InlineData("journal")]
+    [InlineData("lux")]
+    [InlineData("minty")]
+    [InlineData("sandstone")]
+    [InlineData("slate")]
     public void DefaultThemes_ContainsTheme(string theme)
     {
         Assert.Contains(theme, CssBundleService.DefaultThemes);

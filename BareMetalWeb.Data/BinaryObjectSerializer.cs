@@ -37,6 +37,30 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         // Register IdentifierValue (readonly struct) as a known type.
         // Serialization/deserialization is handled inline as two ulongs.
         InstanceFactory.TryAdd(typeof(IdentifierValue), () => default(IdentifierValue));
+
+        // Pre-register collection factories for all element types used by entity fields.
+        // This eliminates the Activator.CreateInstance fallback in CreateTypeShape.
+        RegisterCollectionFactory<string>();
+        RegisterCollectionFactory<int>();
+        RegisterCollectionFactory<uint>();
+        RegisterCollectionFactory<long>();
+        RegisterCollectionFactory<double>();
+        RegisterCollectionFactory<float>();
+        RegisterCollectionFactory<bool>();
+        RegisterCollectionFactory<DateTime>();
+        RegisterCollectionFactory<Guid>();
+    }
+
+    /// <summary>
+    /// Pre-registers <c>List&lt;T&gt;</c> and <c>Dictionary&lt;string, T&gt;</c> factories
+    /// for the given element type. Call at startup for each type used in entity collection fields.
+    /// </summary>
+    public static void RegisterCollectionFactory<T>()
+    {
+        InstanceFactory.TryAdd(typeof(List<T>), static () => new List<T>());
+        InstanceFactory.TryAdd(typeof(Dictionary<string, T>), static () => new Dictionary<string, T>());
+        InstanceFactory.TryAdd(typeof(Dictionary<uint, T>), static () => new Dictionary<uint, T>());
+        InstanceFactory.TryAdd(typeof(Dictionary<int, T>), static () => new Dictionary<int, T>());
     }
 
     // Base property accessors for BaseDataObject — ordinal-indexed, zero reflection.
@@ -1247,6 +1271,10 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         var t = typeof(T);
         RegisterKnownTypeCore(t);
         InstanceFactory.TryAdd(t, static () => new T());
+        // Also register List<T> and Dictionary<string,T> factories so CreateTypeShape
+        // never falls back to Activator.CreateInstance for collection fields.
+        InstanceFactory.TryAdd(typeof(List<T>), static () => new List<T>());
+        InstanceFactory.TryAdd(typeof(Dictionary<string, T>), static () => new Dictionary<string, T>());
     }
 
     /// <summary>
@@ -1556,9 +1584,10 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             shape.Kind = TypeKind.List;
             shape.ElementType = AssumePublicMembers(listElementType);
             var listType = type;
-            // Capture the annotated 'listType' local so the trimmer tracks the
-            // [DynamicallyAccessedMembers(PublicParameterlessConstructor)] annotation.
-            var listFactory = InstanceFactory.GetOrAdd(listType, _ => { var t = listType; return () => Activator.CreateInstance(t)!; });
+            var listFactory = InstanceFactory.GetOrAdd(listType, static t =>
+                throw new InvalidOperationException(
+                    $"No factory registered for collection type '{t.FullName}'. " +
+                    "Pre-register it at startup with BinaryObjectSerializer.RegisterKnownType<T>()."));
             shape.ListFactory = _ => (System.Collections.IList)listFactory();
             return shape;
         }
@@ -1569,9 +1598,10 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             shape.KeyType = AssumePublicMembers(keyType);
             shape.ValueType = AssumePublicMembers(valueType);
             var dictType = type;
-            // Capture the annotated 'dictType' local so the trimmer tracks the
-            // [DynamicallyAccessedMembers(PublicParameterlessConstructor)] annotation.
-            var dictFactory = InstanceFactory.GetOrAdd(dictType, _ => { var t = dictType; return () => Activator.CreateInstance(t)!; });
+            var dictFactory = InstanceFactory.GetOrAdd(dictType, static t =>
+                throw new InvalidOperationException(
+                    $"No factory registered for collection type '{t.FullName}'. " +
+                    "Pre-register it at startup with BinaryObjectSerializer.RegisterKnownType<T>()."));
             shape.DictionaryFactory = _ => (System.Collections.IDictionary)dictFactory();
             return shape;
         }
@@ -1916,27 +1946,46 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
     private static MemberAccessor[] BuildMemberAccessors(Type type)
     {
         // Entity types: use ordinal-indexed DataScaffold metadata (zero reflection)
-        var meta = DataScaffold.GetEntityByType(type);
+        // Try by CLR type first (compiled entities), then by name (string-registered entities)
+        var meta = DataScaffold.GetEntityByType(type) ?? DataScaffold.GetEntityByName(type.Name);
         if (meta != null)
         {
             // Build accessors from metadata fields + base properties — no PropertyInfo, no reflection.
-            var list = new List<MemberAccessor>(meta.Fields.Count + BasePropertyAccessors.Length);
-
-            // Base properties (Key, Identifier, CreatedOnUtc, etc.) — static ordinal accessors
-            for (int i = 0; i < BasePropertyAccessors.Length; i++)
-                list.Add(BasePropertyAccessors[i]);
-
-            // Entity-specific DataField properties — ordinal-indexed via metadata
-            foreach (var fieldMeta in meta.Fields)
+            if (meta.Fields.Count > 0)
             {
-                if (fieldMeta.StorageOrdinal < 0)
-                    continue;
-                list.Add(new MemberAccessor(fieldMeta.Name, fieldMeta.ClrType,
-                    fieldMeta.GetValueFn, fieldMeta.SetValueFn));
+                var list = new List<MemberAccessor>(meta.Fields.Count + BasePropertyAccessors.Length);
+                for (int i = 0; i < BasePropertyAccessors.Length; i++)
+                    list.Add(BasePropertyAccessors[i]);
+
+                foreach (var fieldMeta in meta.Fields)
+                {
+                    if (fieldMeta.StorageOrdinal < 0) continue;
+                    list.Add(new MemberAccessor(fieldMeta.Name, fieldMeta.ClrType,
+                        fieldMeta.GetValueFn, fieldMeta.SetValueFn));
+                }
+                list.Sort(static (a, b) => StringComparer.Ordinal.Compare(a.Name, b.Name));
+                return list.ToArray();
             }
 
-            list.Sort(static (a, b) => StringComparer.Ordinal.Compare(a.Name, b.Name));
-            return list.ToArray();
+            // Schema-based fallback: entity registered by name with EntitySchema
+            // but no DataFieldMetadata. Build accessors from schema ordinals.
+            if (meta.Schema != null)
+            {
+                var schema = meta.Schema;
+                var list = new List<MemberAccessor>(schema.FieldCount + BasePropertyAccessors.Length);
+                for (int i = 0; i < BasePropertyAccessors.Length; i++)
+                    list.Add(BasePropertyAccessors[i]);
+
+                for (int i = 0; i < schema.FieldCount; i++)
+                {
+                    int ord = BaseDataObject.BaseFieldCount + i;
+                    list.Add(new MemberAccessor(schema.Names[i], schema.ClrTypes[i],
+                        obj => ((BaseDataObject)obj).GetFieldValue(ord),
+                        (obj, val) => ((BaseDataObject)obj).SetFieldValue(ord, val)));
+                }
+                list.Sort(static (a, b) => StringComparer.Ordinal.Compare(a.Name, b.Name));
+                return list.ToArray();
+            }
         }
 
         // Non-entity types with explicit member registration (zero reflection)

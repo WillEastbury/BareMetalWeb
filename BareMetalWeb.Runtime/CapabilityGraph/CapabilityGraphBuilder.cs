@@ -84,7 +84,7 @@ public sealed class CapabilityGraphBuilder
         {
             try
             {
-                var views = await store.QueryAsync<BareMetalWeb.Data.ViewDefinition>().ConfigureAwait(false);
+                var views = (await store.QueryAsync("ViewDefinition").ConfigureAwait(false)).Cast<BareMetalWeb.Data.ViewDefinition>();
                 foreach (var view in views)
                 {
                     var rootSlug = view.RootEntity;

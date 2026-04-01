@@ -39,21 +39,21 @@ public static class SamplePackageJson
         };
 
         if (root.TryGetProperty("entities", out var entities))
-            pkg.Entities = ReadEntityList<EntityDefinition>(entities);
+            pkg.Entities = ReadEntityList<EntityDefinition>("EntityDefinition", entities);
         if (root.TryGetProperty("fields", out var fields))
-            pkg.Fields = ReadEntityList<FieldDefinition>(fields);
+            pkg.Fields = ReadEntityList<FieldDefinition>("FieldDefinition", fields);
         if (root.TryGetProperty("indexes", out var indexes))
-            pkg.Indexes = ReadEntityList<IndexDefinition>(indexes);
+            pkg.Indexes = ReadEntityList<IndexDefinition>("IndexDefinition", indexes);
         if (root.TryGetProperty("actions", out var actions))
-            pkg.Actions = ReadEntityList<ActionDefinition>(actions);
+            pkg.Actions = ReadEntityListBySlug("action-definitions", actions);
         if (root.TryGetProperty("actionCommands", out var cmds))
-            pkg.ActionCommands = ReadEntityList<ActionCommandDefinition>(cmds);
+            pkg.ActionCommands = ReadEntityListBySlug("action-commands", cmds);
         if (root.TryGetProperty("aggregations", out var aggs))
-            pkg.Aggregations = ReadEntityList<AggregationDefinition>(aggs);
+            pkg.Aggregations = ReadEntityListBySlug("aggregation-definitions", aggs);
         if (root.TryGetProperty("scheduledActions", out var sched))
-            pkg.ScheduledActions = ReadEntityList<ScheduledActionDefinition>(sched);
+            pkg.ScheduledActions = ReadEntityListBySlug("scheduled-actions", sched);
         if (root.TryGetProperty("workflowRules", out var rules))
-            pkg.WorkflowRules = ReadEntityList<DomainEventSubscription>(rules);
+            pkg.WorkflowRules = ReadEntityListBySlug("domain-event-subscriptions", rules);
 
         // Lightweight types without DataScaffold metadata
         if (root.TryGetProperty("reports", out var reports))
@@ -67,17 +67,50 @@ public static class SamplePackageJson
     }
 
     /// <summary>
+    /// Metadata-driven entity deserialization by slug: uses DataScaffold field metadata and compiled
+    /// setter delegates to populate DataRecord properties from JSON without reflection.
+    /// The entity must be registered with DataScaffold (by slug) before calling this method.
+    /// </summary>
+    private static List<BaseDataObject> ReadEntityListBySlug(string slug, JsonElement arr)
+    {
+        if (arr.ValueKind != JsonValueKind.Array) return new List<BaseDataObject>();
+
+        if (!DataScaffold.TryGetEntity(slug, out var meta))
+            return new List<BaseDataObject>(); // Entity not yet registered; skip gracefully
+
+        var list = new List<BaseDataObject>(arr.GetArrayLength());
+
+        foreach (var el in arr.EnumerateArray())
+        {
+            if (el.ValueKind != JsonValueKind.Object) continue;
+            var entity = meta.Handlers.Create();
+
+            foreach (var prop in el.EnumerateObject())
+            {
+                var field = meta.FindField(prop.Name);
+                if (field == null) continue;
+                if (DataScaffold.TryConvertJson(prop.Value, field.ClrType, out var converted))
+                    field.SetValueFn(entity, converted);
+            }
+
+            list.Add(entity);
+        }
+
+        return list;
+    }
+
+    /// <summary>
     /// Metadata-driven entity deserialization: uses DataScaffold field metadata and compiled
     /// setter delegates to populate entity properties from JSON without reflection.
     /// The entity type must be registered with DataScaffold before calling this method.
     /// </summary>
-    private static List<T> ReadEntityList<T>(JsonElement arr) where T : BaseDataObject, new()
+    private static List<T> ReadEntityList<T>(string entityName, JsonElement arr) where T : BaseDataObject, new()
     {
         if (arr.ValueKind != JsonValueKind.Array) return new List<T>();
 
-        var meta = DataScaffold.GetEntityByType(typeof(T))
+        var meta = DataScaffold.GetEntityByName(entityName)
             ?? throw new InvalidOperationException(
-                $"Entity type '{typeof(T).Name}' is not registered with DataScaffold. " +
+                $"Entity '{entityName}' is not registered with DataScaffold. " +
                 "Register it before deserializing sample packages.");
 
         var list = new List<T>(arr.GetArrayLength());

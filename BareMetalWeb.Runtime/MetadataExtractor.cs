@@ -1,4 +1,3 @@
-using System.Reflection;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data;
 using BareMetalWeb.Rendering.Models;
@@ -7,12 +6,10 @@ namespace BareMetalWeb.Runtime;
 
 /// <summary>
 /// Generates persisted metadata records (<see cref="EntityDefinition"/>,
-/// <see cref="FieldDefinition"/>, <see cref="IndexDefinition"/>) from the
-/// reflection attributes on a compiled C# type.
+/// <see cref="FieldDefinition"/>, <see cref="IndexDefinition"/>) from registered
+/// <see cref="DataEntityMetadata"/>.
 ///
-/// This is the bridge between the "code-first" world (annotated <see cref="BaseDataObject"/>
-/// subclasses) and the "metadata-first" world where entity schemas live in the
-/// data store and can be browsed and edited through the admin UI.
+/// All metadata is read from <see cref="DataScaffold"/> — no reflection is used.
 /// </summary>
 public static class MetadataExtractor
 {
@@ -28,31 +25,21 @@ public static class MetadataExtractor
         "EntityTypeName"
     };
 
-    private static readonly NullabilityInfoContext _nullabilityCtx = new();
-
     // ── Helpers ─────────────────────────────────────────────────────────────────
 
     /// <summary>
     /// Resolves the URL slug for a lookup target type.
-    /// Tries the live DataScaffold registry first; falls back to reading the
-    /// <see cref="DataEntityAttribute"/> (or deriving by convention) from the CLR type.
+    /// Checks the live <see cref="DataScaffold"/> registry; falls back to
+    /// convention-based slug derivation from the type name (no reflection).
     /// </summary>
     internal static string? ResolveEntitySlug(Type targetType)
     {
-        // Check the live registry first
         var meta = DataScaffold.GetEntityByType(targetType);
         if (meta != null)
             return meta.Slug;
 
-        // Fall back to reading the attribute directly
-        var attr = targetType.GetCustomAttribute<DataEntityAttribute>();
-        if (attr != null && !string.IsNullOrWhiteSpace(attr.Slug))
-            return attr.Slug!.Trim().ToLowerInvariant();
-
-        var name = !string.IsNullOrWhiteSpace(attr?.Name)
-            ? attr!.Name
-            : DataScaffold.Pluralize(DataScaffold.DeCamelcase(targetType.Name));
-
+        // Convention fallback: derive from type name without reflection
+        var name = DataScaffold.Pluralize(DataScaffold.DeCamelcase(targetType.Name));
         return DataScaffold.ToSlug(name);
     }
 
@@ -101,113 +88,9 @@ public static class MetadataExtractor
         _ => "guid"
     };
 
-    private static bool IsCoreProperty(PropertyInfo prop) =>
-        prop.DeclaringType == typeof(BaseDataObject) || CorePropertyNames.Contains(prop.Name);
-
     /// <summary>
-    /// Extracts persisted metadata records directly from a compiled CLR type by scanning
-    /// its <see cref="DataEntityAttribute"/>, <see cref="DataFieldAttribute"/> and
-    /// <see cref="DataIndexAttribute"/> annotations.
-    /// </summary>
-    internal static (
-        EntityDefinition Entity,
-        IReadOnlyList<FieldDefinition> Fields,
-        IReadOnlyList<IndexDefinition> Indexes)
-        ExtractFromType(Type type)
-    {
-        var entityAttr = type.GetCustomAttribute<DataEntityAttribute>();
-
-        string name = !string.IsNullOrWhiteSpace(entityAttr?.Name)
-            ? entityAttr!.Name
-            : DataScaffold.Pluralize(DataScaffold.DeCamelcase(type.Name));
-
-        string slug = !string.IsNullOrWhiteSpace(entityAttr?.Slug)
-            ? entityAttr!.Slug!.Trim().ToLowerInvariant()
-            : DataScaffold.ToSlug(name);
-
-        var entity = new EntityDefinition
-        {
-            EntityId = Guid.NewGuid().ToString("D"),
-            Name = name,
-            Slug = slug,
-            IdStrategy = MapIdStrategyString(entityAttr?.IdGeneration ?? AutoIdStrategy.Sequential),
-            ShowOnNav = entityAttr?.ShowOnNav ?? false,
-            NavGroup = entityAttr?.NavGroup ?? "Admin",
-            NavOrder = entityAttr?.NavOrder ?? 0,
-            Permissions = !string.IsNullOrWhiteSpace(entityAttr?.Permissions)
-                ? entityAttr!.Permissions
-                : name,
-            Version = 1
-        };
-
-        var fields = new List<FieldDefinition>();
-        var indexes = new List<IndexDefinition>();
-
-        var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(p => !IsCoreProperty(p))
-            .Select(p => (Prop: p, Attr: p.GetCustomAttribute<DataFieldAttribute>()))
-            .Where(x => x.Attr != null)
-            .OrderBy(x => x.Attr!.Order);
-
-        foreach (var (prop, attr) in properties)
-        {
-            var dataIndex = prop.GetCustomAttribute<DataIndexAttribute>();
-            var lookupAttr = prop.GetCustomAttribute<DataLookupAttribute>();
-            bool hasLookup = lookupAttr != null;
-            string? lookupSlug = hasLookup ? ResolveEntitySlug(lookupAttr!.TargetType) : null;
-
-            FormFieldType? explicitType = attr!.FieldType != FormFieldType.Unknown
-                ? attr.FieldType
-                : null;
-            string fieldTypeStr = MapFieldTypeString(prop.PropertyType, explicitType, hasLookup);
-
-            string? enumValues = null;
-            var effectivePropType = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType;
-            if (effectivePropType.IsEnum && !hasLookup)
-                enumValues = string.Join("|", Enum.GetNames(effectivePropType));
-
-            bool isNullable = Nullable.GetUnderlyingType(prop.PropertyType) != null
-                || (!prop.PropertyType.IsValueType && IsNullableProperty(prop, _nullabilityCtx));
-
-            fields.Add(new FieldDefinition
-            {
-                FieldId = Guid.NewGuid().ToString("D"),
-                EntityId = entity.EntityId,
-                Name = prop.Name,
-                Label = !string.IsNullOrWhiteSpace(attr.Label) ? attr.Label : prop.Name,
-                Ordinal = attr.Order,
-                Type = fieldTypeStr,
-                IsNullable = isNullable,
-                Required = attr.Required,
-                List = attr.List,
-                View = attr.View,
-                Edit = attr.Edit,
-                Create = attr.Create,
-                ReadOnly = attr.ReadOnly,
-                Placeholder = attr.Placeholder,
-                EnumValues = enumValues,
-                LookupEntitySlug = lookupSlug,
-                LookupValueField = hasLookup ? lookupAttr!.ValueField : null,
-                LookupDisplayField = hasLookup ? lookupAttr!.DisplayField : null
-            });
-
-            if (dataIndex != null)
-            {
-                indexes.Add(new IndexDefinition
-                {
-                    EntityId = entity.EntityId,
-                    FieldNames = prop.Name,
-                    Type = dataIndex.Kind == IndexKind.BTree ? "btree" : "secondary"
-                });
-            }
-        }
-
-        return (entity, fields, indexes);
-    }
-
-    /// <summary>
-    /// Builds persisted metadata records from an already-loaded <see cref="DataEntityMetadata"/>,
-    /// avoiding the full reflection scan that <see cref="ExtractFromType"/> performs.
+    /// Builds persisted metadata records from an already-loaded <see cref="DataEntityMetadata"/>.
+    /// All entity-level and field-level data is read directly from the metadata — no reflection.
     /// </summary>
     internal static (
         EntityDefinition Entity,
@@ -215,20 +98,16 @@ public static class MetadataExtractor
         IReadOnlyList<IndexDefinition> Indexes)
         BuildFromMetadata(DataEntityMetadata meta)
     {
-        var entityAttr = meta.Type.GetCustomAttribute<DataEntityAttribute>();
-
         var entity = new EntityDefinition
         {
             EntityId = Guid.NewGuid().ToString("D"),
             Name = meta.Name,
             Slug = meta.Slug,
-            IdStrategy = MapIdStrategyString(entityAttr?.IdGeneration ?? AutoIdStrategy.Sequential),
-            ShowOnNav = entityAttr?.ShowOnNav ?? false,
-            NavGroup = entityAttr?.NavGroup ?? "Admin",
-            NavOrder = entityAttr?.NavOrder ?? 0,
-            Permissions = !string.IsNullOrWhiteSpace(entityAttr?.Permissions)
-                ? entityAttr!.Permissions
-                : meta.Name,
+            IdStrategy = MapIdStrategyString(meta.IdGeneration),
+            ShowOnNav = meta.ShowOnNav,
+            NavGroup = meta.NavGroup ?? "Admin",
+            NavOrder = meta.NavOrder,
+            Permissions = meta.Permissions,
             Version = 1
         };
 
@@ -289,15 +168,5 @@ public static class MetadataExtractor
         }
 
         return (entity, fields, indexes);
-    }
-
-    private static bool IsNullableProperty(PropertyInfo prop, NullabilityInfoContext ctx)
-    {
-        if (Nullable.GetUnderlyingType(prop.PropertyType) != null) return true;
-        if (prop.PropertyType.IsValueType) return false;
-
-        var info = ctx.Create(prop);
-        return info.ReadState == NullabilityState.Nullable
-               || info.WriteState == NullabilityState.Nullable;
     }
 }

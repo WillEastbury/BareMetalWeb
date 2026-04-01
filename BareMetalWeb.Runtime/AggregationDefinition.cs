@@ -9,7 +9,7 @@ namespace BareMetalWeb.Runtime;
 [DataEntity("Aggregation Definitions", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1005)]
 public class AggregationDefinition : BaseDataObject
 {
-    public override string EntityTypeName => "Aggregation Definitions";
+    public override string EntityTypeName => "AggregationDefinition";
     private const int Ord_EntityId = BaseFieldCount + 0;
     private const int Ord_Name = BaseFieldCount + 1;
     private const int Ord_GroupByFields = BaseFieldCount + 2;

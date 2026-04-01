@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data;
@@ -95,5 +97,25 @@ public class BulkOperationsTests : IDisposable
 
         public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
         { Delete<T>(key); return ValueTask.CompletedTask; }
+
+        // ── Non-generic stubs (string + ordinal) ───────────────────────
+        public void Save(string e, BaseDataObject o) => throw new NotSupportedException();
+        public BaseDataObject? Load(string e, uint k) => throw new NotSupportedException();
+        public IEnumerable<BaseDataObject> Query(string e, QueryDefinition? q = null) => throw new NotSupportedException();
+        public void Delete(string e, uint k) => throw new NotSupportedException();
+        public ValueTask SaveAsync(string e, BaseDataObject o, CancellationToken ct = default) => throw new NotSupportedException();
+        public ValueTask<BaseDataObject?> LoadAsync(string e, uint k, CancellationToken ct = default) => throw new NotSupportedException();
+        public ValueTask<IEnumerable<BaseDataObject>> QueryAsync(string e, QueryDefinition? q = null, CancellationToken ct = default) => throw new NotSupportedException();
+        public ValueTask<int> CountAsync(string e, QueryDefinition? q = null, CancellationToken ct = default) => throw new NotSupportedException();
+        public ValueTask DeleteAsync(string e, uint k, CancellationToken ct = default) => throw new NotSupportedException();
+        public void Save(int o, BaseDataObject obj) => throw new NotSupportedException();
+        public BaseDataObject? Load(int o, uint k) => throw new NotSupportedException();
+        public IEnumerable<BaseDataObject> Query(int o, QueryDefinition? q = null) => throw new NotSupportedException();
+        public void Delete(int o, uint k) => throw new NotSupportedException();
+        public ValueTask SaveAsync(int o, BaseDataObject obj, CancellationToken ct = default) => throw new NotSupportedException();
+        public ValueTask<BaseDataObject?> LoadAsync(int o, uint k, CancellationToken ct = default) => throw new NotSupportedException();
+        public ValueTask<IEnumerable<BaseDataObject>> QueryAsync(int o, QueryDefinition? q = null, CancellationToken ct = default) => throw new NotSupportedException();
+        public ValueTask<int> CountAsync(int o, QueryDefinition? q = null, CancellationToken ct = default) => throw new NotSupportedException();
+        public ValueTask DeleteAsync(int o, uint k, CancellationToken ct = default) => throw new NotSupportedException();
     }
 }

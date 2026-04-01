@@ -10,7 +10,7 @@ namespace BareMetalWeb.Runtime;
 [DataEntity("Action Definitions", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1003)]
 public class ActionDefinition : BaseDataObject
 {
-    public override string EntityTypeName => "Action Definitions";
+    public override string EntityTypeName => "ActionDefinition";
     private const int Ord_EntityId = BaseFieldCount + 0;
     private const int Ord_Name = BaseFieldCount + 1;
     private const int Ord_Label = BaseFieldCount + 2;

@@ -101,7 +101,7 @@ public sealed class DataQueryEvaluator : IDataQueryEvaluator
         }
 
         if (ColumnQueryExecutor.IsEligible(candidates, query))
-            return ColumnQueryExecutor.Filter(candidates, query, skip, top);
+            return ColumnQueryExecutor.Filter(candidates[0].EntityTypeName, candidates, query, skip, top);
 
         // Scalar fallback.
         var result  = new List<T>(Math.Min(top, candidates.Count));

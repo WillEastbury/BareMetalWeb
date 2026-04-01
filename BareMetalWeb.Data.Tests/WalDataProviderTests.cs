@@ -20,7 +20,9 @@ public sealed class WalDataProviderTests : IDisposable
     {
         _dir = Path.Combine(Path.GetTempPath(), "BmwWalProviderTests_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_dir);
-        BareMetalWeb.Core.DataScaffold.RegisterEntity<AppSetting>();
+        BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting,
+            BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => new AppSetting()));
+        BinaryObjectSerializer.RegisterKnownType(typeof(AppSetting), () => new AppSetting());
     }
 
     public void Dispose()
@@ -34,6 +36,8 @@ public sealed class WalDataProviderTests : IDisposable
     private static AppSetting MakeSetting(string settingId, string value = "v")
         => new() { SettingId = settingId, Value = value, Description = "desc" };
 
+    private static readonly EntitySchema _schema = SystemEntitySchemas.AppSetting;
+
     // ── Save / Load ───────────────────────────────────────────────────────────
 
     [Fact]
@@ -45,13 +49,13 @@ public sealed class WalDataProviderTests : IDisposable
         setting.Key = provider.NextSequentialKey("AppSetting");
 
         // Act
-        provider.Save(setting);
-        var loaded = provider.Load<AppSetting>(setting.Key);
+        provider.Save("AppSetting", setting);
+        var loaded = provider.Load("AppSetting", setting.Key) as DataRecord;
 
         // Assert
         Assert.NotNull(loaded);
-        Assert.Equal("key1",  loaded.SettingId);
-        Assert.Equal("hello", loaded.Value);
+        Assert.Equal("key1",  loaded!.GetField(_schema, "SettingId"));
+        Assert.Equal("hello", loaded!.GetField(_schema, "Value"));
     }
 
     [Fact]
@@ -63,24 +67,24 @@ public sealed class WalDataProviderTests : IDisposable
         {
             var s = MakeSetting("k2");
             s.Key = p1.NextSequentialKey("AppSetting");
-            p1.Save(s);
+            p1.Save("AppSetting", s);
             key = s.Key;
         }
 
         // Act: read with a completely separate provider (simulates app restart)
         using var p2 = new WalDataProvider(_dir);
-        var loaded = p2.Load<AppSetting>(key);
+        var loaded = p2.Load("AppSetting", key) as DataRecord;
 
         // Assert
         Assert.NotNull(loaded);
-        Assert.Equal("k2", loaded.SettingId);
+        Assert.Equal("k2", loaded!.GetField(_schema, "SettingId"));
     }
 
     [Fact]
     public void Load_NonExistentId_ReturnsNull()
     {
         using var provider = new WalDataProvider(_dir);
-        var result = provider.Load<AppSetting>(99999u);
+        var result = provider.Load("AppSetting", 99999u);
         Assert.Null(result);
     }
 
@@ -90,14 +94,14 @@ public sealed class WalDataProviderTests : IDisposable
         using var provider = new WalDataProvider(_dir);
         var setting = MakeSetting("upd", "original");
         setting.Key = provider.NextSequentialKey("AppSetting");
-        provider.Save(setting);
+        provider.Save("AppSetting", setting);
 
         setting.Value = "updated";
-        provider.Save(setting);
+        provider.Save("AppSetting", setting);
 
-        var loaded = provider.Load<AppSetting>(setting.Key);
+        var loaded = provider.Load("AppSetting", setting.Key) as DataRecord;
         Assert.NotNull(loaded);
-        Assert.Equal("updated", loaded.Value);
+        Assert.Equal("updated", loaded!.GetField(_schema, "Value"));
     }
 
     // ── Query ─────────────────────────────────────────────────────────────────
@@ -110,10 +114,10 @@ public sealed class WalDataProviderTests : IDisposable
         {
             var s = MakeSetting("q_" + i);
             s.Key = provider.NextSequentialKey("AppSetting");
-            provider.Save(s);
+            provider.Save("AppSetting", s);
         }
 
-        var results = provider.Query<AppSetting>();
+        var results = provider.Query("AppSetting");
         Assert.Equal(5, results.Count());
     }
 
@@ -125,26 +129,26 @@ public sealed class WalDataProviderTests : IDisposable
             {
                 var s = MakeSetting("r_" + i);
                 s.Key = p1.NextSequentialKey("AppSetting");
-                p1.Save(s);
+                p1.Save("AppSetting", s);
             }
 
         using var p2 = new WalDataProvider(_dir);
-        Assert.Equal(4, p2.Query<AppSetting>().Count());
+        Assert.Equal(4, p2.Query("AppSetting").Count());
     }
 
     [Fact]
     public void Query_WithEqualityFilter_ReturnsMatchingRecords()
     {
         // AppSetting must be registered with DataScaffold for filter evaluation
-        BareMetalWeb.Core.DataScaffold.RegisterEntity<AppSetting>();
+        BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting, BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => new AppSetting()));
 
         using var provider = new WalDataProvider(_dir);
         var s1 = MakeSetting("needle",  "yes");
         s1.Key = provider.NextSequentialKey("AppSetting");
-        provider.Save(s1);
+        provider.Save("AppSetting", s1);
         var s2 = MakeSetting("haystack", "no");
         s2.Key = provider.NextSequentialKey("AppSetting");
-        provider.Save(s2);
+        provider.Save("AppSetting", s2);
 
         var query = new QueryDefinition
         {
@@ -154,9 +158,9 @@ public sealed class WalDataProviderTests : IDisposable
             }
         };
 
-        var results = provider.Query<AppSetting>(query).ToList();
+        var results = provider.Query("AppSetting", query).Cast<DataRecord>().ToList();
         Assert.Single(results);
-        Assert.Equal("needle", results[0].SettingId);
+        Assert.Equal("needle", results[0].GetField(_schema, "SettingId"));
     }
 
     // ── Count ─────────────────────────────────────────────────────────────────
@@ -169,10 +173,10 @@ public sealed class WalDataProviderTests : IDisposable
         {
             var s = MakeSetting("c" + i);
             s.Key = provider.NextSequentialKey("AppSetting");
-            provider.Save(s);
+            provider.Save("AppSetting", s);
         }
 
-        Assert.Equal(6, provider.Count<AppSetting>());
+        Assert.Equal(6, provider.Count("AppSetting"));
     }
 
     // ── Delete ────────────────────────────────────────────────────────────────
@@ -183,11 +187,11 @@ public sealed class WalDataProviderTests : IDisposable
         using var provider = new WalDataProvider(_dir);
         var s = MakeSetting("del");
         s.Key = provider.NextSequentialKey("AppSetting");
-        provider.Save(s);
+        provider.Save("AppSetting", s);
 
-        provider.Delete<AppSetting>(s.Key);
+        provider.Delete("AppSetting", s.Key);
 
-        Assert.Null(provider.Load<AppSetting>(s.Key));
+        Assert.Null(provider.Load("AppSetting", s.Key));
     }
 
     [Fact]
@@ -198,14 +202,14 @@ public sealed class WalDataProviderTests : IDisposable
         s1.Key = provider.NextSequentialKey("AppSetting");
         var s2 = MakeSetting("gone");
         s2.Key = provider.NextSequentialKey("AppSetting");
-        provider.Save(s1);
-        provider.Save(s2);
+        provider.Save("AppSetting", s1);
+        provider.Save("AppSetting", s2);
 
-        provider.Delete<AppSetting>(s2.Key);
+        provider.Delete("AppSetting", s2.Key);
 
-        var results = provider.Query<AppSetting>().ToList();
+        var results = provider.Query("AppSetting").Cast<DataRecord>().ToList();
         Assert.Single(results);
-        Assert.Equal("keep", results[0].SettingId);
+        Assert.Equal("keep", results[0].GetField(_schema, "SettingId"));
     }
 
     [Fact]
@@ -216,14 +220,14 @@ public sealed class WalDataProviderTests : IDisposable
         {
             var s = MakeSetting("gone2");
             s.Key = p1.NextSequentialKey("AppSetting");
-            p1.Save(s);
+            p1.Save("AppSetting", s);
             key = s.Key;
-            p1.Delete<AppSetting>(key);
+            p1.Delete("AppSetting", key);
         }
 
         using var p2 = new WalDataProvider(_dir);
-        Assert.Null(p2.Load<AppSetting>(key));
-        Assert.Equal(0, p2.Count<AppSetting>());
+        Assert.Null(p2.Load("AppSetting", key));
+        Assert.Equal(0, p2.Count("AppSetting"));
     }
 
     [Fact]
@@ -231,7 +235,7 @@ public sealed class WalDataProviderTests : IDisposable
     {
         using var provider = new WalDataProvider(_dir);
         var exception = Record.Exception(
-            () => provider.Delete<AppSetting>(99999u));
+            () => provider.Delete("AppSetting", 99999u));
         Assert.Null(exception);
     }
 
@@ -243,20 +247,20 @@ public sealed class WalDataProviderTests : IDisposable
         using var provider = new WalDataProvider(_dir);
         var s = MakeSetting("async_key", "async_val");
         s.Key = provider.NextSequentialKey("AppSetting");
-        await provider.SaveAsync(s);
-        var loaded = await provider.LoadAsync<AppSetting>(s.Key);
+        await provider.SaveAsync("AppSetting", s);
+        var loaded = await provider.LoadAsync("AppSetting", s.Key) as DataRecord;
 
         Assert.NotNull(loaded);
-        Assert.Equal("async_val", loaded.Value);
+        Assert.Equal("async_val", loaded!.GetField(_schema, "Value"));
     }
 
     [Fact]
     public async Task QueryAsync_ReturnsRecords()
     {
         using var provider = new WalDataProvider(_dir);
-        var a1 = MakeSetting("a1"); a1.Key = provider.NextSequentialKey("AppSetting"); provider.Save(a1);
-        var a2 = MakeSetting("a2"); a2.Key = provider.NextSequentialKey("AppSetting"); provider.Save(a2);
-        var results = await provider.QueryAsync<AppSetting>();
+        var a1 = MakeSetting("a1"); a1.Key = provider.NextSequentialKey("AppSetting"); provider.Save("AppSetting", a1);
+        var a2 = MakeSetting("a2"); a2.Key = provider.NextSequentialKey("AppSetting"); provider.Save("AppSetting", a2);
+        var results = await provider.QueryAsync("AppSetting");
         Assert.Equal(2, results.Count());
     }
 
@@ -298,7 +302,7 @@ public sealed class WalDataProviderTests : IDisposable
             {
                 var s = MakeSetting("bulk_" + i, "val_" + i);
                 s.Key = p1.NextSequentialKey("AppSetting");
-                p1.Save(s);
+                p1.Save("AppSetting", s);
                 savedKeys.Add(s.Key);
             }
         }
@@ -307,11 +311,11 @@ public sealed class WalDataProviderTests : IDisposable
         int loaded = 0;
         foreach (var key in savedKeys)
         {
-            if (p2.Load<AppSetting>(key) != null) loaded++;
+            if (p2.Load("AppSetting", key) != null) loaded++;
         }
 
         Assert.Equal(count, loaded);
-        Assert.Equal(count, p2.Count<AppSetting>());
+        Assert.Equal(count, p2.Count("AppSetting"));
     }
 
     // ── ETag + timestamps set on save ─────────────────────────────────────────
@@ -323,7 +327,7 @@ public sealed class WalDataProviderTests : IDisposable
         var s = MakeSetting("meta");
         s.Key = provider.NextSequentialKey("AppSetting");
 
-        provider.Save(s);
+        provider.Save("AppSetting", s);
 
         Assert.NotEmpty(s.ETag);
         Assert.NotEqual(default, s.CreatedOnUtc);
@@ -338,8 +342,8 @@ public sealed class WalDataProviderTests : IDisposable
         uint key1, key2;
         using (var p1 = new WalDataProvider(_dir))
         {
-            var s1 = MakeSetting("m1"); s1.Key = p1.NextSequentialKey("AppSetting"); p1.Save(s1); key1 = s1.Key;
-            var s2 = MakeSetting("m2"); s2.Key = p1.NextSequentialKey("AppSetting"); p1.Save(s2); key2 = s2.Key;
+            var s1 = MakeSetting("m1"); s1.Key = p1.NextSequentialKey("AppSetting"); p1.Save("AppSetting", s1); key1 = s1.Key;
+            var s2 = MakeSetting("m2"); s2.Key = p1.NextSequentialKey("AppSetting"); p1.Save("AppSetting", s2); key2 = s2.Key;
         }
 
         // Assert idmap file was created
@@ -348,18 +352,8 @@ public sealed class WalDataProviderTests : IDisposable
 
         // Reload with fresh instance and verify both records accessible
         using var p2 = new WalDataProvider(_dir);
-        Assert.NotNull(p2.Load<AppSetting>(key1));
-        Assert.NotNull(p2.Load<AppSetting>(key2));
-    }
-
-    // ── CanHandle always returns true ─────────────────────────────────────────
-
-    [Fact]
-    public void CanHandle_AnyType_ReturnsTrue()
-    {
-        using var provider = new WalDataProvider(_dir);
-        Assert.True(provider.CanHandle(typeof(AppSetting)));
-        Assert.True(provider.CanHandle(typeof(object)));
+        Assert.NotNull(p2.Load("AppSetting", key1));
+        Assert.NotNull(p2.Load("AppSetting", key2));
     }
 
     // ── Secondary index acceleration ──────────────────────────────────────────
@@ -369,7 +363,7 @@ public sealed class WalDataProviderTests : IDisposable
     {
         // AppSetting.SettingId is decorated with [DataIndex], so WalDataProvider
         // must populate the secondary index on Save and consult it on Query.
-        BareMetalWeb.Core.DataScaffold.RegisterEntity<AppSetting>();
+        BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting, BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => new AppSetting()));
         using var provider = new WalDataProvider(_dir);
 
         const int total = 20;
@@ -377,7 +371,7 @@ public sealed class WalDataProviderTests : IDisposable
         {
             var s = MakeSetting("sid_" + i, "val_" + i);
             s.Key = provider.NextSequentialKey("AppSetting");
-            provider.Save(s);
+            provider.Save("AppSetting", s);
         }
 
         var query = new QueryDefinition
@@ -388,22 +382,22 @@ public sealed class WalDataProviderTests : IDisposable
             }
         };
 
-        var results = provider.Query<AppSetting>(query).ToList();
+        var results = provider.Query("AppSetting", query).Cast<DataRecord>().ToList();
 
         Assert.Single(results);
-        Assert.Equal("sid_5", results[0].SettingId);
+        Assert.Equal("sid_5", results[0].GetField(_schema, "SettingId"));
     }
 
     [Fact]
     public void Query_IndexedFieldEquals_NoMatch_ReturnsEmpty()
     {
-        BareMetalWeb.Core.DataScaffold.RegisterEntity<AppSetting>();
+        BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting, BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => new AppSetting()));
         using var provider = new WalDataProvider(_dir);
         for (int i = 0; i < 5; i++)
         {
             var s = MakeSetting("x_" + i);
             s.Key = provider.NextSequentialKey("AppSetting");
-            provider.Save(s);
+            provider.Save("AppSetting", s);
         }
 
         var query = new QueryDefinition
@@ -414,26 +408,26 @@ public sealed class WalDataProviderTests : IDisposable
             }
         };
 
-        var results = provider.Query<AppSetting>(query).ToList();
+        var results = provider.Query("AppSetting", query).Cast<DataRecord>().ToList();
         Assert.Empty(results);
     }
 
     [Fact]
     public void Query_IndexedField_AfterDelete_ExcludesDeletedRecord()
     {
-        BareMetalWeb.Core.DataScaffold.RegisterEntity<AppSetting>();
+        BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting, BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => new AppSetting()));
         using var provider = new WalDataProvider(_dir);
 
         var s1 = MakeSetting("del_target", "to_be_deleted");
         s1.Key = provider.NextSequentialKey("AppSetting");
-        provider.Save(s1);
+        provider.Save("AppSetting", s1);
 
         var s2 = MakeSetting("del_target2", "to_keep");
         s2.Key = provider.NextSequentialKey("AppSetting");
-        provider.Save(s2);
+        provider.Save("AppSetting", s2);
 
         // Delete the first record — the index entry must be cleaned up
-        provider.Delete<AppSetting>(s1.Key);
+        provider.Delete("AppSetting", s1.Key);
 
         var query = new QueryDefinition
         {
@@ -443,23 +437,23 @@ public sealed class WalDataProviderTests : IDisposable
             }
         };
 
-        var results = provider.Query<AppSetting>(query).ToList();
+        var results = provider.Query("AppSetting", query).Cast<DataRecord>().ToList();
         Assert.Empty(results);
     }
 
     [Fact]
     public void Query_IndexedField_AfterUpdate_ReflectsNewValue()
     {
-        BareMetalWeb.Core.DataScaffold.RegisterEntity<AppSetting>();
+        BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting, BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => new AppSetting()));
         using var provider = new WalDataProvider(_dir);
 
         var s = MakeSetting("old_id", "v");
         s.Key = provider.NextSequentialKey("AppSetting");
-        provider.Save(s);
+        provider.Save("AppSetting", s);
 
         // Update the indexed field
         s.SettingId = "new_id";
-        provider.Save(s);
+        provider.Save("AppSetting", s);
 
         // old value must no longer be found
         var queryOld = new QueryDefinition
@@ -469,7 +463,7 @@ public sealed class WalDataProviderTests : IDisposable
                 new() { Field = nameof(AppSetting.SettingId), Operator = QueryOperator.Equals, Value = "old_id" }
             }
         };
-        Assert.Empty(provider.Query<AppSetting>(queryOld).ToList());
+        Assert.Empty(provider.Query("AppSetting", queryOld).Cast<DataRecord>().ToList());
 
         // new value must be found
         var queryNew = new QueryDefinition
@@ -479,9 +473,9 @@ public sealed class WalDataProviderTests : IDisposable
                 new() { Field = nameof(AppSetting.SettingId), Operator = QueryOperator.Equals, Value = "new_id" }
             }
         };
-        var results = provider.Query<AppSetting>(queryNew).ToList();
+        var results = provider.Query("AppSetting", queryNew).Cast<DataRecord>().ToList();
         Assert.Single(results);
-        Assert.Equal("new_id", results[0].SettingId);
+        Assert.Equal("new_id", results[0].GetField(_schema, "SettingId"));
     }
 
     [Fact]
@@ -489,14 +483,14 @@ public sealed class WalDataProviderTests : IDisposable
     {
         // Ensure that the secondary index paged files are persisted so a fresh
         // WalDataProvider instance can still accelerate queries.
-        BareMetalWeb.Core.DataScaffold.RegisterEntity<AppSetting>();
+        BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting, BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => new AppSetting()));
         string settingId;
 
         using (var p1 = new WalDataProvider(_dir))
         {
             var s = MakeSetting("persist_idx", "v");
             s.Key = p1.NextSequentialKey("AppSetting");
-            p1.Save(s);
+            p1.Save("AppSetting", s);
             settingId = s.SettingId;
         }
 
@@ -509,8 +503,8 @@ public sealed class WalDataProviderTests : IDisposable
             }
         };
 
-        var results = p2.Query<AppSetting>(query).ToList();
+        var results = p2.Query("AppSetting", query).Cast<DataRecord>().ToList();
         Assert.Single(results);
-        Assert.Equal(settingId, results[0].SettingId);
+        Assert.Equal(settingId, results[0].GetField(_schema, "SettingId"));
     }
 }

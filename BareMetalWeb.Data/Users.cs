@@ -7,11 +7,11 @@ namespace BareMetalWeb.Data;
 
 public static class Users
 {
-    public static ValueTask<User?> GetByIdAsync(uint key, CancellationToken cancellationToken = default)
-        => DataStoreProvider.Current.LoadAsync<User>(key, cancellationToken);
+    public static async ValueTask<User?> GetByIdAsync(uint key, CancellationToken cancellationToken = default)
+        => (User?)(await DataStoreProvider.Current.LoadAsync("User", key, cancellationToken).ConfigureAwait(false));
 
     public static ValueTask SaveAsync(User user, CancellationToken cancellationToken = default)
-        => DataStoreProvider.Current.SaveAsync(user, cancellationToken);
+        => DataStoreProvider.Current.SaveAsync("User", user, cancellationToken);
 
     public static async ValueTask<User?> FindByEmailAsync(string email, CancellationToken cancellationToken = default)
     {
@@ -19,7 +19,7 @@ public static class Users
             return null;
 
         var normalized = email.Trim();
-        var users = await DataStoreProvider.Current.QueryAsync<User>(null, cancellationToken).ConfigureAwait(false);
+        var users = (await DataStoreProvider.Current.QueryAsync("User", null, cancellationToken).ConfigureAwait(false)).Cast<User>();
         foreach (var user in users)
         {
             if (string.Equals(user.Email, normalized, StringComparison.OrdinalIgnoreCase))
@@ -34,7 +34,7 @@ public static class Users
             return null;
 
         var normalized = userName.Trim();
-        var users = await DataStoreProvider.Current.QueryAsync<User>(null, cancellationToken).ConfigureAwait(false);
+        var users = (await DataStoreProvider.Current.QueryAsync("User", null, cancellationToken).ConfigureAwait(false)).Cast<User>();
         foreach (var user in users)
         {
             if (string.Equals(user.UserName, normalized, StringComparison.OrdinalIgnoreCase))
@@ -49,7 +49,7 @@ public static class Users
             return null;
 
         var normalized = value.Trim();
-        var users = await DataStoreProvider.Current.QueryAsync<User>(null, cancellationToken).ConfigureAwait(false);
+        var users = (await DataStoreProvider.Current.QueryAsync("User", null, cancellationToken).ConfigureAwait(false)).Cast<User>();
         foreach (var user in users)
         {
             if (string.Equals(user.Email, normalized, StringComparison.OrdinalIgnoreCase)

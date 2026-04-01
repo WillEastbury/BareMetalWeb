@@ -178,14 +178,14 @@ public sealed class ScheduledActionService
     private static string? ResolveEntitySlug(string entityId)
     {
         var store = DataStoreProvider.Current;
-        var defs = store.QueryAsync<BareMetalWeb.Runtime.EntityDefinition>(
+        var defs = store.QueryAsync("EntityDefinition",
             new QueryDefinition
             {
                 Clauses = { new QueryClause { Field = "EntityId", Operator = QueryOperator.Equals, Value = entityId } }
             }, CancellationToken.None).GetAwaiter().GetResult(); // TODO: convert to async
 
         BareMetalWeb.Runtime.EntityDefinition? def = null;
-        foreach (var d in defs)
+        foreach (var d in defs.Cast<BareMetalWeb.Runtime.EntityDefinition>())
         {
             def = d;
             break;

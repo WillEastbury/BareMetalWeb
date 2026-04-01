@@ -40,7 +40,7 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
             ExpiresUtc = DateTime.UtcNow.AddMinutes(15),
             Status = "pending"
         };
-        DataStoreProvider.Current.Save(dc);
+        DataStoreProvider.Current.Save(dc.EntityTypeName, dc);
         var baseUrl = $"{context.HttpRequest.Scheme}://{context.HttpRequest.Host}";
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsync(JsonWriterHelper.ToJsonString(new Dictionary<string, object?>
@@ -90,7 +90,7 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
         }
         var queryDef = new BareMetalWeb.Data.QueryDefinition { Clauses = new() { new BareMetalWeb.Data.QueryClause { Field = "DeviceCode", Operator = BareMetalWeb.Data.QueryOperator.Equals, Value = deviceCode } }, Top = 1 };
         DeviceCodeAuth? dc = null;
-        foreach (var item in await DataStoreProvider.Current.QueryAsync<DeviceCodeAuth>(queryDef))
+        foreach (var item in (await DataStoreProvider.Current.QueryAsync("DeviceCodeAuth", queryDef)).Cast<DeviceCodeAuth>())
         {
             dc = item;
             break;
@@ -115,7 +115,7 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
             {
                 await UserAuth.SignInAsync(context, user, false);
                 dc.Status = "consumed";
-                DataStoreProvider.Current.Save(dc);
+                DataStoreProvider.Current.Save(dc.EntityTypeName, dc);
                 context.Response.ContentType = "application/json";
                 await context.Response.WriteAsync(JsonWriterHelper.ToJsonString(new Dictionary<string, object?>
                 {
@@ -192,7 +192,7 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
             return;
         }
         var queryDef = new BareMetalWeb.Data.QueryDefinition { Clauses = new() { new BareMetalWeb.Data.QueryClause { Field = "UserCode", Operator = BareMetalWeb.Data.QueryOperator.Equals, Value = code } }, Top = 10 };
-        var candidates = await DataStoreProvider.Current.QueryAsync<DeviceCodeAuth>(queryDef);
+        var candidates = (await DataStoreProvider.Current.QueryAsync("DeviceCodeAuth", queryDef)).Cast<DeviceCodeAuth>();
         DeviceCodeAuth? dc = null;
         foreach (var d in candidates)
         {
@@ -209,7 +209,7 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
         }
         dc.Status = "approved";
         dc.UserId = user.Key.ToString();
-        DataStoreProvider.Current.Save(dc);
+        DataStoreProvider.Current.Save(dc.EntityTypeName, dc);
         context.Response.Redirect("/device?msg=Device+authorized+successfully!+You+can+close+this+tab.");
     }));
     appInfo.RegisterRoute("GET /api/_meta", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), async context =>

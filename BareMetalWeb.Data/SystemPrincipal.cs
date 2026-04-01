@@ -7,7 +7,7 @@ namespace BareMetalWeb.Data;
 [DataEntity("System Principals", ShowOnNav = false, NavGroup = "Admin", NavOrder = 20, Permissions = "admin")]
 public sealed class SystemPrincipal : User
 {
-    public override string EntityTypeName => "System Principals";
+    public override string EntityTypeName => "SystemPrincipal";
     private const int Ord_ApiKeyHashes = User.TotalFieldCount + 0;
     private const int Ord_OwnerInstanceId = User.TotalFieldCount + 1;
     private const int Ord_OwnerTenantId = User.TotalFieldCount + 2;
@@ -94,7 +94,7 @@ public sealed class SystemPrincipal : User
         if (string.IsNullOrWhiteSpace(apiKey))
             return null;
 
-        var principals = await DataStoreProvider.Current.QueryAsync<SystemPrincipal>(null, cancellationToken).ConfigureAwait(false);
+        var principals = (await DataStoreProvider.Current.QueryAsync("SystemPrincipal", null, cancellationToken).ConfigureAwait(false)).Cast<SystemPrincipal>();
         foreach (var principal in principals)
         {
             if (principal == null || !principal.IsActive)

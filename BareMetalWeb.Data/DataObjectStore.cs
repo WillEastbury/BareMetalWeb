@@ -1,8 +1,8 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using BareMetalWeb.Core;
 using BareMetalWeb.Data.Interfaces;
 
 namespace BareMetalWeb.Data;
@@ -11,7 +11,6 @@ public sealed class DataObjectStore : IDataObjectStore
 {
     private readonly List<IDataProvider> _providersList = new();
     private IDataProvider? _fallbackProvider;
-    private readonly ConcurrentDictionary<Type, IDataProvider> _providerCache = new();
 
     public IReadOnlyList<IDataProvider> Providers => _providersList;
 
@@ -22,103 +21,130 @@ public sealed class DataObjectStore : IDataObjectStore
             _providersList.Insert(0, provider);
         else
             _providersList.Add(provider);
-
-        _providerCache.Clear();
     }
 
     public void RegisterFallbackProvider(IDataProvider provider)
     {
         if (provider is null) throw new ArgumentNullException(nameof(provider));
         _fallbackProvider = provider;
-        _providerCache.Clear();
     }
 
-    public void ClearProviders() { _providersList.Clear(); _providerCache.Clear(); }
+    public void ClearProviders() { _providersList.Clear(); }
 
-    public void Save<T>(T obj) where T : BaseDataObject
+    // ── Ordinal-based overloads (hot path) ──────────────────────────────
+
+    private EntitySchema ResolveSchema(int entityOrdinal)
+    {
+        var meta = DataScaffold.GetEntityByOrdinal(entityOrdinal)
+            ?? throw new InvalidOperationException($"No entity registered at ordinal {entityOrdinal}.");
+        return meta.Schema
+            ?? throw new InvalidOperationException($"Entity '{meta.Name}' (ordinal {entityOrdinal}) has no schema.");
+    }
+
+    private EntitySchema ResolveSchema(string entityTypeName)
+    {
+        var ordinal = DataScaffold.GetEntityOrdinal(entityTypeName);
+        if (ordinal < 0)
+            throw new InvalidOperationException($"No entity registered with name '{entityTypeName}'.");
+        return ResolveSchema(ordinal);
+    }
+
+    public void Save(int entityOrdinal, BaseDataObject obj)
     {
         if (obj is null) throw new ArgumentNullException(nameof(obj));
-        var provider = ResolveProvider(typeof(T));
+        var schema = ResolveSchema(entityOrdinal);
+        var provider = ResolveProviderByName(schema.EntityName);
         if (obj.Key == 0)
-            obj.Key = provider.NextSequentialKey(typeof(T).Name);
-        provider.Save(obj);
+            obj.Key = provider.NextSequentialKey(schema.EntityName);
+        provider.Save(schema.EntityName, obj);
     }
 
-    public async ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
+    public BaseDataObject? Load(int entityOrdinal, uint key)
+    {
+        if (key == 0) throw new ArgumentException("Key cannot be zero.", nameof(key));
+        var schema = ResolveSchema(entityOrdinal);
+        return ResolveProviderByName(schema.EntityName).Load(schema.EntityName, key);
+    }
+
+    public IEnumerable<BaseDataObject> Query(int entityOrdinal, QueryDefinition? query = null)
+    {
+        var schema = ResolveSchema(entityOrdinal);
+        return ResolveProviderByName(schema.EntityName).Query(schema.EntityName, query);
+    }
+
+    public void Delete(int entityOrdinal, uint key)
+    {
+        if (key == 0) throw new ArgumentException("Key cannot be zero.", nameof(key));
+        var schema = ResolveSchema(entityOrdinal);
+        ResolveProviderByName(schema.EntityName).Delete(schema.EntityName, key);
+    }
+
+    public ValueTask SaveAsync(int entityOrdinal, BaseDataObject obj, CancellationToken cancellationToken = default)
+    { Save(entityOrdinal, obj); return ValueTask.CompletedTask; }
+
+    public ValueTask<BaseDataObject?> LoadAsync(int entityOrdinal, uint key, CancellationToken cancellationToken = default)
+        => new(Load(entityOrdinal, key));
+
+    public ValueTask<IEnumerable<BaseDataObject>> QueryAsync(int entityOrdinal, QueryDefinition? query = null, CancellationToken cancellationToken = default)
+        => new(Query(entityOrdinal, query));
+
+    public ValueTask<int> CountAsync(int entityOrdinal, QueryDefinition? query = null, CancellationToken cancellationToken = default)
+    {
+        var schema = ResolveSchema(entityOrdinal);
+        return ResolveProviderByName(schema.EntityName).CountAsync(schema.EntityName, query, cancellationToken);
+    }
+
+    public ValueTask DeleteAsync(int entityOrdinal, uint key, CancellationToken cancellationToken = default)
+    { Delete(entityOrdinal, key); return ValueTask.CompletedTask; }
+
+    // ── String-based overloads (resolve name → ordinal → hot path) ──────
+
+    public void Save(string entityTypeName, BaseDataObject obj)
     {
         if (obj is null) throw new ArgumentNullException(nameof(obj));
-        var provider = ResolveProvider(typeof(T));
+        var provider = ResolveProviderByName(entityTypeName);
         if (obj.Key == 0)
-            obj.Key = provider.NextSequentialKey(typeof(T).Name);
-        await provider.SaveAsync(obj, cancellationToken).ConfigureAwait(false);
+            obj.Key = provider.NextSequentialKey(entityTypeName);
+        provider.Save(entityTypeName, obj);
     }
 
-    public T? Load<T>(uint key) where T : BaseDataObject
+    public BaseDataObject? Load(string entityTypeName, uint key)
     {
         if (key == 0) throw new ArgumentException("Key cannot be zero.", nameof(key));
-        var provider = ResolveProvider(typeof(T));
-        return provider.Load<T>(key);
+        return ResolveProviderByName(entityTypeName).Load(entityTypeName, key);
     }
 
-    public async ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
+    public IEnumerable<BaseDataObject> Query(string entityTypeName, QueryDefinition? query = null)
+        => ResolveProviderByName(entityTypeName).Query(entityTypeName, query);
+
+    public void Delete(string entityTypeName, uint key)
     {
         if (key == 0) throw new ArgumentException("Key cannot be zero.", nameof(key));
-        var provider = ResolveProvider(typeof(T));
-        return await provider.LoadAsync<T>(key, cancellationToken).ConfigureAwait(false);
+        ResolveProviderByName(entityTypeName).Delete(entityTypeName, key);
     }
 
-    public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
+    public ValueTask SaveAsync(string entityTypeName, BaseDataObject obj, CancellationToken cancellationToken = default)
+    { Save(entityTypeName, obj); return ValueTask.CompletedTask; }
+
+    public ValueTask<BaseDataObject?> LoadAsync(string entityTypeName, uint key, CancellationToken cancellationToken = default)
+        => new(Load(entityTypeName, key));
+
+    public ValueTask<IEnumerable<BaseDataObject>> QueryAsync(string entityTypeName, QueryDefinition? query = null, CancellationToken cancellationToken = default)
+        => new(Query(entityTypeName, query));
+
+    public ValueTask<int> CountAsync(string entityTypeName, QueryDefinition? query = null, CancellationToken cancellationToken = default)
+        => ResolveProviderByName(entityTypeName).CountAsync(entityTypeName, query, cancellationToken);
+
+    public ValueTask DeleteAsync(string entityTypeName, uint key, CancellationToken cancellationToken = default)
+    { Delete(entityTypeName, key); return ValueTask.CompletedTask; }
+
+    private IDataProvider ResolveProviderByName(string entityTypeName)
     {
-        var provider = ResolveProvider(typeof(T));
-        return provider.Query<T>(query);
-    }
-
-    public async ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
-    {
-        var provider = ResolveProvider(typeof(T));
-        return await provider.QueryAsync<T>(query, cancellationToken).ConfigureAwait(false);
-    }
-
-    public async ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
-    {
-        var provider = ResolveProvider(typeof(T));
-        return await provider.CountAsync<T>(query, cancellationToken).ConfigureAwait(false);
-    }
-
-    public void Delete<T>(uint key) where T : BaseDataObject
-    {
-        if (key == 0) throw new ArgumentException("Key cannot be zero.", nameof(key));
-        var provider = ResolveProvider(typeof(T));
-        provider.Delete<T>(key);
-    }
-
-    public async ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
-    {
-        if (key == 0) throw new ArgumentException("Key cannot be zero.", nameof(key));
-        var provider = ResolveProvider(typeof(T));
-        await provider.DeleteAsync<T>(key, cancellationToken).ConfigureAwait(false);
-    }
-
-    private IDataProvider ResolveProvider(Type type)
-    {
-        return _providerCache.GetOrAdd(type, t =>
-        {
-            IDataProvider? provider = null;
-            foreach (var p in _providersList)
-            {
-                if (p.CanHandle(t))
-                {
-                    provider = p;
-                    break;
-                }
-            }
-            if (provider is not null)
-                return provider;
-
-            if (_fallbackProvider is not null)
-                return _fallbackProvider;
-
-            throw new InvalidOperationException($"No IDataProvider registered for type {t.Name} and no fallback provider configured.");
-        });
+        if (_providersList.Count > 0)
+            return _providersList[0];
+        if (_fallbackProvider is not null)
+            return _fallbackProvider;
+        throw new InvalidOperationException(
+            $"No IDataProvider registered and no fallback provider configured (entity: {entityTypeName}).");
     }
 }

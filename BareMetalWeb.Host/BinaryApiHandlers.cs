@@ -367,8 +367,8 @@ public static class BinaryApiHandlers
         try
         {
             // Find aggregation definitions where EntityId matches
-            var entityDefs = await DataStoreProvider.Current
-                .QueryAsync<BareMetalWeb.Runtime.EntityDefinition>(null, context.RequestAborted);
+            var entityDefs = (await DataStoreProvider.Current
+                .QueryAsync("EntityDefinition", null, context.RequestAborted)).Cast<BareMetalWeb.Runtime.EntityDefinition>();
             BareMetalWeb.Runtime.EntityDefinition? entityDef = null;
             foreach (var e in entityDefs)
             {
@@ -392,8 +392,8 @@ public static class BinaryApiHandlers
             {
                 Clauses = { new QueryClause { Field = "EntityId", Operator = QueryOperator.Equals, Value = entityDef.EntityId } }
             };
-            var aggResults = await DataStoreProvider.Current
-                .QueryAsync<BareMetalWeb.Runtime.AggregationDefinition>(aggQuery, context.RequestAborted);
+            var aggResults = (await DataStoreProvider.Current
+                .QueryAsync("AggregationDefinition", aggQuery, context.RequestAborted)).Cast<BareMetalWeb.Runtime.AggregationDefinition>();
             var aggs = new List<BareMetalWeb.Runtime.AggregationDefinition>(aggResults is ICollection aggColl ? aggColl.Count : 8);
             foreach (var a in aggResults)
                 aggs.Add(a);

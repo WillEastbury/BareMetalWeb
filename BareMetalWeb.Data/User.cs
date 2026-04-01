@@ -9,7 +9,7 @@ namespace BareMetalWeb.Data;
 [DataEntity("Users", ShowOnNav = false, NavGroup = "Admin", NavOrder = 10, Permissions = "admin")]
 public class User : BaseDataObject
 {
-    public override string EntityTypeName => "Users";
+    public override string EntityTypeName => "User";
     private const int Ord_UserName = BaseFieldCount + 0;
     private const int Ord_DisplayName = BaseFieldCount + 1;
     private const int Ord_Email = BaseFieldCount + 2;
@@ -210,11 +210,11 @@ public class User : BaseDataObject
 
     public bool IsLockedOut => LockoutUntilUtc.HasValue && LockoutUntilUtc.Value > DateTime.UtcNow;
 
-    public static ValueTask<User?> GetByIdAsync(uint key, CancellationToken cancellationToken = default)
-        => DataStoreProvider.Current.LoadAsync<User>(key, cancellationToken);
+    public static async ValueTask<User?> GetByIdAsync(uint key, CancellationToken cancellationToken = default)
+        => (User?)(await DataStoreProvider.Current.LoadAsync("User", key, cancellationToken).ConfigureAwait(false));
 
     public ValueTask SaveAsync(CancellationToken cancellationToken = default)
-        => DataStoreProvider.Current.SaveAsync(this, cancellationToken);
+        => DataStoreProvider.Current.SaveAsync("User", this, cancellationToken);
 
     public void SetPassword(string password, int? iterations = null)
     {

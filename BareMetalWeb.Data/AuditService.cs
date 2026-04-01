@@ -18,14 +18,14 @@ public sealed class AuditService
 {
     private readonly IBufferedLogger? _logger;
 
-    // Cache of compiled property accessors per type — uses DataScaffold metadata (AOT-safe)
-    private static readonly ConcurrentDictionary<Type, (string Name, Func<object, object?> Getter)[]> _accessorCache = new();
+    // Cache of compiled property accessors per entity name — uses DataScaffold metadata (AOT-safe)
+    private static readonly ConcurrentDictionary<string, (string Name, Func<object, object?> Getter)[]> _accessorCache = new();
 
-    private static (string Name, Func<object, object?> Getter)[] GetCachedAccessors(Type type)
+    private static (string Name, Func<object, object?> Getter)[] GetCachedAccessors(string entityName)
     {
-        return _accessorCache.GetOrAdd(type, static t =>
+        return _accessorCache.GetOrAdd(entityName, static name =>
         {
-            var meta = DataScaffold.GetEntityByType(t);
+            var meta = DataScaffold.GetEntityByName(name);
             if (meta == null) return Array.Empty<(string, Func<object, object?>)>();
 
             var layout = EntityLayoutCompiler.GetOrCompile(meta);
@@ -68,8 +68,7 @@ public sealed class AuditService
     /// <summary>
     /// Captures an audit record for entity creation
     /// </summary>
-    public async ValueTask AuditCreateAsync<T>(T entity, string userName, CancellationToken cancellationToken = default)
-        where T : BaseDataObject
+    public async ValueTask AuditCreateAsync(string entityName, BaseDataObject entity, string userName, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -78,7 +77,7 @@ public sealed class AuditService
             var entry = CreateAuditRecord(meta, userName);
             if (entry == null) return;
 
-            SetField(entry, meta, "EntityType", typeof(T).Name);
+            SetField(entry, meta, "EntityType", entityName);
             SetField(entry, meta, "EntityKey", entity.Key);
             SetField(entry, meta, "Operation", AuditOperation.Create);
             SetField(entry, meta, "TimestampUtc", DateTime.UtcNow);
@@ -96,12 +95,11 @@ public sealed class AuditService
     /// <summary>
     /// Captures an audit record for entity update with field-level change tracking
     /// </summary>
-    public async ValueTask AuditUpdateAsync<T>(T oldEntity, T newEntity, string userName, CancellationToken cancellationToken = default)
-        where T : BaseDataObject
+    public async ValueTask AuditUpdateAsync(string entityName, BaseDataObject oldEntity, BaseDataObject newEntity, string userName, CancellationToken cancellationToken = default)
     {
         try
         {
-            var changes = DetectChanges(oldEntity, newEntity);
+            var changes = DetectChanges(entityName, oldEntity, newEntity);
 
             // Skip if no meaningful changes (e.g., only UpdatedOnUtc, ETag changed)
             if (changes.Count == 0)
@@ -112,7 +110,7 @@ public sealed class AuditService
             var entry = CreateAuditRecord(meta, userName);
             if (entry == null) return;
 
-            SetField(entry, meta, "EntityType", typeof(T).Name);
+            SetField(entry, meta, "EntityType", entityName);
             SetField(entry, meta, "EntityKey", newEntity.Key);
             SetField(entry, meta, "Operation", AuditOperation.Update);
             SetField(entry, meta, "TimestampUtc", DateTime.UtcNow);
@@ -132,8 +130,7 @@ public sealed class AuditService
     /// <summary>
     /// Captures an audit record for entity deletion
     /// </summary>
-    public async ValueTask AuditDeleteAsync<T>(uint entityKey, string userName, CancellationToken cancellationToken = default)
-        where T : BaseDataObject
+    public async ValueTask AuditDeleteAsync(string entityName, uint entityKey, string userName, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -142,7 +139,7 @@ public sealed class AuditService
             var entry = CreateAuditRecord(meta, userName);
             if (entry == null) return;
 
-            SetField(entry, meta, "EntityType", typeof(T).Name);
+            SetField(entry, meta, "EntityType", entityName);
             SetField(entry, meta, "EntityKey", entityKey);
             SetField(entry, meta, "Operation", AuditOperation.Delete);
             SetField(entry, meta, "TimestampUtc", DateTime.UtcNow);
@@ -160,14 +157,14 @@ public sealed class AuditService
     /// <summary>
     /// Captures an audit record for remote command execution
     /// </summary>
-    public async ValueTask AuditRemoteCommandAsync<T>(
-        T entity,
+    public async ValueTask AuditRemoteCommandAsync(
+        string entityName,
+        BaseDataObject entity,
         string commandName,
         string userName,
         Dictionary<string, object?>? parameters = null,
         RemoteCommandResult? result = null,
         CancellationToken cancellationToken = default)
-        where T : BaseDataObject
     {
         try
         {
@@ -176,7 +173,7 @@ public sealed class AuditService
             var entry = CreateAuditRecord(meta, userName);
             if (entry == null) return;
 
-            SetField(entry, meta, "EntityType", typeof(T).Name);
+            SetField(entry, meta, "EntityType", entityName);
             SetField(entry, meta, "EntityKey", entity.Key);
             SetField(entry, meta, "Operation", AuditOperation.RemoteCommand);
             SetField(entry, meta, "TimestampUtc", DateTime.UtcNow);
@@ -197,10 +194,10 @@ public sealed class AuditService
     /// <summary>
     /// Gets audit history for a specific entity
     /// </summary>
-    public async ValueTask<IEnumerable<BaseDataObject>> GetEntityHistoryAsync<T>(
+    public async ValueTask<IEnumerable<BaseDataObject>> GetEntityHistoryAsync(
+        string entityName,
         uint entityKey,
         CancellationToken cancellationToken = default)
-        where T : BaseDataObject
     {
         var meta = GetAuditMeta();
         if (meta == null) return Array.Empty<BaseDataObject>();
@@ -209,7 +206,7 @@ public sealed class AuditService
         {
             Clauses = new List<QueryClause>
             {
-                new() { Field = "EntityType", Operator = QueryOperator.Equals, Value = typeof(T).Name },
+                new() { Field = "EntityType", Operator = QueryOperator.Equals, Value = entityName },
                 new() { Field = "EntityKey", Operator = QueryOperator.Equals, Value = entityKey }
             },
             Sorts = new List<SortClause>
@@ -269,10 +266,9 @@ public sealed class AuditService
     /// <summary>
     /// Detects changes between old and new entity instances using pre-compiled delegates.
     /// </summary>
-    private List<FieldChange> DetectChanges<T>(T oldEntity, T newEntity) where T : BaseDataObject
+    private List<FieldChange> DetectChanges(string entityName, BaseDataObject oldEntity, BaseDataObject newEntity)
     {
         var changes = new List<FieldChange>();
-        var type = typeof(T);
 
         // Fields to skip (metadata fields that always change + sensitive credential fields)
         var skipFields = new HashSet<string>
@@ -287,7 +283,7 @@ public sealed class AuditService
         };
 
         // Use DataScaffold metadata (compiled delegates) instead of raw reflection
-        var meta = DataScaffold.GetEntityByType(type);
+        var meta = DataScaffold.GetEntityByName(entityName);
         if (meta != null)
         {
             foreach (var field in meta.Fields)
@@ -318,7 +314,7 @@ public sealed class AuditService
         }
 
         // Fallback for unregistered types — uses cached compiled delegates
-        foreach (var (name, getter) in GetCachedAccessors(type))
+        foreach (var (name, getter) in GetCachedAccessors(entityName))
         {
             if (skipFields.Contains(name))
                 continue;

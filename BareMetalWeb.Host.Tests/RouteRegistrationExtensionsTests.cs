@@ -688,14 +688,14 @@ public class RouteRegistrationExtensionsTests : IDisposable
     }
 
     [Fact]
-    public void RegisterAuthRoutes_SetupRoute_HasAnonymousOnlyPermission()
+    public void RegisterAuthRoutes_SetupRoute_HasPublicPermission()
     {
         // Arrange & Act
         _server.RegisterAuthRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate, allowAccountCreation: false);
 
-        // Assert
+        // Assert — setup route is Public so stale session cookies don't trigger AnonymousOnly 403
         var route = _server.routes["GET /setup"];
-        Assert.Equal("AnonymousOnly", route.PageInfo!.PageMetaData.PermissionsNeeded);
+        Assert.Equal("Public", route.PageInfo!.PageMetaData.PermissionsNeeded);
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -1306,5 +1306,25 @@ public class RouteRegistrationExtensionsTests : IDisposable
         public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject => ValueTask.FromResult(Query<T>(query).Count());
         public void Delete<T>(uint key) where T : BaseDataObject => _store.Remove((typeof(T), key));
         public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject { Delete<T>(key); return ValueTask.CompletedTask; }
+
+        // ── Non-generic stubs (string + ordinal) ───────────────────────
+        public void Save(string e, BaseDataObject o) { _store[(typeof(BaseDataObject), o.Key)] = o; }
+        public BaseDataObject? Load(string e, uint k) => _store.TryGetValue((typeof(BaseDataObject), k), out var obj) ? obj : null;
+        public IEnumerable<BaseDataObject> Query(string e, QueryDefinition? q = null) => Array.Empty<BaseDataObject>();
+        public void Delete(string e, uint k) => _store.Remove((typeof(BaseDataObject), k));
+        public ValueTask SaveAsync(string e, BaseDataObject o, CancellationToken ct = default) { Save(e, o); return ValueTask.CompletedTask; }
+        public ValueTask<BaseDataObject?> LoadAsync(string e, uint k, CancellationToken ct = default) => ValueTask.FromResult(Load(e, k));
+        public ValueTask<IEnumerable<BaseDataObject>> QueryAsync(string e, QueryDefinition? q = null, CancellationToken ct = default) => ValueTask.FromResult<IEnumerable<BaseDataObject>>(Array.Empty<BaseDataObject>());
+        public ValueTask<int> CountAsync(string e, QueryDefinition? q = null, CancellationToken ct = default) => ValueTask.FromResult(0);
+        public ValueTask DeleteAsync(string e, uint k, CancellationToken ct = default) { Delete(e, k); return ValueTask.CompletedTask; }
+        public void Save(int o, BaseDataObject obj) { }
+        public BaseDataObject? Load(int o, uint k) => null;
+        public IEnumerable<BaseDataObject> Query(int o, QueryDefinition? q = null) => Array.Empty<BaseDataObject>();
+        public void Delete(int o, uint k) { }
+        public ValueTask SaveAsync(int o, BaseDataObject obj, CancellationToken ct = default) => ValueTask.CompletedTask;
+        public ValueTask<BaseDataObject?> LoadAsync(int o, uint k, CancellationToken ct = default) => ValueTask.FromResult<BaseDataObject?>(null);
+        public ValueTask<IEnumerable<BaseDataObject>> QueryAsync(int o, QueryDefinition? q = null, CancellationToken ct = default) => ValueTask.FromResult<IEnumerable<BaseDataObject>>(Array.Empty<BaseDataObject>());
+        public ValueTask<int> CountAsync(int o, QueryDefinition? q = null, CancellationToken ct = default) => ValueTask.FromResult(0);
+        public ValueTask DeleteAsync(int o, uint k, CancellationToken ct = default) => ValueTask.CompletedTask;
     }
 }

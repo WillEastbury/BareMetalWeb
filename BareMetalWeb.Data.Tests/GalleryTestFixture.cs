@@ -23,17 +23,35 @@ internal static class GalleryTestFixture
         var tempDir = Path.Combine(Path.GetTempPath(), $"bmw-test-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDir);
 
-        // Register system entities first
-        DataScaffold.RegisterEntity<AppSetting>();
-        DataScaffold.RegisterEntity<User>();
-        DataScaffold.RegisterEntity<SystemPrincipal>();
-        DataScaffold.RegisterEntity<AuditEntry>();
-        DataScaffold.RegisterEntity<ReportDefinition>();
-        DataScaffold.RegisterEntity<EntityDefinition>();
-        DataScaffold.RegisterEntity<FieldDefinition>();
-        DataScaffold.RegisterEntity<IndexDefinition>();
-        DataScaffold.RegisterEntity<ActionDefinition>();
-        DataScaffold.RegisterEntity<ActionCommandDefinition>();
+        // Register system entities first (non-generic, schema-driven)
+        DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting,
+            DataScaffold.BuildStoreHandlers("AppSetting", () => new AppSetting()));
+        DataScaffold.RegisterEntity("User", SystemEntitySchemas.User,
+            DataScaffold.BuildStoreHandlers("User", () => new User()));
+        DataScaffold.RegisterEntity("AuditEntry", SystemEntitySchemas.AuditEntry,
+            DataScaffold.BuildStoreHandlers("AuditEntry", () => new AuditEntry()));
+        DataScaffold.RegisterEntity("ReportDefinition", SystemEntitySchemas.ReportDefinition,
+            DataScaffold.BuildStoreHandlers("ReportDefinition", () => new ReportDefinition()));
+        DataScaffold.RegisterEntity("EntityDefinition", SystemEntitySchemas.EntityDefinition,
+            DataScaffold.BuildStoreHandlers("EntityDefinition", () => new EntityDefinition()));
+        DataScaffold.RegisterEntity("FieldDefinition", SystemEntitySchemas.FieldDefinition,
+            DataScaffold.BuildStoreHandlers("FieldDefinition", () => new FieldDefinition()));
+        DataScaffold.RegisterEntity("IndexDefinition", SystemEntitySchemas.IndexDefinition,
+            DataScaffold.BuildStoreHandlers("IndexDefinition", () => new IndexDefinition()));
+        DataScaffold.RegisterEntity("ActionDefinition", SystemEntitySchemas.ActionDefinition,
+            DataScaffold.BuildStoreHandlers("ActionDefinition", () => new ActionDefinition()));
+        DataScaffold.RegisterEntity("ActionCommandDefinition", SystemEntitySchemas.ActionCommandDefinition,
+            DataScaffold.BuildStoreHandlers("ActionCommandDefinition", () => new ActionCommandDefinition()));
+
+        BinaryObjectSerializer.RegisterKnownType(typeof(AppSetting), () => new AppSetting());
+        BinaryObjectSerializer.RegisterKnownType(typeof(User), () => new User());
+        BinaryObjectSerializer.RegisterKnownType(typeof(AuditEntry), () => new AuditEntry());
+        BinaryObjectSerializer.RegisterKnownType(typeof(ReportDefinition), () => new ReportDefinition());
+        BinaryObjectSerializer.RegisterKnownType(typeof(EntityDefinition), () => new EntityDefinition());
+        BinaryObjectSerializer.RegisterKnownType(typeof(FieldDefinition), () => new FieldDefinition());
+        BinaryObjectSerializer.RegisterKnownType(typeof(IndexDefinition), () => new IndexDefinition());
+        BinaryObjectSerializer.RegisterKnownType(typeof(ActionDefinition), () => new ActionDefinition());
+        BinaryObjectSerializer.RegisterKnownType(typeof(ActionCommandDefinition), () => new ActionCommandDefinition());
 
         // Compile entities directly from gallery JSON (bypass binary store)
         var compiler = new RuntimeEntityCompiler();

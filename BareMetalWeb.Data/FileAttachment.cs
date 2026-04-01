@@ -15,7 +15,7 @@ namespace BareMetalWeb.Data;
 )]
 public sealed class FileAttachment : BaseDataObject
 {
-    public override string EntityTypeName => "File Attachment";
+    public override string EntityTypeName => "FileAttachment";
     private const int Ord_RecordType = BaseFieldCount + 0;
     private const int Ord_RecordKey = BaseFieldCount + 1;
     private const int Ord_FileName = BaseFieldCount + 2;

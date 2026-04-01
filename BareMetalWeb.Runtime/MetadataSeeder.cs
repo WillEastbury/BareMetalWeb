@@ -41,8 +41,8 @@ public static class MetadataSeeder
         var seeded = new List<string>();
 
         // Load existing EntityDefinitions so we can skip already-seeded entities.
-        var existingDefs = new List<EntityDefinition>(await store.QueryAsync<EntityDefinition>(null, cancellationToken)
-            .ConfigureAwait(false));
+        var existingDefs = (await store.QueryAsync("EntityDefinition", null, cancellationToken)
+            .ConfigureAwait(false)).Cast<EntityDefinition>().ToList();
 
         // Index by the slug that will be used (either explicit Slug, or derived from Name).
         var existingBySlug = new Dictionary<string, EntityDefinition>(StringComparer.OrdinalIgnoreCase);
@@ -83,13 +83,13 @@ public static class MetadataSeeder
                     .ConfigureAwait(false);
             }
 
-            await store.SaveAsync(entityDef, cancellationToken).ConfigureAwait(false);
+            await store.SaveAsync(entityDef.EntityTypeName, entityDef, cancellationToken).ConfigureAwait(false);
 
             foreach (var field in fields)
-                await store.SaveAsync(field, cancellationToken).ConfigureAwait(false);
+                await store.SaveAsync(field.EntityTypeName, field, cancellationToken).ConfigureAwait(false);
 
             foreach (var index in indexes)
-                await store.SaveAsync(index, cancellationToken).ConfigureAwait(false);
+                await store.SaveAsync(index.EntityTypeName, index, cancellationToken).ConfigureAwait(false);
 
             seeded.Add(meta.Name);
             logger?.Invoke(
@@ -117,14 +117,14 @@ public static class MetadataSeeder
             Clauses = { new QueryClause { Field = "EntityId", Operator = QueryOperator.Equals, Value = entityDefId } }
         };
 
-        var fields = new List<FieldDefinition>(await store.QueryAsync<FieldDefinition>(entityIdQuery, ct).ConfigureAwait(false));
+        var fields = (await store.QueryAsync("FieldDefinition", entityIdQuery, ct).ConfigureAwait(false)).Cast<FieldDefinition>().ToList();
 
         foreach (var f in fields)
-            await store.DeleteAsync<FieldDefinition>(f.Key, ct).ConfigureAwait(false);
+            await store.DeleteAsync("FieldDefinition", f.Key, ct).ConfigureAwait(false);
 
-        var idxs = new List<IndexDefinition>(await store.QueryAsync<IndexDefinition>(entityIdQuery, ct).ConfigureAwait(false));
+        var idxs = (await store.QueryAsync("IndexDefinition", entityIdQuery, ct).ConfigureAwait(false)).Cast<IndexDefinition>().ToList();
 
         foreach (var idx in idxs)
-            await store.DeleteAsync<IndexDefinition>(idx.Key, ct).ConfigureAwait(false);
+            await store.DeleteAsync("IndexDefinition", idx.Key, ct).ConfigureAwait(false);
     }
 }
