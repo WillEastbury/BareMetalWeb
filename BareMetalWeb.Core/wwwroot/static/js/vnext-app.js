@@ -5088,6 +5088,8 @@
   }
 
   function navbar(activeSlug) {
+    // If the server already rendered the top navbar, don't duplicate it
+    if (document.querySelector('.bm-navbar')) return document.createDocumentFragment();
     const all = _entityList || [];
     const nav = el('nav', { className: 'navbar navbar-expand navbar-dark bg-dark mb-3 px-3' });
     const brand = el('a', { className: 'navbar-brand', href: BASE, textContent: '\u26A1 VNext' });

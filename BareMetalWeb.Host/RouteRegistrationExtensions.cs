@@ -2011,6 +2011,7 @@ public static class RouteRegistrationExtensions
         sb.Append(ReplaceTemplateTokens(template.Head, tokens));
         sb.Append($"<meta name=\"csrf-token\" content=\"{safeToken}\">");
         sb.Append("<meta name=\"vnext-base\" content=\"\">");
+        sb.Append("<style>.bm-ssr-content{display:none!important}</style>");
         sb.Append("</head>");
         sb.Append("<body>");
         sb.Append(ReplaceTemplateTokens(navbarSection, tokens));

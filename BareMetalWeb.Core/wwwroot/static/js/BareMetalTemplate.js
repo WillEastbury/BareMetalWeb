@@ -6,8 +6,24 @@ const BareMetalTemplate = (() => {
 
   const INPUT_TYPES = {
     number: 'number', email: 'email', date: 'date',
-    'datetime-local': 'datetime-local', time: 'time', password: 'password'
+    'datetime-local': 'datetime-local', time: 'time', password: 'password',
+    Integer: 'number', Decimal: 'number', Money: 'number',
+    Email: 'email', DateTime: 'datetime-local', Date: 'date', Time: 'time',
+    Password: 'password', Url: 'text', Phone: 'tel'
   };
+  const COUNTRY_OPTIONS = [
+    ['','— Select —'],['AF','Afghanistan'],['AL','Albania'],['DZ','Algeria'],['AR','Argentina'],['AU','Australia'],
+    ['AT','Austria'],['BE','Belgium'],['BR','Brazil'],['CA','Canada'],['CN','China'],
+    ['CO','Colombia'],['HR','Croatia'],['CZ','Czech Republic'],['DK','Denmark'],['EG','Egypt'],
+    ['FI','Finland'],['FR','France'],['DE','Germany'],['GR','Greece'],['HK','Hong Kong'],
+    ['HU','Hungary'],['IN','India'],['ID','Indonesia'],['IE','Ireland'],['IL','Israel'],
+    ['IT','Italy'],['JP','Japan'],['MX','Mexico'],['NL','Netherlands'],['NZ','New Zealand'],
+    ['NG','Nigeria'],['NO','Norway'],['PK','Pakistan'],['PH','Philippines'],['PL','Poland'],
+    ['PT','Portugal'],['RO','Romania'],['RU','Russia'],['SA','Saudi Arabia'],['SG','Singapore'],
+    ['ZA','South Africa'],['KR','South Korea'],['ES','Spain'],['SE','Sweden'],['CH','Switzerland'],
+    ['TW','Taiwan'],['TH','Thailand'],['TR','Turkey'],['UA','Ukraine'],['AE','United Arab Emirates'],
+    ['GB','United Kingdom'],['US','United States'],['VN','Vietnam']
+  ];
   const mk = (tag, props) => Object.assign(document.createElement(tag), props);
 
   function buildForm(layout, fields) {
@@ -58,11 +74,17 @@ const BareMetalTemplate = (() => {
             textContent: isObj ? String(o.label ?? o.value ?? o) : String(o)
           }));
         });
+      } else if (f.type === 'Country') {
+        inp = mk('select', { className: 'form-select' });
+        COUNTRY_OPTIONS.forEach(c => {
+          inp.appendChild(mk('option', { value: c[0], textContent: c[1] }));
+        });
       } else if (f.type === 'file') {
         inp = mk('input', { type: 'file', className: 'form-control' });
         if (f.accept) inp.accept = f.accept;
       } else {
         inp = mk('input', { className: 'form-control', type: INPUT_TYPES[f.type] || 'text' });
+        if (f.type === 'Integer') inp.step = '1';
       }
 
       inp.setAttribute('rv-value', name);
@@ -213,12 +235,19 @@ const BareMetalTemplate = (() => {
             textContent: isObj ? String(o.label ?? o.value ?? o) : String(o)
           }));
         });
+      } else if (f.type === 'Country') {
+        inp = mk('select', {});
+        inp.style.width = '100%';
+        COUNTRY_OPTIONS.forEach(c => {
+          inp.appendChild(mk('option', { value: c[0], textContent: c[1] }));
+        });
       } else if (f.type === 'file') {
         inp = mk('input', { type: 'file' });
         if (f.accept) inp.accept = f.accept;
       } else {
         inp = mk('input', { type: INPUT_TYPES[f.type] || 'text' });
         inp.style.width = '100%';
+        if (f.type === 'Integer') inp.step = '1';
       }
 
       inp.setAttribute('rv-value', name);
