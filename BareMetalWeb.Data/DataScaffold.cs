@@ -2417,7 +2417,18 @@ public static class DataScaffold
     public static bool TryConvertJson(JsonElement element, Type targetType, out object? converted)
     {
         converted = null;
+        if (targetType == null) return false;
         var effectiveType = Nullable.GetUnderlyingType(targetType) ?? targetType;
+
+        // Handle string-to-numeric coercion for all numeric types before the main try block
+        if (element.ValueKind == JsonValueKind.String)
+        {
+            var str = element.GetString();
+            if (effectiveType == typeof(int) && int.TryParse(str, out var iv)) { converted = iv; return true; }
+            if (effectiveType == typeof(long) && long.TryParse(str, out var lv)) { converted = lv; return true; }
+            if (effectiveType == typeof(decimal) && decimal.TryParse(str, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var dv)) { converted = dv; return true; }
+            if (effectiveType == typeof(double) && double.TryParse(str, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var dbv)) { converted = dbv; return true; }
+        }
 
         try
         {
@@ -2442,7 +2453,12 @@ public static class DataScaffold
             if (effectiveType == typeof(int))
             {
                 if (element.TryGetInt32(out var intValue)) { converted = intValue; return true; }
-                if (element.ValueKind == JsonValueKind.String && int.TryParse(element.GetString(), out intValue)) { converted = intValue; return true; }
+                if (element.ValueKind == JsonValueKind.String)
+                {
+                    var str = element.GetString();
+                    System.Console.Error.WriteLine($"[DEBUG-INT] String value='{str}' TryParse={int.TryParse(str, out var p)} parsed={p}");
+                    if (int.TryParse(str, out intValue)) { converted = intValue; return true; }
+                }
             }
 
             if (effectiveType == typeof(long))
