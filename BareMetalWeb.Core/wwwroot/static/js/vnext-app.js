@@ -4889,10 +4889,12 @@
             }
         } catch (e) {}
 
-        // Only start the SPA router on VNext shell pages that have a #vnext-content
-        // mount point. SSR pages (e.g. /metrics, /topips) include this bundle for
-        // theme/skin support but must not attempt client-side routing.
-        if (!document.getElementById('vnext-content')) return;
+        // Only start the IIFE router on pages that do NOT have the VNext Router (second block).
+        // The second block handles VNext shell pages via its own async route() function.
+        // The IIFE router only needs to run when the page has #vnext-content but the second
+        // block is not loaded (which doesn't happen in practice — skip IIFE routing entirely
+        // when #vnext-content exists and let the second block handle it).
+        if (document.getElementById('vnext-content')) return;
 
         // Register routes
         BMRouter
