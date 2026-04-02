@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Security.Cryptography;
 using System.Text;
 using Xunit;
 
@@ -8,15 +9,33 @@ namespace BareMetalWeb.Data.Tests;
 public class SynchronousEncryptionTests : IDisposable
 {
     private readonly string _tempDirectory;
+    private readonly string? _origBmwKey;
+    private readonly string? _origKubeHost;
+    private readonly string? _origHostname;
 
     public SynchronousEncryptionTests()
     {
         _tempDirectory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
         Directory.CreateDirectory(_tempDirectory);
+        SynchronousEncryption.ConfigureKeyRoot(_tempDirectory);
+
+        // Preserve original env vars
+        _origBmwKey = Environment.GetEnvironmentVariable("BMW_ENCRYPTION_KEY");
+        _origKubeHost = Environment.GetEnvironmentVariable("KUBERNETES_SERVICE_HOST");
+        _origHostname = Environment.GetEnvironmentVariable("HOSTNAME");
+
+        // Clear env vars so tests use machine-identity derivation by default
+        Environment.SetEnvironmentVariable("BMW_ENCRYPTION_KEY", null);
+        Environment.SetEnvironmentVariable("KUBERNETES_SERVICE_HOST", null);
     }
 
     public void Dispose()
     {
+        // Restore original env vars
+        Environment.SetEnvironmentVariable("BMW_ENCRYPTION_KEY", _origBmwKey);
+        Environment.SetEnvironmentVariable("KUBERNETES_SERVICE_HOST", _origKubeHost);
+        Environment.SetEnvironmentVariable("HOSTNAME", _origHostname);
+
         if (Directory.Exists(_tempDirectory))
             Directory.Delete(_tempDirectory, true);
     }
@@ -405,5 +424,166 @@ public class SynchronousEncryptionTests : IDisposable
             if (Directory.Exists(tempDir2))
                 Directory.Delete(tempDir2, true);
         }
+    }
+
+    // ── Key derivation waterfall tests ──────────────────────────────────────
+
+    [Fact]
+    public void DeriveMachineKey_EnvVar_UsedDirectly()
+    {
+        // Arrange — set a known 32-byte key via env var
+        var key = new byte[32];
+        RandomNumberGenerator.Fill(key);
+        Environment.SetEnvironmentVariable("BMW_ENCRYPTION_KEY", Convert.ToBase64String(key));
+
+        // Act — protect and unprotect should round-trip using the env-var key
+        var secret = new byte[32];
+        RandomNumberGenerator.Fill(secret);
+        var wrapped = SynchronousEncryption.ProtectKeyBytes(secret);
+        var unwrapped = SynchronousEncryption.UnprotectKeyBytes(wrapped);
+
+        // Assert
+        Assert.Equal(secret, unwrapped);
+    }
+
+    [Fact]
+    public void DeriveMachineKey_EnvVar_WrongSize_Throws()
+    {
+        // Arrange — 16-byte key (wrong size)
+        Environment.SetEnvironmentVariable("BMW_ENCRYPTION_KEY", Convert.ToBase64String(new byte[16]));
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => SynchronousEncryption.ProtectKeyBytes(new byte[32]));
+    }
+
+    [Fact]
+    public void DeriveMachineKey_EnvVar_InvalidBase64_Throws()
+    {
+        // Arrange
+        Environment.SetEnvironmentVariable("BMW_ENCRYPTION_KEY", "not-valid-base64!!!");
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() => SynchronousEncryption.ProtectKeyBytes(new byte[32]));
+    }
+
+    [Fact]
+    public void DeriveMachineKey_K8sPodIdentity_Deterministic()
+    {
+        // Arrange — simulate K8s environment
+        Environment.SetEnvironmentVariable("BMW_ENCRYPTION_KEY", null);
+        Environment.SetEnvironmentVariable("KUBERNETES_SERVICE_HOST", "10.0.0.1");
+        Environment.SetEnvironmentVariable("HOSTNAME", "bmw-test-pod-0");
+
+        // Act — two protect/unprotect cycles should use the same derived key
+        var secret = new byte[32];
+        RandomNumberGenerator.Fill(secret);
+        var wrapped1 = SynchronousEncryption.ProtectKeyBytes(secret);
+        var unwrapped1 = SynchronousEncryption.UnprotectKeyBytes(wrapped1);
+        var wrapped2 = SynchronousEncryption.ProtectKeyBytes(secret);
+        var unwrapped2 = SynchronousEncryption.UnprotectKeyBytes(wrapped2);
+
+        // Assert
+        Assert.Equal(secret, unwrapped1);
+        Assert.Equal(secret, unwrapped2);
+    }
+
+    [Fact]
+    public void DeriveMachineKey_BareMetal_Deterministic()
+    {
+        // Arrange — no K8s, no env var (bare metal)
+        Environment.SetEnvironmentVariable("BMW_ENCRYPTION_KEY", null);
+        Environment.SetEnvironmentVariable("KUBERNETES_SERVICE_HOST", null);
+
+        // Act
+        var secret = new byte[32];
+        RandomNumberGenerator.Fill(secret);
+        var wrapped = SynchronousEncryption.ProtectKeyBytes(secret);
+        var unwrapped = SynchronousEncryption.UnprotectKeyBytes(wrapped);
+
+        // Assert
+        Assert.Equal(secret, unwrapped);
+    }
+
+    [Fact]
+    public void EnsureSalt_CreatesSaltFile()
+    {
+        // Arrange — use a fresh temp dir
+        var saltDir = Path.Combine(_tempDirectory, "salt-test");
+        SynchronousEncryption.ConfigureKeyRoot(saltDir);
+        Environment.SetEnvironmentVariable("BMW_ENCRYPTION_KEY", null);
+        Environment.SetEnvironmentVariable("KUBERNETES_SERVICE_HOST", null);
+
+        // Act — trigger key derivation which creates the salt
+        var secret = new byte[32];
+        RandomNumberGenerator.Fill(secret);
+        SynchronousEncryption.ProtectKeyBytes(secret);
+
+        // Assert
+        var saltPath = Path.Combine(saltDir, ".keys", "derivation.salt");
+        Assert.True(File.Exists(saltPath));
+        Assert.Equal(32, File.ReadAllBytes(saltPath).Length);
+
+        // Restore
+        SynchronousEncryption.ConfigureKeyRoot(_tempDirectory);
+    }
+
+    [Fact]
+    public void EnsureSalt_ReusesExistingSalt()
+    {
+        // Arrange
+        var saltDir = Path.Combine(_tempDirectory, "salt-reuse");
+        SynchronousEncryption.ConfigureKeyRoot(saltDir);
+        Environment.SetEnvironmentVariable("BMW_ENCRYPTION_KEY", null);
+        Environment.SetEnvironmentVariable("KUBERNETES_SERVICE_HOST", null);
+
+        // Act — first call creates salt
+        var secret = new byte[32];
+        RandomNumberGenerator.Fill(secret);
+        var wrapped1 = SynchronousEncryption.ProtectKeyBytes(secret);
+
+        // Read the salt
+        var saltPath = Path.Combine(saltDir, ".keys", "derivation.salt");
+        var salt1 = File.ReadAllBytes(saltPath);
+
+        // Second call should reuse the same salt
+        var wrapped2 = SynchronousEncryption.ProtectKeyBytes(secret);
+        var salt2 = File.ReadAllBytes(saltPath);
+
+        // Assert — same salt means same derived key, so both should unwrap
+        Assert.Equal(salt1, salt2);
+        Assert.Equal(secret, SynchronousEncryption.UnprotectKeyBytes(wrapped1));
+        Assert.Equal(secret, SynchronousEncryption.UnprotectKeyBytes(wrapped2));
+
+        // Restore
+        SynchronousEncryption.ConfigureKeyRoot(_tempDirectory);
+    }
+
+    [Fact]
+    public void ConfigureKeyRoot_InvalidValue_ThrowsArgumentException()
+    {
+        Assert.Throws<ArgumentException>(() => SynchronousEncryption.ConfigureKeyRoot(null!));
+        Assert.Throws<ArgumentException>(() => SynchronousEncryption.ConfigureKeyRoot(""));
+        Assert.Throws<ArgumentException>(() => SynchronousEncryption.ConfigureKeyRoot(" "));
+    }
+
+    [Fact]
+    public void ProtectUnprotect_WithEnvKey_DifferentFromBareMetalKey()
+    {
+        // Arrange — protect with bare metal derivation
+        Environment.SetEnvironmentVariable("BMW_ENCRYPTION_KEY", null);
+        Environment.SetEnvironmentVariable("KUBERNETES_SERVICE_HOST", null);
+        var secret = new byte[32];
+        RandomNumberGenerator.Fill(secret);
+        var wrappedBareMetal = SynchronousEncryption.ProtectKeyBytes(secret);
+
+        // Now switch to env var key
+        var envKey = new byte[32];
+        RandomNumberGenerator.Fill(envKey);
+        Environment.SetEnvironmentVariable("BMW_ENCRYPTION_KEY", Convert.ToBase64String(envKey));
+
+        // The bare-metal-wrapped key should NOT decrypt with the env-var key
+        // (UnprotectKeyBytes will try current derivation first, then legacy — both should fail
+        // because neither matches the bare-metal+salt derivation when BMW_ENCRYPTION_KEY is set)
+        Assert.ThrowsAny<Exception>(() => SynchronousEncryption.UnprotectKeyBytes(wrappedBareMetal));
     }
 }
