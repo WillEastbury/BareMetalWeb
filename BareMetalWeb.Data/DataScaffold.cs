@@ -2439,22 +2439,22 @@ public static class DataScaffold
                 return true;
             }
 
-            if (effectiveType == typeof(int) && element.TryGetInt32(out var intValue))
+            if (effectiveType == typeof(int))
             {
-                converted = intValue;
-                return true;
+                if (element.TryGetInt32(out var intValue)) { converted = intValue; return true; }
+                if (element.ValueKind == JsonValueKind.String && int.TryParse(element.GetString(), out intValue)) { converted = intValue; return true; }
             }
 
-            if (effectiveType == typeof(long) && element.TryGetInt64(out var longValue))
+            if (effectiveType == typeof(long))
             {
-                converted = longValue;
-                return true;
+                if (element.TryGetInt64(out var longValue)) { converted = longValue; return true; }
+                if (element.ValueKind == JsonValueKind.String && long.TryParse(element.GetString(), out longValue)) { converted = longValue; return true; }
             }
 
-            if (effectiveType == typeof(decimal) && element.TryGetDecimal(out var decValue))
+            if (effectiveType == typeof(decimal))
             {
-                converted = decValue;
-                return true;
+                if (element.TryGetDecimal(out var decValue)) { converted = decValue; return true; }
+                if (element.ValueKind == JsonValueKind.String && decimal.TryParse(element.GetString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out decValue)) { converted = decValue; return true; }
             }
 
             if (effectiveType == typeof(double) && element.TryGetDouble(out var dblValue))
