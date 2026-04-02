@@ -6743,7 +6743,7 @@
       if (!_entityList) _entityList = await BareMetalRendering.listEntities();
 
       // ── Home: entity cards ───────────────────────────────────────────────
-      if (!slug) {
+      if (!slug || slug === 'd') {
         R.replaceChildren(navbar());
         const container = el('div', { className: 'container' });
         const row = el('div', { className: 'row g-3 mt-1' });
