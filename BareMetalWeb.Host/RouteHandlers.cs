@@ -4381,6 +4381,8 @@ public sealed class RouteHandlers : IRouteHandlers
                 sb.Append($"<span class=\"text-muted small\">{pkg.Entities.Count} entit{(pkg.Entities.Count == 1 ? "y" : "ies")}, {pkg.Fields.Count} field{(pkg.Fields.Count == 1 ? "" : "s")}</span></p>");
                 sb.Append($"<form method=\"post\" action=\"/admin/gallery/deploy/{WebUtility.HtmlEncode(pkg.Slug)}\">");
                 sb.Append($"<input type=\"hidden\" name=\"{CsrfProtection.FormFieldName}\" value=\"{WebUtility.HtmlEncode(csrfToken)}\">");
+                sb.Append("<div class=\"form-check mb-2\"><input class=\"form-check-input\" type=\"checkbox\" name=\"grant_permissions\" value=\"true\" id=\"grant_" + WebUtility.HtmlEncode(pkg.Slug) + "\" checked>");
+                sb.Append($"<label class=\"form-check-label small\" for=\"grant_{WebUtility.HtmlEncode(pkg.Slug)}\">Grant permissions to all users</label></div>");
                 sb.Append($"<button type=\"submit\" class=\"btn {btnClass} btn-sm\">{btnLabel}</button>");
                 sb.Append("</form>");
                 sb.Append("</div></div></div>");
@@ -4428,6 +4430,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var messages = RentStringList();
+        var grantPermissions = IsTruthyFormValue(form["grant_permissions"]);
         var deployed = await SampleGalleryService.DeployPackageAsync(
             pkg,
             DataStoreProvider.Current,
@@ -4451,6 +4454,20 @@ public sealed class RouteHandlers : IRouteHandlers
             {
                 _logger?.LogError($"Gallery|rebuild-failed|{packageSlug}", ex);
             }
+
+            // Grant new module permissions to all existing users
+            if (grantPermissions)
+            {
+                try
+                {
+                    await GrantModulePermissionsToAllUsersAsync(pkg, context.RequestAborted).ConfigureAwait(false);
+                    _logger?.LogInfo($"Gallery|permissions-granted|{packageSlug}|all-users");
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogError($"Gallery|permissions-grant-failed|{packageSlug}", ex);
+                }
+            }
         }
 
         var message = deployed.Count > 0
@@ -4459,6 +4476,48 @@ public sealed class RouteHandlers : IRouteHandlers
 
         context.Response.Redirect("/admin/gallery");
         _ = message; // redirect supersedes any rendered message
+    }
+
+    /// <summary>
+    /// Grants the permissions required by a deployed gallery package to all existing users.
+    /// Collects entity permission strings from the package, then appends any missing ones
+    /// to each user's comma-separated Permissions field.
+    /// </summary>
+    private async ValueTask GrantModulePermissionsToAllUsersAsync(SamplePackage pkg, CancellationToken cancellationToken)
+    {
+        // Collect all permission strings from the package's entities
+        var newPerms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entity in pkg.Entities)
+        {
+            var perms = entity.Permissions?.Trim();
+            if (!string.IsNullOrWhiteSpace(perms))
+            {
+                foreach (var p in perms.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    newPerms.Add(p);
+            }
+        }
+        if (newPerms.Count == 0) return;
+
+        var userMeta = UserAuthHelper.GetUserMeta();
+        if (userMeta == null) return;
+
+        var users = await userMeta.Handlers.QueryAsync(null, cancellationToken).ConfigureAwait(false);
+        foreach (var user in users)
+        {
+            var currentPerms = UserAuthHelper.GetPermissions(user, userMeta);
+            var currentSet = new HashSet<string>(currentPerms, StringComparer.OrdinalIgnoreCase);
+            bool changed = false;
+            foreach (var p in newPerms)
+            {
+                if (currentSet.Add(p))
+                    changed = true;
+            }
+            if (changed)
+            {
+                UserAuth.SetPermissions(user, currentSet.ToArray());
+                await userMeta.Handlers.SaveAsync(user, cancellationToken).ConfigureAwait(false);
+            }
+        }
     }
 
     // ── Webstore: browse + install remote templates from control plane ───────

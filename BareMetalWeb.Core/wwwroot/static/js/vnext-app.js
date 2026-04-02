@@ -9,6 +9,7 @@
     var API  = '/api';
     var META = '/meta';
     var LOOKUP_CARDINALITY_THRESHOLD = 20; // above this count, show a search dialog
+    global.__BMW_BASE = BASE;
 
     // ── CSRF support ──────────────────────────────────────────────────────────
     function getCsrfToken() {
@@ -4999,6 +5000,7 @@
 // Depends on: BareMetalRest, BareMetalBind, BareMetalTemplate, BareMetalRendering
 (async function () {
   'use strict';
+  const BASE = window.__BMW_BASE || '';
   BareMetalRest.setRoot('/api/');
 
   // Only activate the SPA router on VNext shell pages (which have #vnext-content).
