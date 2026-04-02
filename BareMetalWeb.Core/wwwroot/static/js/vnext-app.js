@@ -9,7 +9,6 @@
     var API  = '/api';
     var META = '/meta';
     var LOOKUP_CARDINALITY_THRESHOLD = 20; // above this count, show a search dialog
-    global.__BMW_BASE = BASE;
 
     // ── CSRF support ──────────────────────────────────────────────────────────
     function getCsrfToken() {
@@ -4994,6 +4993,15 @@
         }
     });
 
+    // Expose shared utilities for the VNext Router block below
+    global.__BMW_BASE = BASE;
+    global.__BMW = {
+        apiFetch: apiFetch, apiGet: apiGet, apiPost: apiPost, apiDelete: apiDelete,
+        escHtml: escHtml, getCsrfToken: getCsrfToken,
+        cancelNavigation: cancelNavigation, trackJob: trackJob,
+        _updateInboxBadge: _updateInboxBadge
+    };
+
 })(window);
 // VNext Router — thin SPA router powered by BareMetalRendering
 // Parses /{slug}[/{id}[/edit|/delete]|/create]
@@ -5001,6 +5009,7 @@
 (async function () {
   'use strict';
   const BASE = window.__BMW_BASE || '';
+  const { apiFetch, apiGet, apiPost, apiDelete, escHtml, getCsrfToken, cancelNavigation, trackJob, _updateInboxBadge } = window.__BMW;
   BareMetalRest.setRoot('/api/');
 
   // Only activate the SPA router on VNext shell pages (which have #vnext-content).
