@@ -5009,7 +5009,7 @@
 (async function () {
   'use strict';
   const BASE = window.__BMW_BASE || '';
-  const { apiFetch, apiGet, apiPost, apiDelete, escHtml, getCsrfToken, cancelNavigation, trackJob, _updateInboxBadge } = window.__BMW;
+  const { apiFetch, apiGet, apiPost, apiDelete, escHtml, getCsrfToken, trackJob, _updateInboxBadge } = window.__BMW;
   BareMetalRest.setRoot('/api/');
 
   // Only activate the SPA router on VNext shell pages (which have #vnext-content).
