@@ -237,3 +237,61 @@ public static class SessionLogFields
     public const int IpAddress = DataRecord.BaseFieldCount + 3;
     public const int UserAgent = DataRecord.BaseFieldCount + 4;
 }
+
+/// <summary>
+/// Ordinal constants for <see cref="SystemEntitySchemas.SystemPrincipal"/> fields.
+/// SystemPrincipal has the same field layout as User (offsets 0-20) plus 4 extra fields.
+/// </summary>
+public static class SystemPrincipalFields
+{
+    // User fields are at UserFields offsets (0-20)
+    public const int ApiKeyHashes = DataRecord.BaseFieldCount + 21;
+    public const int OwnerInstanceId = DataRecord.BaseFieldCount + 22;
+    public const int OwnerTenantId = DataRecord.BaseFieldCount + 23;
+    public const int Role = DataRecord.BaseFieldCount + 24;
+}
+
+/// <summary>Ordinal constants for ViewDefinition fields.</summary>
+public static class ViewDefinitionFields
+{
+    public const int ViewName = DataRecord.BaseFieldCount + 0;
+    public const int RootEntity = DataRecord.BaseFieldCount + 1;
+    public const int ProjectionsJson = DataRecord.BaseFieldCount + 2;
+    public const int JoinsJson = DataRecord.BaseFieldCount + 3;
+    public const int FiltersJson = DataRecord.BaseFieldCount + 4;
+    public const int SortsJson = DataRecord.BaseFieldCount + 5;
+    public const int Limit = DataRecord.BaseFieldCount + 6;
+    public const int Offset = DataRecord.BaseFieldCount + 7;
+    public const int Materialised = DataRecord.BaseFieldCount + 8;
+}
+
+/// <summary>Ordinal constants for DashboardDefinition fields.</summary>
+public static class DashboardDefinitionFields
+{
+    public const int Name = DataRecord.BaseFieldCount + 0;
+    public const int Description = DataRecord.BaseFieldCount + 1;
+    public const int TilesJson = DataRecord.BaseFieldCount + 2;
+}
+
+/// <summary>Ordinal constants for FileAttachment fields.</summary>
+public static class FileAttachmentFields
+{
+    public const int RecordType = DataRecord.BaseFieldCount + 0;
+    public const int RecordKey = DataRecord.BaseFieldCount + 1;
+    public const int FileName = DataRecord.BaseFieldCount + 2;
+    public const int ContentType = DataRecord.BaseFieldCount + 3;
+    public const int SizeBytes = DataRecord.BaseFieldCount + 4;
+    public const int StorageKey = DataRecord.BaseFieldCount + 5;
+    public const int Description = DataRecord.BaseFieldCount + 6;
+    public const int AttachmentGroupId = DataRecord.BaseFieldCount + 7;
+    public const int VersionNumber = DataRecord.BaseFieldCount + 8;
+    public const int IsCurrentVersion = DataRecord.BaseFieldCount + 9;
+}
+
+/// <summary>Ordinal constants for RecordComment fields.</summary>
+public static class RecordCommentFields
+{
+    public const int RecordType = DataRecord.BaseFieldCount + 0;
+    public const int RecordKey = DataRecord.BaseFieldCount + 1;
+    public const int Text = DataRecord.BaseFieldCount + 2;
+}

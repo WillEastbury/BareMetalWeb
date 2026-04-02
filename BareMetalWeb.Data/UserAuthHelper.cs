@@ -271,7 +271,7 @@ public static class UserAuthHelper
             return null;
 
         if (!DataScaffold.TryGetEntity("system-principals", out var meta))
-            return await SystemPrincipal.FindByApiKeyAsync(apiKey, cancellationToken).ConfigureAwait(false);
+            return await SystemPrincipalHelper.FindByApiKeyAsync(apiKey, cancellationToken).ConfigureAwait(false);
 
         var principals = await meta.Handlers.QueryAsync(null, cancellationToken).ConfigureAwait(false);
         foreach (var principal in principals)

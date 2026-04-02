@@ -1156,10 +1156,15 @@ public class RouteRegistrationExtensionsTests : IDisposable
         Assert.NotNull(method);
 
         // Customer entity defaults permissions to "Customers" — pass a user with that permission
-        var user = new User { Key = 1, UserName = "test", IsActive = true, Permissions = new[] { "Customers" } };
+        var user = SystemEntitySchemas.User.CreateRecord();
+        user.Key = 1;
+        user.SetFieldValue(UserFields.UserName, "test");
+        user.SetFieldValue(UserFields.IsActive, true);
+        user.SetFieldValue(UserFields.Permissions, new[] { "Customers" });
+        var userPermissions = new[] { "Customers" };
 
         // Act
-        var task = (Task<string?>?)method.Invoke(null, new object?[] { user, user.Permissions, "testnonce" });
+        var task = (Task<string?>?)method.Invoke(null, new object?[] { user, userPermissions, "testnonce" });
         Assert.NotNull(task);
         var script = await task.ConfigureAwait(false);
 

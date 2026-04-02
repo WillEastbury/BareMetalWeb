@@ -48,10 +48,11 @@ public sealed class MaterializedViewCache
     /// Registers a <see cref="ViewDefinition"/> for materialisation.
     /// The result is computed lazily on first call to <see cref="GetOrRefreshAsync"/>.
     /// </summary>
-    public void Register(ViewDefinition def)
+    public void Register(DataRecord def)
     {
         ArgumentNullException.ThrowIfNull(def);
-        _entries[def.ViewName] = new CacheEntry(def);
+        var viewName = def.GetFieldValue(ViewDefinitionFields.ViewName)?.ToString() ?? string.Empty;
+        _entries[viewName] = new CacheEntry(def);
     }
 
     /// <summary>Unregisters and drops the cached result for a view by name.</summary>
@@ -117,13 +118,13 @@ public sealed class MaterializedViewCache
 
     private sealed class CacheEntry
     {
-        private readonly ViewDefinition _def;
+        private readonly DataRecord _def;
         private readonly HashSet<string> _entityDeps;
         private volatile ReportResult? _cached;
         private long _invalidated = 1; // starts invalidated → computed on first access
         private readonly SemaphoreSlim _refreshLock = new(1, 1);
 
-        internal CacheEntry(ViewDefinition def)
+        internal CacheEntry(DataRecord def)
         {
             _def        = def;
             _entityDeps = BuildDeps(def);
@@ -163,12 +164,14 @@ public sealed class MaterializedViewCache
             }
         }
 
-        private static HashSet<string> BuildDeps(ViewDefinition def)
+        private static HashSet<string> BuildDeps(DataRecord def)
         {
             var deps = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            if (!string.IsNullOrWhiteSpace(def.RootEntity))
-                deps.Add(def.RootEntity);
-            foreach (var j in def.Joins)
+            var rootEntity = def.GetFieldValue(ViewDefinitionFields.RootEntity)?.ToString() ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(rootEntity))
+                deps.Add(rootEntity);
+            var joins = BmwManualJson.DeserializeViewJoins(def.GetFieldValue(ViewDefinitionFields.JoinsJson)?.ToString() ?? "[]");
+            foreach (var j in joins)
             {
                 if (!string.IsNullOrWhiteSpace(j.SourceEntity)) deps.Add(j.SourceEntity);
                 if (!string.IsNullOrWhiteSpace(j.TargetEntity)) deps.Add(j.TargetEntity);
@@ -176,7 +179,7 @@ public sealed class MaterializedViewCache
             return deps;
         }
 
-        private static string BuildCacheKey(ViewDefinition def)
-            => $"{def.Key}:{def.ViewName}:{def.RootEntity}";
+        private static string BuildCacheKey(DataRecord def)
+            => $"{def.Key}:{def.GetFieldValue(ViewDefinitionFields.ViewName)?.ToString() ?? string.Empty}:{def.GetFieldValue(ViewDefinitionFields.RootEntity)?.ToString() ?? string.Empty}";
     }
 }

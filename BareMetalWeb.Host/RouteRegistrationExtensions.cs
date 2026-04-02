@@ -1716,8 +1716,10 @@ public static class RouteRegistrationExtensions
                 if (!new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase).Contains("admin"))
                 { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
 
-                var reports = DataStoreProvider.Current.Query("ReportDefinition", null).Cast<ReportDefinition>().ToList();
-                reports.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));
+                var reports = DataStoreProvider.Current.Query("ReportDefinition", null).ToList();
+                reports.Sort((a, b) => string.Compare(
+                    a.GetFieldValue(ReportDefinitionFields.Name)?.ToString(),
+                    b.GetFieldValue(ReportDefinitionFields.Name)?.ToString(), StringComparison.Ordinal));
 
                 context.Response.ContentType = "application/json";
                 await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
@@ -1725,16 +1727,18 @@ public static class RouteRegistrationExtensions
                     w.WriteStartArray();
                     foreach (var r in reports)
                     {
+                        var parameters = BmwManualJson.DeserializeReportParameters(
+                            r.GetFieldValue(ReportDefinitionFields.ParametersJson)?.ToString() ?? "[]");
                         w.WriteStartObject();
                         w.WriteNumber("id", r.Key);
-                        w.WriteString("name", r.Name);
-                        w.WriteString("description", r.Description);
-                        w.WriteString("rootEntity", r.RootEntity);
-                        w.WriteNumber("parameterCount", r.Parameters.Count);
+                        w.WriteString("name", r.GetFieldValue(ReportDefinitionFields.Name)?.ToString() ?? string.Empty);
+                        w.WriteString("description", r.GetFieldValue(ReportDefinitionFields.Description)?.ToString() ?? string.Empty);
+                        w.WriteString("rootEntity", r.GetFieldValue(ReportDefinitionFields.RootEntity)?.ToString() ?? string.Empty);
+                        w.WriteNumber("parameterCount", parameters.Count);
 
                         w.WritePropertyName("parameters");
                         w.WriteStartArray();
-                        foreach (var p in r.Parameters)
+                        foreach (var p in parameters)
                         {
                             w.WriteStartObject();
                             w.WriteString("name", p.Name);
@@ -1787,7 +1791,7 @@ public static class RouteRegistrationExtensions
                     return;
                 }
 
-                var def = (ReportDefinition?)(await DataStoreProvider.Current.LoadAsync("ReportDefinition", parsedId, context.RequestAborted).ConfigureAwait(false));
+                var def = await DataStoreProvider.Current.LoadAsync("ReportDefinition", parsedId, context.RequestAborted).ConfigureAwait(false);
                 if (def == null)
                 {
                     context.Response.StatusCode = 404;
@@ -1796,7 +1800,8 @@ public static class RouteRegistrationExtensions
                     return;
                 }
 
-                var parameters = def.Parameters;
+                var parameters = BmwManualJson.DeserializeReportParameters(
+                    def.GetFieldValue(ReportDefinitionFields.ParametersJson)?.ToString() ?? "[]");
                 Dictionary<string, string>? runtimeParams = null;
                 if (parameters.Count > 0)
                 {
@@ -1832,7 +1837,7 @@ public static class RouteRegistrationExtensions
                 if (string.Equals(format, "csv", StringComparison.OrdinalIgnoreCase))
                 {
                     context.Response.ContentType = "text/csv";
-                    context.Response.Headers.ContentDisposition = $"attachment; filename=\"{Uri.EscapeDataString(def.Name)}.csv\"";
+                    context.Response.Headers.ContentDisposition = $"attachment; filename=\"{Uri.EscapeDataString(def.GetFieldValue(ReportDefinitionFields.Name)?.ToString() ?? "report")}.csv\"";
                     var csvSb = new StringBuilder(1024);
                     {
                         var headerCells = new string[result.ColumnLabels.Length];
@@ -1868,7 +1873,7 @@ public static class RouteRegistrationExtensions
                 await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
                 {
                     w.WriteStartObject();
-                    w.WriteString("name", def.Name);
+                    w.WriteString("name", def.GetFieldValue(ReportDefinitionFields.Name)?.ToString() ?? string.Empty);
                     w.WriteString("generatedAt", result.GeneratedAt);
                     w.WriteNumber("totalRows", result.TotalRows);
                     w.WriteBoolean("isTruncated", result.IsTruncated);
@@ -2479,14 +2484,16 @@ public static class RouteRegistrationExtensions
                 if (!new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase).Contains("admin"))
                 { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
 
-                var dashboards = DataStoreProvider.Current.Query("DashboardDefinition", null).Cast<DashboardDefinition>().ToList();
-                dashboards.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));
+                var dashboards = DataStoreProvider.Current.Query("DashboardDefinition", null).ToList();
+                dashboards.Sort((a, b) => string.Compare(
+                    DashboardDefinitionHelper.GetName(a),
+                    DashboardDefinitionHelper.GetName(b), StringComparison.Ordinal));
                 var list = dashboards.Select(d => new Dictionary<string, object?>
                 {
                     ["id"] = d.Key,
-                    ["name"] = d.Name,
-                    ["description"] = d.Description,
-                    ["tileCount"] = d.Tiles.Count
+                    ["name"] = DashboardDefinitionHelper.GetName(d),
+                    ["description"] = d.GetFieldValue(DashboardDefinitionFields.Description)?.ToString() ?? string.Empty,
+                    ["tileCount"] = DashboardDefinitionHelper.GetTiles(d).Count
                 });
                 context.Response.ContentType = "application/json";
                 await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
@@ -2509,11 +2516,11 @@ public static class RouteRegistrationExtensions
                 if (string.IsNullOrWhiteSpace(id) || !uint.TryParse(id, out var dashId))
                 { context.Response.StatusCode = 400; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Invalid dashboard id\"}"); return; }
 
-                var def = (DashboardDefinition?)(await DataStoreProvider.Current.LoadAsync("DashboardDefinition", dashId, context.RequestAborted).ConfigureAwait(false));
+                var def = await DataStoreProvider.Current.LoadAsync("DashboardDefinition", dashId, context.RequestAborted).ConfigureAwait(false);
                 if (def == null)
                 { context.Response.StatusCode = 404; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Dashboard not found\"}"); return; }
 
-                var resolvedTiles = await DashboardHtmlRenderer.ResolveTilesAsync(def.Tiles, context.RequestAborted);
+                var resolvedTiles = await DashboardHtmlRenderer.ResolveTilesAsync(DashboardDefinitionHelper.GetTiles(def), context.RequestAborted);
                 var tileProjections = new Dictionary<string, object?>[resolvedTiles.Count];
                 for (int i = 0; i < resolvedTiles.Count; i++)
                 {
@@ -2542,8 +2549,8 @@ public static class RouteRegistrationExtensions
                 {
                     w.WriteStartObject();
                     w.WriteNumber("id", def.Key);
-                    w.WriteString("name", def.Name);
-                    w.WriteString("description", def.Description);
+                    w.WriteString("name", DashboardDefinitionHelper.GetName(def));
+                    w.WriteString("description", def.GetFieldValue(DashboardDefinitionFields.Description)?.ToString() ?? string.Empty);
                     w.WritePropertyName("tiles");
                     JsonWriterHelper.WriteValue(w, tileProjections);
                     w.WriteEndObject();
@@ -3196,8 +3203,10 @@ public static class RouteRegistrationExtensions
                 var userPermissions = new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase);
                 if (!userPermissions.Contains("admin")) { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
 
-                var views = DataStoreProvider.Current.Query("ViewDefinition", null).Cast<ViewDefinition>().ToList();
-                views.Sort((a, b) => string.Compare(a.ViewName, b.ViewName, StringComparison.Ordinal));
+                var views = DataStoreProvider.Current.Query("ViewDefinition", null).ToList();
+                views.Sort((a, b) => string.Compare(
+                    a.GetFieldValue(ViewDefinitionFields.ViewName)?.ToString(),
+                    b.GetFieldValue(ViewDefinitionFields.ViewName)?.ToString(), StringComparison.Ordinal));
 
                 var items = new object[views.Count];
                 for (int i = 0; i < views.Count; i++)
@@ -3206,11 +3215,11 @@ public static class RouteRegistrationExtensions
                     items[i] = new Dictionary<string, object?>
                     {
                         ["id"]          = v.Key,
-                        ["viewName"]    = v.ViewName,
-                        ["rootEntity"]  = v.RootEntity,
-                        ["limit"]       = v.Limit,
-                        ["offset"]      = v.Offset,
-                        ["materialised"] = v.Materialised,
+                        ["viewName"]    = v.GetFieldValue(ViewDefinitionFields.ViewName)?.ToString() ?? string.Empty,
+                        ["rootEntity"]  = v.GetFieldValue(ViewDefinitionFields.RootEntity)?.ToString() ?? string.Empty,
+                        ["limit"]       = v.GetFieldValue(ViewDefinitionFields.Limit),
+                        ["offset"]      = v.GetFieldValue(ViewDefinitionFields.Offset),
+                        ["materialised"] = v.GetFieldValue(ViewDefinitionFields.Materialised) is true,
                     };
                 }
 
@@ -3240,7 +3249,7 @@ public static class RouteRegistrationExtensions
                     return;
                 }
 
-                var def = (ViewDefinition?)(await DataStoreProvider.Current.LoadAsync("ViewDefinition", viewKey, context.RequestAborted).ConfigureAwait(false));
+                var def = await DataStoreProvider.Current.LoadAsync("ViewDefinition", viewKey, context.RequestAborted).ConfigureAwait(false);
                 if (def == null)
                 {
                     context.Response.StatusCode = 404;
@@ -3253,9 +3262,10 @@ public static class RouteRegistrationExtensions
                 try
                 {
                     // Materialised views served from cache when available
-                    if (def.Materialised)
+                    if (def.GetFieldValue(ViewDefinitionFields.Materialised) is true)
                     {
-                        var cached = await MaterializedViewCache.Instance.GetOrRefreshAsync(def.ViewName, context.RequestAborted).ConfigureAwait(false);
+                        var viewName = def.GetFieldValue(ViewDefinitionFields.ViewName)?.ToString() ?? string.Empty;
+                        var cached = await MaterializedViewCache.Instance.GetOrRefreshAsync(viewName, context.RequestAborted).ConfigureAwait(false);
                         result = cached ?? await _engine.ExecuteAsync(def, context.RequestAborted).ConfigureAwait(false);
                     }
                     else
@@ -3280,7 +3290,7 @@ public static class RouteRegistrationExtensions
                 if (string.Equals(format, "csv", StringComparison.OrdinalIgnoreCase))
                 {
                     context.Response.ContentType = "text/csv";
-                    context.Response.Headers.ContentDisposition = $"attachment; filename=\"{Uri.EscapeDataString(def.ViewName)}.csv\"";
+                    context.Response.Headers.ContentDisposition = $"attachment; filename=\"{Uri.EscapeDataString(def.GetFieldValue(ViewDefinitionFields.ViewName)?.ToString() ?? "view")}.csv\"";
                     var csvSb = new StringBuilder(1024);
                     var headerCells = new string[result.ColumnLabels.Length];
                     for (int ci = 0; ci < result.ColumnLabels.Length; ci++)
@@ -3310,7 +3320,10 @@ public static class RouteRegistrationExtensions
                 }
 
                 context.Response.ContentType = "application/json";
-                await WriteViewResultJsonAsync(context, def.ViewName, def.RootEntity, result, rowsList);
+                await WriteViewResultJsonAsync(context,
+                    def.GetFieldValue(ViewDefinitionFields.ViewName)?.ToString() ?? string.Empty,
+                    def.GetFieldValue(ViewDefinitionFields.RootEntity)?.ToString() ?? string.Empty,
+                    result, rowsList);
             }));
 
         // ── POST /api/views/execute ── ad-hoc view execution ──────────────────
@@ -3331,7 +3344,7 @@ public static class RouteRegistrationExtensions
                     return;
                 }
 
-                ViewDefinition? def;
+                DataRecord? def;
                 try
                 {
                     using var bodyDoc = await System.Text.Json.JsonDocument.ParseAsync(
@@ -3346,7 +3359,7 @@ public static class RouteRegistrationExtensions
                     return;
                 }
 
-                if (def == null || string.IsNullOrWhiteSpace(def.RootEntity))
+                if (def == null || string.IsNullOrWhiteSpace(def.GetFieldValue(ViewDefinitionFields.RootEntity)?.ToString()))
                 {
                     context.Response.StatusCode = 400;
                     context.Response.ContentType = "application/json";
@@ -3385,7 +3398,10 @@ public static class RouteRegistrationExtensions
                 }
 
                 context.Response.ContentType = "application/json";
-                await WriteViewResultJsonAsync(context, def.ViewName, def.RootEntity, result, rowsList);
+                await WriteViewResultJsonAsync(context,
+                    def.GetFieldValue(ViewDefinitionFields.ViewName)?.ToString() ?? string.Empty,
+                    def.GetFieldValue(ViewDefinitionFields.RootEntity)?.ToString() ?? string.Empty,
+                    result, rowsList);
             }));
     }
 
@@ -3579,39 +3595,37 @@ public static class RouteRegistrationExtensions
         w.WriteEndObject();
     }
 
-    private static ViewDefinition? ParseViewDefinition(JsonElement root)
+    private static DataRecord? ParseViewDefinition(JsonElement root)
     {
         if (root.ValueKind != JsonValueKind.Object)
             return null;
 
-        var def = new ViewDefinition
-        {
-            ViewName = root.TryGetProperty("viewName", out var vn) || root.TryGetProperty("ViewName", out vn) ? vn.GetString() ?? string.Empty : string.Empty,
-            RootEntity = root.TryGetProperty("rootEntity", out var re) || root.TryGetProperty("RootEntity", out re) ? re.GetString() ?? string.Empty : string.Empty,
-            Limit = root.TryGetProperty("limit", out var lim) || root.TryGetProperty("Limit", out lim) ? lim.GetInt32() : 10_000,
-            Offset = root.TryGetProperty("offset", out var off) || root.TryGetProperty("Offset", out off) ? off.GetInt32() : 0,
-            Materialised = root.TryGetProperty("materialised", out var mat) || root.TryGetProperty("Materialised", out mat) ? mat.GetBoolean() : false,
-        };
+        var def = SystemEntitySchemas.ViewDefinition.CreateRecord();
+        def.SetFieldValue(ViewDefinitionFields.ViewName, root.TryGetProperty("viewName", out var vn) || root.TryGetProperty("ViewName", out vn) ? vn.GetString() ?? string.Empty : string.Empty);
+        def.SetFieldValue(ViewDefinitionFields.RootEntity, root.TryGetProperty("rootEntity", out var re) || root.TryGetProperty("RootEntity", out re) ? re.GetString() ?? string.Empty : string.Empty);
+        def.SetFieldValue(ViewDefinitionFields.Limit, root.TryGetProperty("limit", out var lim) || root.TryGetProperty("Limit", out lim) ? lim.GetInt32() : 10_000);
+        def.SetFieldValue(ViewDefinitionFields.Offset, root.TryGetProperty("offset", out var off) || root.TryGetProperty("Offset", out off) ? off.GetInt32() : 0);
+        def.SetFieldValue(ViewDefinitionFields.Materialised, root.TryGetProperty("materialised", out var mat) || root.TryGetProperty("Materialised", out mat) ? mat.GetBoolean() : false);
 
         if ((root.TryGetProperty("projectionsJson", out var pj) || root.TryGetProperty("ProjectionsJson", out pj)) && pj.ValueKind == JsonValueKind.String)
-            def.ProjectionsJson = pj.GetString() ?? "[]";
+            def.SetFieldValue(ViewDefinitionFields.ProjectionsJson, pj.GetString() ?? "[]");
         else if ((root.TryGetProperty("projections", out var pa) || root.TryGetProperty("Projections", out pa)) && pa.ValueKind == JsonValueKind.Array)
-            def.ProjectionsJson = pa.GetRawText();
+            def.SetFieldValue(ViewDefinitionFields.ProjectionsJson, pa.GetRawText());
 
         if ((root.TryGetProperty("joinsJson", out var jj) || root.TryGetProperty("JoinsJson", out jj)) && jj.ValueKind == JsonValueKind.String)
-            def.JoinsJson = jj.GetString() ?? "[]";
+            def.SetFieldValue(ViewDefinitionFields.JoinsJson, jj.GetString() ?? "[]");
         else if ((root.TryGetProperty("joins", out var ja) || root.TryGetProperty("Joins", out ja)) && ja.ValueKind == JsonValueKind.Array)
-            def.JoinsJson = ja.GetRawText();
+            def.SetFieldValue(ViewDefinitionFields.JoinsJson, ja.GetRawText());
 
         if ((root.TryGetProperty("filtersJson", out var fj) || root.TryGetProperty("FiltersJson", out fj)) && fj.ValueKind == JsonValueKind.String)
-            def.FiltersJson = fj.GetString() ?? "[]";
+            def.SetFieldValue(ViewDefinitionFields.FiltersJson, fj.GetString() ?? "[]");
         else if ((root.TryGetProperty("filters", out var fa) || root.TryGetProperty("Filters", out fa)) && fa.ValueKind == JsonValueKind.Array)
-            def.FiltersJson = fa.GetRawText();
+            def.SetFieldValue(ViewDefinitionFields.FiltersJson, fa.GetRawText());
 
         if ((root.TryGetProperty("sortsJson", out var sj) || root.TryGetProperty("SortsJson", out sj)) && sj.ValueKind == JsonValueKind.String)
-            def.SortsJson = sj.GetString() ?? "[]";
+            def.SetFieldValue(ViewDefinitionFields.SortsJson, sj.GetString() ?? "[]");
         else if ((root.TryGetProperty("sorts", out var sa) || root.TryGetProperty("Sorts", out sa)) && sa.ValueKind == JsonValueKind.Array)
-            def.SortsJson = sa.GetRawText();
+            def.SetFieldValue(ViewDefinitionFields.SortsJson, sa.GetRawText());
 
         return def;
     }

@@ -33,20 +33,21 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
                 ApiErrorWriter.RateLimited(), context.RequestAborted);
             return;
         }
-        var dc = new DeviceCodeAuth
-        {
-            UserCode = DeviceCodeAuth.GenerateUserCode(),
-            DeviceCode = DeviceCodeAuth.GenerateDeviceCode(),
-            ExpiresUtc = DateTime.UtcNow.AddMinutes(15),
-            Status = "pending"
-        };
+        var dc = SystemEntitySchemas.DeviceCodeAuth.CreateRecord();
+        dc.CreatedBy = "system";
+        var userCode = DeviceCodeAuthHelper.GenerateUserCode();
+        var deviceCode = DeviceCodeAuthHelper.GenerateDeviceCode();
+        DeviceCodeAuthHelper.SetUserCode(dc, userCode);
+        DeviceCodeAuthHelper.SetDeviceCode(dc, deviceCode);
+        DeviceCodeAuthHelper.SetExpiresUtc(dc, DateTime.UtcNow.AddMinutes(15));
+        DeviceCodeAuthHelper.SetStatus(dc, "pending");
         DataStoreProvider.Current.Save(dc.EntityTypeName, dc);
         var baseUrl = $"{context.HttpRequest.Scheme}://{context.HttpRequest.Host}";
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsync(JsonWriterHelper.ToJsonString(new Dictionary<string, object?>
         {
-            ["device_code"] = dc.DeviceCode,
-            ["user_code"] = dc.UserCode,
+            ["device_code"] = deviceCode,
+            ["user_code"] = userCode,
             ["verification_url"] = $"{baseUrl}/device",
             ["expires_in"] = 900,
             ["interval"] = 5
@@ -89,21 +90,21 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
             return;
         }
         var queryDef = new BareMetalWeb.Data.QueryDefinition { Clauses = new() { new BareMetalWeb.Data.QueryClause { Field = "DeviceCode", Operator = BareMetalWeb.Data.QueryOperator.Equals, Value = deviceCode } }, Top = 1 };
-        DeviceCodeAuth? dc = null;
-        foreach (var item in (await DataStoreProvider.Current.QueryAsync("DeviceCodeAuth", queryDef)).Cast<DeviceCodeAuth>())
+        DataRecord? dc = null;
+        foreach (var item in await DataStoreProvider.Current.QueryAsync("DeviceCodeAuth", queryDef))
         {
             dc = item;
             break;
         }
-        if (dc == null || dc.IsExpired(DateTime.UtcNow))
+        if (dc == null || DeviceCodeAuthHelper.IsExpired(dc, DateTime.UtcNow))
         {
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsync("{\"status\":\"expired\"}");
             return;
         }
-        if (dc.Status == "approved" && !string.IsNullOrEmpty(dc.UserId))
+        if (DeviceCodeAuthHelper.GetStatus(dc) == "approved" && !string.IsNullOrEmpty(DeviceCodeAuthHelper.GetUserId(dc)))
         {
-            if (!uint.TryParse(dc.UserId, out var parsedUserId))
+            if (!uint.TryParse(DeviceCodeAuthHelper.GetUserId(dc), out var parsedUserId))
             {
                 await ApiErrorWriter.WriteAsync(context.Response,
                     ApiErrorWriter.BadRequest("Invalid user id."),
@@ -114,7 +115,7 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
             if (user != null)
             {
                 await UserAuth.SignInAsync(context, user, false);
-                dc.Status = "consumed";
+                DeviceCodeAuthHelper.SetStatus(dc, "consumed");
                 DataStoreProvider.Current.Save(dc.EntityTypeName, dc);
                 context.Response.ContentType = "application/json";
                 await context.Response.WriteAsync(JsonWriterHelper.ToJsonString(new Dictionary<string, object?>
@@ -125,7 +126,7 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
                 return;
             }
         }
-        if (dc.Status == "denied")
+        if (DeviceCodeAuthHelper.GetStatus(dc) == "denied")
         {
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsync("{\"status\":\"denied\"}");
@@ -192,11 +193,11 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
             return;
         }
         var queryDef = new BareMetalWeb.Data.QueryDefinition { Clauses = new() { new BareMetalWeb.Data.QueryClause { Field = "UserCode", Operator = BareMetalWeb.Data.QueryOperator.Equals, Value = code } }, Top = 10 };
-        var candidates = (await DataStoreProvider.Current.QueryAsync("DeviceCodeAuth", queryDef)).Cast<DeviceCodeAuth>();
-        DeviceCodeAuth? dc = null;
+        var candidates = await DataStoreProvider.Current.QueryAsync("DeviceCodeAuth", queryDef);
+        DataRecord? dc = null;
         foreach (var d in candidates)
         {
-            if (d.Status == "pending" && !d.IsExpired(DateTime.UtcNow))
+            if (DeviceCodeAuthHelper.GetStatus(d) == "pending" && !DeviceCodeAuthHelper.IsExpired(d, DateTime.UtcNow))
             {
                 dc = d;
                 break;
@@ -207,8 +208,8 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
             context.Response.Redirect($"/device?msg=Error:+Invalid+or+expired+code&code={System.Net.WebUtility.UrlEncode(code)}");
             return;
         }
-        dc.Status = "approved";
-        dc.UserId = user.Key.ToString();
+        DeviceCodeAuthHelper.SetStatus(dc, "approved");
+        DeviceCodeAuthHelper.SetUserId(dc, user.Key.ToString());
         DataStoreProvider.Current.Save(dc.EntityTypeName, dc);
         context.Response.Redirect("/device?msg=Device+authorized+successfully!+You+can+close+this+tab.");
     }));

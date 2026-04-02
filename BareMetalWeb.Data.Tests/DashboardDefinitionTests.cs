@@ -5,21 +5,23 @@ using Xunit;
 namespace BareMetalWeb.Data.Tests;
 
 /// <summary>
-/// Tests for DashboardDefinition and DashboardTile models.
+/// Tests for DashboardDefinition records and DashboardTile models.
 /// </summary>
 public class DashboardDefinitionTests
 {
     [Fact]
     public void DashboardDefinition_DefaultTilesJson_IsEmptyArray()
     {
-        var def = new DashboardDefinition { Name = "Test" };
-        Assert.Equal("[]", def.TilesJson);
+        var def = SystemEntitySchemas.DashboardDefinition.CreateRecord();
+        def.SetFieldValue(DashboardDefinitionFields.Name, "Test");
+        Assert.Equal("[]", DashboardDefinitionHelper.GetTilesJson(def));
     }
 
     [Fact]
     public void DashboardDefinition_Tiles_RoundTrip()
     {
-        var def = new DashboardDefinition { Name = "Test" };
+        var def = SystemEntitySchemas.DashboardDefinition.CreateRecord();
+        def.SetFieldValue(DashboardDefinitionFields.Name, "Test");
         var tiles = new List<DashboardTile>
         {
             new DashboardTile
@@ -45,10 +47,10 @@ public class DashboardDefinitionTests
             }
         };
 
-        def.Tiles = tiles;
+        def.SetFieldValue(DashboardDefinitionFields.TilesJson, BmwManualJson.SerializeDashboardTiles(tiles));
 
-        // Re-read via property
-        var read = def.Tiles;
+        // Re-read via helper
+        var read = DashboardDefinitionHelper.GetTiles(def);
         Assert.Equal(2, read.Count);
         Assert.Equal("Orders Today", read[0].Title);
         Assert.Equal("bi-bag", read[0].Icon);
@@ -66,17 +68,19 @@ public class DashboardDefinitionTests
     [Fact]
     public void DashboardDefinition_InvalidJson_ReturnEmptyList()
     {
-        var def = new DashboardDefinition { TilesJson = "NOT_VALID_JSON" };
-        var tiles = def.Tiles;
+        var def = SystemEntitySchemas.DashboardDefinition.CreateRecord();
+        def.SetFieldValue(DashboardDefinitionFields.TilesJson, "NOT_VALID_JSON");
+        var tiles = DashboardDefinitionHelper.GetTiles(def);
         Assert.NotNull(tiles);
         Assert.Empty(tiles);
     }
 
     [Fact]
-    public void DashboardDefinition_ToString_ReturnsName()
+    public void DashboardDefinition_GetName_ReturnsName()
     {
-        var def = new DashboardDefinition { Name = "Exec KPIs" };
-        Assert.Equal("Exec KPIs", def.ToString());
+        var def = SystemEntitySchemas.DashboardDefinition.CreateRecord();
+        def.SetFieldValue(DashboardDefinitionFields.Name, "Exec KPIs");
+        Assert.Equal("Exec KPIs", DashboardDefinitionHelper.GetName(def));
     }
 
     [Fact]
@@ -94,8 +98,9 @@ public class DashboardDefinitionTests
     [Fact]
     public void DashboardTile_Filter_RoundTrip()
     {
-        var def = new DashboardDefinition { Name = "Test" };
-        def.Tiles = new List<DashboardTile>
+        var def = SystemEntitySchemas.DashboardDefinition.CreateRecord();
+        def.SetFieldValue(DashboardDefinitionFields.Name, "Test");
+        def.SetFieldValue(DashboardDefinitionFields.TilesJson, BmwManualJson.SerializeDashboardTiles(new List<DashboardTile>
         {
             new DashboardTile
             {
@@ -104,9 +109,9 @@ public class DashboardDefinitionTests
                 FilterField = "Status",
                 FilterValue = "Pending"
             }
-        };
+        }));
 
-        var round = def.Tiles;
+        var round = DashboardDefinitionHelper.GetTiles(def);
         Assert.Equal("Status", round[0].FilterField);
         Assert.Equal("Pending", round[0].FilterValue);
     }
@@ -114,11 +119,8 @@ public class DashboardDefinitionTests
     [Fact]
     public void DashboardDefinition_IsRegistrable_AsEntity()
     {
-        // Verify the DataEntity attribute is present and accessible
-        var attr = typeof(DashboardDefinition)
-            .GetCustomAttributes(typeof(DataEntityAttribute), false);
-        Assert.Single(attr);
-        var dataEntity = (DataEntityAttribute)attr[0];
-        Assert.Equal("dashboard-definitions", dataEntity.Slug);
+        var schema = SystemEntitySchemas.DashboardDefinition;
+        Assert.NotNull(schema);
+        Assert.Equal("dashboard-definitions", schema.Slug);
     }
 }

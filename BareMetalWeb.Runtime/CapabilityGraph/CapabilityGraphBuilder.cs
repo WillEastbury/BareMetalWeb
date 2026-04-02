@@ -84,14 +84,15 @@ public sealed class CapabilityGraphBuilder
         {
             try
             {
-                var views = (await store.QueryAsync("ViewDefinition").ConfigureAwait(false)).Cast<BareMetalWeb.Data.ViewDefinition>();
+                var views = await store.QueryAsync("ViewDefinition").ConfigureAwait(false);
                 foreach (var view in views)
                 {
-                    var rootSlug = view.RootEntity;
+                    var rootSlug = view.GetFieldValue(BareMetalWeb.Data.ViewDefinitionFields.RootEntity)?.ToString();
+                    var viewName = view.GetFieldValue(BareMetalWeb.Data.ViewDefinitionFields.ViewName)?.ToString() ?? string.Empty;
                     int entityIdx = _slugToEntityIndex.TryGetValue(rootSlug ?? "", out var idx) ? idx : -1;
                     var viewNodeId = AddNode(CapabilityType.NavigateView, entityIdx,
-                        $"View({view.ViewName})",
-                        detail: view.ViewName);
+                        $"View({viewName})",
+                        detail: viewName);
 
                     // View connects to root entity's query
                     if (entityIdx >= 0 && _slugToQueryNode.TryGetValue(rootSlug!, out var rootQuery))

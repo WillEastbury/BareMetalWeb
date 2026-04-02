@@ -63,7 +63,7 @@ public sealed class ViewEngine
     /// Compiles a <see cref="ViewDefinition"/> into a cached <see cref="ViewExecutionPlan"/>.
     /// Re-uses the cached plan when the definition has not changed.
     /// </summary>
-    public static ViewExecutionPlan Compile(ViewDefinition def)
+    public static ViewExecutionPlan Compile(DataRecord def)
     {
         ArgumentNullException.ThrowIfNull(def);
 
@@ -76,20 +76,21 @@ public sealed class ViewEngine
         return plan;
     }
 
-    private static ViewExecutionPlan CompileCore(ViewDefinition def, string cacheKey)
+    private static ViewExecutionPlan CompileCore(DataRecord def, string cacheKey)
     {
         // Resolve root entity metadata
-        DataScaffold.TryGetEntity(def.RootEntity, out var rootMeta);
+        var rootEntity = def.GetFieldValue(ViewDefinitionFields.RootEntity)?.ToString() ?? string.Empty;
+        DataScaffold.TryGetEntity(rootEntity, out var rootMeta);
 
         // Compile projections
-        var projections = def.Projections;
+        var projections = BmwManualJson.DeserializeViewProjections(def.GetFieldValue(ViewDefinitionFields.ProjectionsJson)?.ToString() ?? "[]");
         var projectionMap  = new ViewProjectionEntry[projections.Count];
         var columnHeaders  = new string[projections.Count];
 
         for (int i = 0; i < projections.Count; i++)
         {
             var p        = projections[i];
-            var entitySlug = string.IsNullOrEmpty(p.Entity) ? def.RootEntity : p.Entity;
+            var entitySlug = string.IsNullOrEmpty(p.Entity) ? rootEntity : p.Entity;
             var alias    = string.IsNullOrWhiteSpace(p.Alias)
                 ? $"{entitySlug}.{p.Field}"
                 : p.Alias;
@@ -107,7 +108,7 @@ public sealed class ViewEngine
         }
 
         // Compile joins
-        var joins    = def.Joins;
+        var joins    = BmwManualJson.DeserializeViewJoins(def.GetFieldValue(ViewDefinitionFields.JoinsJson)?.ToString() ?? "[]");
         var joinEntries = new ViewJoinEntry[joins.Count];
         for (int i = 0; i < joins.Count; i++)
         {
@@ -129,14 +130,14 @@ public sealed class ViewEngine
         }
 
         // Compile filters
-        var filters      = def.Filters;
+        var filters      = BmwManualJson.DeserializeViewFilters(def.GetFieldValue(ViewDefinitionFields.FiltersJson)?.ToString() ?? "[]");
         var filterEntries = new ViewFilterEntry[filters.Count];
         // Also build pushed filter QueryDefinitions per entity for data-provider predicate pushdown
         var pushedFilters = new Dictionary<string, QueryDefinition>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < filters.Count; i++)
         {
             var f = filters[i];
-            var entitySlug = string.IsNullOrEmpty(f.Entity) ? def.RootEntity : f.Entity;
+            var entitySlug = string.IsNullOrEmpty(f.Entity) ? rootEntity : f.Entity;
             DataScaffold.TryGetEntity(entitySlug, out var filterMeta);
             filterEntries[i] = new ViewFilterEntry
             {
@@ -157,12 +158,14 @@ public sealed class ViewEngine
         }
 
         // Compile sort keys — map "entity.field" aliases to column indices after projection
-        var sorts    = def.Sorts;
+        var sorts    = BmwManualJson.DeserializeViewSorts(def.GetFieldValue(ViewDefinitionFields.SortsJson)?.ToString() ?? "[]");
+        var defLimit  = (int)(def.GetFieldValue(ViewDefinitionFields.Limit) ?? 10_000);
+        var defOffset = (int)(def.GetFieldValue(ViewDefinitionFields.Offset) ?? 0);
         var sortKeys = new ViewSortKey[sorts.Count];
         for (int i = 0; i < sorts.Count; i++)
         {
             var s = sorts[i];
-            var entitySlug = string.IsNullOrEmpty(s.Entity) ? def.RootEntity : s.Entity;
+            var entitySlug = string.IsNullOrEmpty(s.Entity) ? rootEntity : s.Entity;
             var targetAlias = $"{entitySlug}.{s.Field}";
 
             int colIdx = -1;
@@ -181,17 +184,17 @@ public sealed class ViewEngine
         return new ViewExecutionPlan
         {
             CacheKey             = cacheKey,
-            RootEntitySlug       = def.RootEntity,
+            RootEntitySlug       = rootEntity,
             RootEntityMeta       = rootMeta,
             ProjectionMap        = projectionMap,
             JoinLookupFunctions  = joinEntries,
             FilterFunctions      = filterEntries,
             PushedFilters        = pushedFilters,
             SortKeys             = sortKeys,
-            Limit                = def.Limit > 0 ? def.Limit : DefaultRowLimit,
-            Offset               = def.Offset >= 0 ? def.Offset : 0,
+            Limit                = defLimit > 0 ? defLimit : DefaultRowLimit,
+            Offset               = defOffset >= 0 ? defOffset : 0,
             ColumnHeaders        = columnHeaders,
-            Materialised         = def.Materialised,
+            Materialised         = def.GetFieldValue(ViewDefinitionFields.Materialised) is true,
         };
     }
 
@@ -415,7 +418,7 @@ public sealed class ViewEngine
     /// Convenience overload: compiles and executes a <see cref="ViewDefinition"/> in one call.
     /// </summary>
     public ValueTask<ReportResult> ExecuteAsync(
-        ViewDefinition def,
+        DataRecord def,
         CancellationToken cancellationToken = default)
     {
         var plan = Compile(def);
@@ -607,6 +610,6 @@ public sealed class ViewEngine
         _                        => QueryOperator.Equals,
     };
 
-    private static string BuildCacheKey(ViewDefinition def)
-        => $"{def.Key}:{def.ViewName}:{def.RootEntity}";
+    private static string BuildCacheKey(DataRecord def)
+        => $"{def.Key}:{def.GetFieldValue(ViewDefinitionFields.ViewName)?.ToString() ?? string.Empty}:{def.GetFieldValue(ViewDefinitionFields.RootEntity)?.ToString() ?? string.Empty}";
 }

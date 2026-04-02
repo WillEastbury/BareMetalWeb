@@ -18,7 +18,7 @@ public static class UserAuth
     // Sessions extend their expiration time with each access, keeping active users
     // logged in. For RememberMe sessions, the cookie Expires is also reissued to
     // match the extended server-side expiry.
-    public static UserSession? GetSession(BmwContext context)
+    public static DataRecord? GetSession(BmwContext context)
     {
         if (context == null) throw new ArgumentNullException(nameof(context));
 
@@ -39,21 +39,21 @@ public static class UserAuth
             return null;
         }
 
-        var session = DataStoreProvider.Current.Load("UserSession", sessionKey) as UserSession;
+        var session = DataStoreProvider.Current.Load("UserSession", sessionKey);
         if (session == null)
             return null;
 
-        if (string.IsNullOrWhiteSpace(session.UserId))
+        if (string.IsNullOrWhiteSpace(UserSessionHelper.GetUserId(session)))
         {
-            session.IsRevoked = true;
+            UserSessionHelper.SetIsRevoked(session, true);
             DataStoreProvider.Current.Save(session.EntityTypeName, session);
             context.DeleteCookie(SessionCookieName);
             return null;
         }
 
-        if (session.IsExpired(DateTime.UtcNow))
+        if (UserSessionHelper.IsExpired(session, DateTime.UtcNow))
         {
-            session.IsRevoked = true;
+            UserSessionHelper.SetIsRevoked(session, true);
             DataStoreProvider.Current.Save(session.EntityTypeName, session);
             context.DeleteCookie(SessionCookieName);
             return null;
@@ -64,20 +64,20 @@ public static class UserAuth
         // This avoids high-frequency concurrent saves on burst requests, which can cause a
         // transient race where a concurrent Load reads a stale (already-moved) record location.
         var now = DateTime.UtcNow;
-        var lifetime = session.RememberMe ? RememberMeLifetime : DefaultSessionLifetime;
+        var lifetime = UserSessionHelper.GetRememberMe(session) ? RememberMeLifetime : DefaultSessionLifetime;
         var newExpiry = now.Add(lifetime);
-        session.LastSeenUtc = now;
-        if (newExpiry - session.ExpiresUtc > TimeSpan.FromMinutes(1))
+        UserSessionHelper.SetLastSeenUtc(session, now);
+        if (newExpiry - UserSessionHelper.GetExpiresUtc(session) > TimeSpan.FromMinutes(1))
         {
             var sem = _sessionLocks.GetOrAdd(protectedSessionId, _ => new SemaphoreSlim(1, 1));
             if (sem.Wait(0))
             {
                 try
                 {
-                    session.ExpiresUtc = newExpiry;
+                    UserSessionHelper.SetExpiresUtc(session, newExpiry);
                     DataStoreProvider.Current.Save(session.EntityTypeName, session);
-                    if (session.RememberMe)
-                        ReissueCookie(context, protectedSessionId, session.ExpiresUtc);
+                    if (UserSessionHelper.GetRememberMe(session))
+                        ReissueCookie(context, protectedSessionId, UserSessionHelper.GetExpiresUtc(session));
                 }
                 finally
                 {
@@ -90,7 +90,7 @@ public static class UserAuth
         return session;
     }
 
-    public static async ValueTask<UserSession?> GetSessionAsync(BmwContext context, CancellationToken cancellationToken = default)
+    public static async ValueTask<DataRecord?> GetSessionAsync(BmwContext context, CancellationToken cancellationToken = default)
     {
         if (context == null) throw new ArgumentNullException(nameof(context));
 
@@ -111,21 +111,21 @@ public static class UserAuth
             return null;
         }
 
-        var session = (UserSession?)(await DataStoreProvider.Current.LoadAsync("UserSession", sessionKey, cancellationToken).ConfigureAwait(false));
+        var session = await DataStoreProvider.Current.LoadAsync("UserSession", sessionKey, cancellationToken).ConfigureAwait(false);
         if (session == null)
             return null;
 
-        if (string.IsNullOrWhiteSpace(session.UserId))
+        if (string.IsNullOrWhiteSpace(UserSessionHelper.GetUserId(session)))
         {
-            session.IsRevoked = true;
+            UserSessionHelper.SetIsRevoked(session, true);
             await DataStoreProvider.Current.SaveAsync(session.EntityTypeName, session, cancellationToken).ConfigureAwait(false);
             context.DeleteCookie(SessionCookieName);
             return null;
         }
 
-        if (session.IsExpired(DateTime.UtcNow))
+        if (UserSessionHelper.IsExpired(session, DateTime.UtcNow))
         {
-            session.IsRevoked = true;
+            UserSessionHelper.SetIsRevoked(session, true);
             await DataStoreProvider.Current.SaveAsync(session.EntityTypeName, session, cancellationToken).ConfigureAwait(false);
             context.DeleteCookie(SessionCookieName);
             return null;
@@ -136,20 +136,20 @@ public static class UserAuth
         // This avoids high-frequency concurrent saves on burst requests, which can cause a
         // transient race where a concurrent Load reads a stale (already-moved) record location.
         var now = DateTime.UtcNow;
-        var lifetime = session.RememberMe ? RememberMeLifetime : DefaultSessionLifetime;
+        var lifetime = UserSessionHelper.GetRememberMe(session) ? RememberMeLifetime : DefaultSessionLifetime;
         var newExpiry = now.Add(lifetime);
-        session.LastSeenUtc = now;
-        if (newExpiry - session.ExpiresUtc > TimeSpan.FromMinutes(1))
+        UserSessionHelper.SetLastSeenUtc(session, now);
+        if (newExpiry - UserSessionHelper.GetExpiresUtc(session) > TimeSpan.FromMinutes(1))
         {
             var sem = _sessionLocks.GetOrAdd(protectedSessionId, _ => new SemaphoreSlim(1, 1));
             if (await sem.WaitAsync(0, cancellationToken).ConfigureAwait(false))
             {
                 try
                 {
-                    session.ExpiresUtc = newExpiry;
+                    UserSessionHelper.SetExpiresUtc(session, newExpiry);
                     await DataStoreProvider.Current.SaveAsync(session.EntityTypeName, session, cancellationToken).ConfigureAwait(false);
-                    if (session.RememberMe)
-                        ReissueCookie(context, protectedSessionId, session.ExpiresUtc);
+                    if (UserSessionHelper.GetRememberMe(session))
+                        ReissueCookie(context, protectedSessionId, UserSessionHelper.GetExpiresUtc(session));
                 }
                 finally
                 {
@@ -168,7 +168,7 @@ public static class UserAuth
         if (session == null)
             return null;
 
-        if (!uint.TryParse(session.UserId, out var userId))
+        if (!uint.TryParse(UserSessionHelper.GetUserId(session), out var userId))
             return null;
 
         var meta = UserAuthHelper.GetUserMeta();
@@ -222,19 +222,17 @@ public static class UserAuth
             displayName = userName;
 
         var now = DateTime.UtcNow;
-        var session = new UserSession
-        {
-            UserId = user.Key.ToString(),
-            UserName = userName,
-            DisplayName = displayName,
-            Permissions = UserAuthHelper.GetPermissions(user, meta),
-            IssuedUtc = now,
-            LastSeenUtc = now,
-            ExpiresUtc = now.Add(rememberMe ? RememberMeLifetime : DefaultSessionLifetime),
-            RememberMe = rememberMe,
-            CreatedBy = userName,
-            UpdatedBy = userName
-        };
+        var session = SystemEntitySchemas.UserSession.CreateRecord();
+        UserSessionHelper.SetUserId(session, user.Key.ToString());
+        UserSessionHelper.SetUserName(session, userName);
+        UserSessionHelper.SetDisplayName(session, displayName);
+        UserSessionHelper.SetPermissions(session, UserAuthHelper.GetPermissions(user, meta));
+        UserSessionHelper.SetIssuedUtc(session, now);
+        UserSessionHelper.SetLastSeenUtc(session, now);
+        UserSessionHelper.SetExpiresUtc(session, now.Add(rememberMe ? RememberMeLifetime : DefaultSessionLifetime));
+        UserSessionHelper.SetRememberMe(session, rememberMe);
+        session.CreatedBy = userName;
+        session.UpdatedBy = userName;
 
         await DataStoreProvider.Current.SaveAsync(session.EntityTypeName, session, cancellationToken).ConfigureAwait(false);
 
@@ -246,7 +244,7 @@ public static class UserAuth
         };
 
         if (rememberMe)
-            options.Expires = session.ExpiresUtc;
+            options.Expires = UserSessionHelper.GetExpiresUtc(session);
 
         var protectedSessionId = CookieProtection.Protect(session.Key.ToString());
         context.SetCookie(SessionCookieName, protectedSessionId, options);
@@ -259,7 +257,7 @@ public static class UserAuth
         var session = await GetSessionAsync(context, cancellationToken).ConfigureAwait(false);
         if (session != null)
         {
-            session.IsRevoked = true;
+            UserSessionHelper.SetIsRevoked(session, true);
             await DataStoreProvider.Current.SaveAsync(session.EntityTypeName, session, cancellationToken).ConfigureAwait(false);
         }
 

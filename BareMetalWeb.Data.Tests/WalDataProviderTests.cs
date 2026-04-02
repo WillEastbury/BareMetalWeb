@@ -21,8 +21,8 @@ public sealed class WalDataProviderTests : IDisposable
         _dir = Path.Combine(Path.GetTempPath(), "BmwWalProviderTests_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_dir);
         BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting,
-            BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => new AppSetting()));
-        BinaryObjectSerializer.RegisterKnownType(typeof(AppSetting), () => new AppSetting());
+            BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => SystemEntitySchemas.AppSetting.CreateRecord()));
+        BinaryObjectSerializer.RegisterKnownType(typeof(DataRecord), () => new DataRecord());
     }
 
     public void Dispose()
@@ -31,10 +31,16 @@ public sealed class WalDataProviderTests : IDisposable
         catch { /* best-effort */ }
     }
 
-    // ── Helper: minimal AppSetting-like object ───────────────────────────────
+    // ── Helper: minimal AppSetting-like DataRecord ─────────────────────────────
 
-    private static AppSetting MakeSetting(string settingId, string value = "v")
-        => new() { SettingId = settingId, Value = value, Description = "desc" };
+    private static DataRecord MakeSetting(string settingId, string value = "v")
+    {
+        var rec = SystemEntitySchemas.AppSetting.CreateRecord();
+        rec.SetFieldValue(AppSettingFields.SettingId, settingId);
+        rec.SetFieldValue(AppSettingFields.Value, value);
+        rec.SetFieldValue(AppSettingFields.Description, "desc");
+        return rec;
+    }
 
     // ── Save / Load ───────────────────────────────────────────────────────────
 
@@ -48,12 +54,12 @@ public sealed class WalDataProviderTests : IDisposable
 
         // Act
         provider.Save("AppSetting", setting);
-        var loaded = (AppSetting?)provider.Load("AppSetting", setting.Key);
+        var loaded = provider.Load("AppSetting", setting.Key);
 
         // Assert
         Assert.NotNull(loaded);
-        Assert.Equal("key1",  loaded!.SettingId);
-        Assert.Equal("hello", loaded.Value);
+        Assert.Equal("key1",  loaded!.GetFieldValue(AppSettingFields.SettingId)?.ToString());
+        Assert.Equal("hello", loaded.GetFieldValue(AppSettingFields.Value)?.ToString());
     }
 
     [Fact]
@@ -71,11 +77,11 @@ public sealed class WalDataProviderTests : IDisposable
 
         // Act: read with a completely separate provider (simulates app restart)
         using var p2 = new WalDataProvider(_dir);
-        var loaded = (AppSetting?)p2.Load("AppSetting", key);
+        var loaded = p2.Load("AppSetting", key);
 
         // Assert
         Assert.NotNull(loaded);
-        Assert.Equal("k2", loaded!.SettingId);
+        Assert.Equal("k2", loaded!.GetFieldValue(AppSettingFields.SettingId)?.ToString());
     }
 
     [Fact]
@@ -94,12 +100,12 @@ public sealed class WalDataProviderTests : IDisposable
         setting.Key = provider.NextSequentialKey("AppSetting");
         provider.Save("AppSetting", setting);
 
-        setting.Value = "updated";
+        setting.SetFieldValue(AppSettingFields.Value, "updated");
         provider.Save("AppSetting", setting);
 
-        var loaded = (AppSetting?)provider.Load("AppSetting", setting.Key);
+        var loaded = provider.Load("AppSetting", setting.Key);
         Assert.NotNull(loaded);
-        Assert.Equal("updated", loaded!.Value);
+        Assert.Equal("updated", loaded!.GetFieldValue(AppSettingFields.Value)?.ToString());
     }
 
     // ── Query ─────────────────────────────────────────────────────────────────
@@ -138,7 +144,7 @@ public sealed class WalDataProviderTests : IDisposable
     public void Query_WithEqualityFilter_ReturnsMatchingRecords()
     {
         // AppSetting must be registered with DataScaffold for filter evaluation
-        BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting, BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => new AppSetting()));
+        BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting, BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => SystemEntitySchemas.AppSetting.CreateRecord()));
 
         using var provider = new WalDataProvider(_dir);
         var s1 = MakeSetting("needle",  "yes");
@@ -152,13 +158,13 @@ public sealed class WalDataProviderTests : IDisposable
         {
             Clauses = new List<QueryClause>
             {
-                new() { Field = nameof(AppSetting.SettingId), Operator = QueryOperator.Equals, Value = "needle" }
+                new() { Field = "SettingId", Operator = QueryOperator.Equals, Value = "needle" }
             }
         };
 
-        var results = provider.Query("AppSetting", query).Cast<AppSetting>().ToList();
+        var results = provider.Query("AppSetting", query).ToList();
         Assert.Single(results);
-        Assert.Equal("needle", results[0].SettingId);
+        Assert.Equal("needle", results[0].GetFieldValue(AppSettingFields.SettingId)?.ToString());
     }
 
     // ── Count ─────────────────────────────────────────────────────────────────
@@ -205,9 +211,9 @@ public sealed class WalDataProviderTests : IDisposable
 
         provider.Delete("AppSetting", s2.Key);
 
-        var results = provider.Query("AppSetting").Cast<AppSetting>().ToList();
+        var results = provider.Query("AppSetting").ToList();
         Assert.Single(results);
-        Assert.Equal("keep", results[0].SettingId);
+        Assert.Equal("keep", results[0].GetFieldValue(AppSettingFields.SettingId)?.ToString());
     }
 
     [Fact]
@@ -246,10 +252,10 @@ public sealed class WalDataProviderTests : IDisposable
         var s = MakeSetting("async_key", "async_val");
         s.Key = provider.NextSequentialKey("AppSetting");
         await provider.SaveAsync("AppSetting", s);
-        var loaded = (AppSetting?)await provider.LoadAsync("AppSetting", s.Key);
+        var loaded = await provider.LoadAsync("AppSetting", s.Key);
 
         Assert.NotNull(loaded);
-        Assert.Equal("async_val", loaded!.Value);
+        Assert.Equal("async_val", loaded!.GetFieldValue(AppSettingFields.Value)?.ToString());
     }
 
     [Fact]
@@ -361,7 +367,7 @@ public sealed class WalDataProviderTests : IDisposable
     {
         // AppSetting.SettingId is decorated with [DataIndex], so WalDataProvider
         // must populate the secondary index on Save and consult it on Query.
-        BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting, BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => new AppSetting()));
+        BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting, BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => SystemEntitySchemas.AppSetting.CreateRecord()));
         using var provider = new WalDataProvider(_dir);
 
         const int total = 20;
@@ -376,20 +382,20 @@ public sealed class WalDataProviderTests : IDisposable
         {
             Clauses = new List<QueryClause>
             {
-                new() { Field = nameof(AppSetting.SettingId), Operator = QueryOperator.Equals, Value = "sid_5" }
+                new() { Field = "SettingId", Operator = QueryOperator.Equals, Value = "sid_5" }
             }
         };
 
-        var results = provider.Query("AppSetting", query).Cast<AppSetting>().ToList();
+        var results = provider.Query("AppSetting", query).ToList();
 
         Assert.Single(results);
-        Assert.Equal("sid_5", results[0].SettingId);
+        Assert.Equal("sid_5", results[0].GetFieldValue(AppSettingFields.SettingId)?.ToString());
     }
 
     [Fact]
     public void Query_IndexedFieldEquals_NoMatch_ReturnsEmpty()
     {
-        BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting, BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => new AppSetting()));
+        BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting, BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => SystemEntitySchemas.AppSetting.CreateRecord()));
         using var provider = new WalDataProvider(_dir);
         for (int i = 0; i < 5; i++)
         {
@@ -402,18 +408,18 @@ public sealed class WalDataProviderTests : IDisposable
         {
             Clauses = new List<QueryClause>
             {
-                new() { Field = nameof(AppSetting.SettingId), Operator = QueryOperator.Equals, Value = "does_not_exist" }
+                new() { Field = "SettingId", Operator = QueryOperator.Equals, Value = "does_not_exist" }
             }
         };
 
-        var results = provider.Query("AppSetting", query).Cast<AppSetting>().ToList();
+        var results = provider.Query("AppSetting", query).ToList();
         Assert.Empty(results);
     }
 
     [Fact]
     public void Query_IndexedField_AfterDelete_ExcludesDeletedRecord()
     {
-        BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting, BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => new AppSetting()));
+        BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting, BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => SystemEntitySchemas.AppSetting.CreateRecord()));
         using var provider = new WalDataProvider(_dir);
 
         var s1 = MakeSetting("del_target", "to_be_deleted");
@@ -431,18 +437,18 @@ public sealed class WalDataProviderTests : IDisposable
         {
             Clauses = new List<QueryClause>
             {
-                new() { Field = nameof(AppSetting.SettingId), Operator = QueryOperator.Equals, Value = "del_target" }
+                new() { Field = "SettingId", Operator = QueryOperator.Equals, Value = "del_target" }
             }
         };
 
-        var results = provider.Query("AppSetting", query).Cast<AppSetting>().ToList();
+        var results = provider.Query("AppSetting", query).ToList();
         Assert.Empty(results);
     }
 
     [Fact]
     public void Query_IndexedField_AfterUpdate_ReflectsNewValue()
     {
-        BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting, BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => new AppSetting()));
+        BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting, BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => SystemEntitySchemas.AppSetting.CreateRecord()));
         using var provider = new WalDataProvider(_dir);
 
         var s = MakeSetting("old_id", "v");
@@ -450,7 +456,7 @@ public sealed class WalDataProviderTests : IDisposable
         provider.Save("AppSetting", s);
 
         // Update the indexed field
-        s.SettingId = "new_id";
+        s.SetFieldValue(AppSettingFields.SettingId, "new_id");
         provider.Save("AppSetting", s);
 
         // old value must no longer be found
@@ -458,22 +464,22 @@ public sealed class WalDataProviderTests : IDisposable
         {
             Clauses = new List<QueryClause>
             {
-                new() { Field = nameof(AppSetting.SettingId), Operator = QueryOperator.Equals, Value = "old_id" }
+                new() { Field = "SettingId", Operator = QueryOperator.Equals, Value = "old_id" }
             }
         };
-        Assert.Empty(provider.Query("AppSetting", queryOld).Cast<AppSetting>().ToList());
+        Assert.Empty(provider.Query("AppSetting", queryOld).ToList());
 
         // new value must be found
         var queryNew = new QueryDefinition
         {
             Clauses = new List<QueryClause>
             {
-                new() { Field = nameof(AppSetting.SettingId), Operator = QueryOperator.Equals, Value = "new_id" }
+                new() { Field = "SettingId", Operator = QueryOperator.Equals, Value = "new_id" }
             }
         };
-        var results = provider.Query("AppSetting", queryNew).Cast<AppSetting>().ToList();
+        var results = provider.Query("AppSetting", queryNew).ToList();
         Assert.Single(results);
-        Assert.Equal("new_id", results[0].SettingId);
+        Assert.Equal("new_id", results[0].GetFieldValue(AppSettingFields.SettingId)?.ToString());
     }
 
     [Fact]
@@ -481,7 +487,7 @@ public sealed class WalDataProviderTests : IDisposable
     {
         // Ensure that the secondary index paged files are persisted so a fresh
         // WalDataProvider instance can still accelerate queries.
-        BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting, BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => new AppSetting()));
+        BareMetalWeb.Core.DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting, BareMetalWeb.Core.DataScaffold.BuildStoreHandlers("AppSetting", () => SystemEntitySchemas.AppSetting.CreateRecord()));
         string settingId;
 
         using (var p1 = new WalDataProvider(_dir))
@@ -489,7 +495,7 @@ public sealed class WalDataProviderTests : IDisposable
             var s = MakeSetting("persist_idx", "v");
             s.Key = p1.NextSequentialKey("AppSetting");
             p1.Save("AppSetting", s);
-            settingId = s.SettingId;
+            settingId = s.GetFieldValue(AppSettingFields.SettingId)?.ToString()!;
         }
 
         using var p2 = new WalDataProvider(_dir);
@@ -497,12 +503,12 @@ public sealed class WalDataProviderTests : IDisposable
         {
             Clauses = new List<QueryClause>
             {
-                new() { Field = nameof(AppSetting.SettingId), Operator = QueryOperator.Equals, Value = settingId }
+                new() { Field = "SettingId", Operator = QueryOperator.Equals, Value = settingId }
             }
         };
 
-        var results = p2.Query("AppSetting", query).Cast<AppSetting>().ToList();
+        var results = p2.Query("AppSetting", query).ToList();
         Assert.Single(results);
-        Assert.Equal(settingId, results[0].SettingId);
+        Assert.Equal(settingId, results[0].GetFieldValue(AppSettingFields.SettingId)?.ToString());
     }
 }

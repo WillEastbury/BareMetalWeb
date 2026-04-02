@@ -29,38 +29,35 @@ public sealed class ReportExecutor
 
     // ── Public API ───────────────────────────────────────────────────────────
 
-    /// <summary>Executes a stored <see cref="ReportDefinition"/>.</summary>
+    /// <summary>Executes a stored report definition from a <see cref="DataRecord"/>.</summary>
     public ValueTask<ReportResult> ExecuteAsync(
-        ReportDefinition definition,
+        DataRecord definition,
         IReadOnlyDictionary<string, string>? runtimeParameters = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(definition);
 
-        var query = new ReportQuery().From(definition.RootEntity ?? string.Empty);
+        var query = new ReportQuery().From(definition.GetFieldValue(ReportDefinitionFields.RootEntity)?.ToString() ?? string.Empty);
 
-        if (definition.Joins != null)
-        {
-            foreach (var join in definition.Joins)
-                query.Join(join.FromEntity, join.FromField, join.ToEntity, join.ToField);
-        }
+        var joins = BmwManualJson.DeserializeReportJoins(definition.GetFieldValue(ReportDefinitionFields.JoinsJson)?.ToString() ?? "[]");
+        foreach (var join in joins)
+            query.Join(join.FromEntity, join.FromField, join.ToEntity, join.ToField);
 
-        if (definition.Columns != null)
-        {
-            foreach (var col in definition.Columns)
-                query.SelectColumn(col.Entity, col.Field, col.Label, col.Format, col.Aggregate);
-        }
+        var columns = BmwManualJson.DeserializeReportColumns(definition.GetFieldValue(ReportDefinitionFields.ColumnsJson)?.ToString() ?? "[]");
+        foreach (var col in columns)
+            query.SelectColumn(col.Entity, col.Field, col.Label, col.Format, col.Aggregate);
 
         // Apply stored filters, substituting runtime parameters
-        if (definition.Filters == null) { /* no filters */ }
-        else foreach (var filter in definition.Filters)
+        var filters = BmwManualJson.DeserializeReportFilters(definition.GetFieldValue(ReportDefinitionFields.FiltersJson)?.ToString() ?? "[]");
+        foreach (var filter in filters)
         {
             var value = SubstituteParameter(filter.Value, runtimeParameters);
             query.Where($"{filter.Entity}.{filter.Field}", filter.Operator, value);
         }
 
-        if (!string.IsNullOrWhiteSpace(definition.SortField))
-            query.OrderBy(definition.SortField, definition.SortDescending);
+        var sortField = definition.GetFieldValue(ReportDefinitionFields.SortField)?.ToString();
+        if (!string.IsNullOrWhiteSpace(sortField))
+            query.OrderBy(sortField, definition.GetFieldValue(ReportDefinitionFields.SortDescending) is true);
 
         return ExecuteAsync(query, cancellationToken);
     }

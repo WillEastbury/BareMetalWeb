@@ -344,21 +344,19 @@ public sealed class RouteHandlers : IRouteHandlers
                 await UserAuth.SaveUserAsync(user, context.RequestAborted);
 
             var userName = UserAuth.GetUserName(user) ?? user.Key.ToString();
-            var challenge = new MfaChallenge
-            {
-                UserId = user.Key.ToString(),
-                RememberMe = rememberMe,
-                ExpiresUtc = DateTime.UtcNow.AddMinutes(5),
-                CreatedBy = userName,
-                UpdatedBy = userName
-            };
+            var challenge = SystemEntitySchemas.MfaChallenge.CreateRecord();
+            MfaChallengeHelper.SetUserId(challenge, user.Key.ToString());
+            MfaChallengeHelper.SetRememberMe(challenge, rememberMe);
+            MfaChallengeHelper.SetExpiresUtc(challenge, DateTime.UtcNow.AddMinutes(5));
+            challenge.CreatedBy = userName;
+            challenge.UpdatedBy = userName;
             await DataStoreProvider.Current.SaveAsync(challenge.EntityTypeName, challenge);
             context.SetCookie(MfaChallengeCookieName, challenge.Key.ToString(), new CookieOptions
             {
                 HttpOnly = true,
                 Secure = context.HttpRequest.IsHttps,
                 SameSite = SameSiteMode.Lax,
-                Expires = challenge.ExpiresUtc
+                Expires = MfaChallengeHelper.GetExpiresUtc(challenge)
             });
             RegisterSuccess(ipKey);
             RegisterSuccess(userKey);
@@ -420,7 +418,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!uint.TryParse(challenge.UserId, out var parsedUserId))
+        if (!uint.TryParse(MfaChallengeHelper.GetUserId(challenge), out var parsedUserId))
         {
             RenderMfaChallengeForm(context, "Invalid user account.");
             await _renderer.RenderPage(context);
@@ -474,11 +472,11 @@ public sealed class RouteHandlers : IRouteHandlers
             RegisterSuccess(BuildMfaAttemptKey("challenge:user", user.Key.ToString()));
             RegisterSuccess(BuildMfaAttemptKey("challenge:ip", remoteIp));
 
-            challenge.IsUsed = true;
+            MfaChallengeHelper.SetIsUsed(challenge, true);
             await DataStoreProvider.Current.SaveAsync(challenge.EntityTypeName, challenge);
             context.DeleteCookie(MfaChallengeCookieName);
 
-            await UserAuth.SignInAsync(context, user, challenge.RememberMe);
+            await UserAuth.SignInAsync(context, user, MfaChallengeHelper.GetRememberMe(challenge));
             context.Response.Redirect("/");
             return;
         }
@@ -1512,61 +1510,54 @@ public sealed class RouteHandlers : IRouteHandlers
                 existingNames.Add(name);
         }
 
-        var reports = new List<ReportDefinition>
+        DataRecord CreateReport(string name, string description, string rootEntity,
+            string columnsJson, string? joinsJson = null, string? sortField = null, bool sortDescending = false)
         {
-            new ReportDefinition(createdBy)
-            {
-                Name = "Customer List",
-                Description = "All customers with contact details.",
-                RootEntity = "customers",
-                Columns = new List<ReportColumn>
-                {
-                    new ReportColumn { Entity = "customers", Field = "Name",    Label = "Name" },
-                    new ReportColumn { Entity = "customers", Field = "Email",   Label = "Email" },
-                    new ReportColumn { Entity = "customers", Field = "Company", Label = "Company" },
-                    new ReportColumn { Entity = "customers", Field = "Phone",   Label = "Phone" },
-                },
-                SortField = "customers.Name"
-            },
-            new ReportDefinition(createdBy)
-            {
-                Name = "Orders with Customer",
-                Description = "Orders joined to customer details.",
-                RootEntity = "orders",
-                Joins = new List<ReportJoin>
-                {
-                    new ReportJoin { FromEntity = "orders", FromField = "CustomerId", ToEntity = "customers", ToField = "Id" }
-                },
-                Columns = new List<ReportColumn>
-                {
-                    new ReportColumn { Entity = "orders",    Field = "OrderNumber", Label = "Order #" },
-                    new ReportColumn { Entity = "customers", Field = "Name",        Label = "Customer" },
-                    new ReportColumn { Entity = "orders",    Field = "OrderDate",   Label = "Order Date" },
-                    new ReportColumn { Entity = "orders",    Field = "Status",      Label = "Status" },
-                },
-                SortField = "orders.OrderDate",
-                SortDescending = true
-            },
-            new ReportDefinition(createdBy)
-            {
-                Name = "Product Catalog",
-                Description = "All products with pricing and inventory information.",
-                RootEntity = "products",
-                Columns = new List<ReportColumn>
-                {
-                    new ReportColumn { Entity = "products", Field = "Name",           Label = "Name" },
-                    new ReportColumn { Entity = "products", Field = "Sku",            Label = "SKU" },
-                    new ReportColumn { Entity = "products", Field = "Category",       Label = "Category" },
-                    new ReportColumn { Entity = "products", Field = "Price",          Label = "Price" },
-                    new ReportColumn { Entity = "products", Field = "InventoryCount", Label = "Inventory" },
-                },
-                SortField = "products.Name"
-            }
+            var r = SystemEntitySchemas.ReportDefinition.CreateRecord();
+            r.CreatedBy = createdBy;
+            r.SetFieldValue(ReportDefinitionFields.Name, name);
+            r.SetFieldValue(ReportDefinitionFields.Description, description);
+            r.SetFieldValue(ReportDefinitionFields.RootEntity, rootEntity);
+            r.SetFieldValue(ReportDefinitionFields.ColumnsJson, columnsJson);
+            if (joinsJson != null)
+                r.SetFieldValue(ReportDefinitionFields.JoinsJson, joinsJson);
+            if (sortField != null)
+                r.SetFieldValue(ReportDefinitionFields.SortField, sortField);
+            r.SetFieldValue(ReportDefinitionFields.SortDescending, sortDescending);
+            return r;
+        }
+
+        var reports = new List<DataRecord>
+        {
+            CreateReport(
+                "Customer List",
+                "All customers with contact details.",
+                "customers",
+                "[{\"Entity\":\"customers\",\"Field\":\"Name\",\"Label\":\"Name\"},{\"Entity\":\"customers\",\"Field\":\"Email\",\"Label\":\"Email\"},{\"Entity\":\"customers\",\"Field\":\"Company\",\"Label\":\"Company\"},{\"Entity\":\"customers\",\"Field\":\"Phone\",\"Label\":\"Phone\"}]",
+                sortField: "customers.Name"
+            ),
+            CreateReport(
+                "Orders with Customer",
+                "Orders joined to customer details.",
+                "orders",
+                "[{\"Entity\":\"orders\",\"Field\":\"OrderNumber\",\"Label\":\"Order #\"},{\"Entity\":\"customers\",\"Field\":\"Name\",\"Label\":\"Customer\"},{\"Entity\":\"orders\",\"Field\":\"OrderDate\",\"Label\":\"Order Date\"},{\"Entity\":\"orders\",\"Field\":\"Status\",\"Label\":\"Status\"}]",
+                joinsJson: "[{\"FromEntity\":\"orders\",\"FromField\":\"CustomerId\",\"ToEntity\":\"customers\",\"ToField\":\"Id\"}]",
+                sortField: "orders.OrderDate",
+                sortDescending: true
+            ),
+            CreateReport(
+                "Product Catalog",
+                "All products with pricing and inventory information.",
+                "products",
+                "[{\"Entity\":\"products\",\"Field\":\"Name\",\"Label\":\"Name\"},{\"Entity\":\"products\",\"Field\":\"Sku\",\"Label\":\"SKU\"},{\"Entity\":\"products\",\"Field\":\"Category\",\"Label\":\"Category\"},{\"Entity\":\"products\",\"Field\":\"Price\",\"Label\":\"Price\"},{\"Entity\":\"products\",\"Field\":\"InventoryCount\",\"Label\":\"Inventory\"}]",
+                sortField: "products.Name"
+            )
         };
 
         foreach (var report in reports)
         {
-            if (existingNames.Contains(report.Name))
+            var reportName = report.GetFieldValue(ReportDefinitionFields.Name)?.ToString() ?? string.Empty;
+            if (existingNames.Contains(reportName))
                 continue;
 
             await DataStoreProvider.Current.SaveAsync(report.EntityTypeName, report).ConfigureAwait(false);
@@ -6137,7 +6128,7 @@ public sealed class RouteHandlers : IRouteHandlers
         ));
     }
 
-    private static async ValueTask<MfaChallenge?> GetMfaChallengeAsync(BmwContext context, CancellationToken cancellationToken = default)
+    private static async ValueTask<DataRecord?> GetMfaChallengeAsync(BmwContext context, CancellationToken cancellationToken = default)
     {
         var challengeId = context.GetCookie(MfaChallengeCookieName);
         if (string.IsNullOrWhiteSpace(challengeId))
@@ -6146,12 +6137,12 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!uint.TryParse(challengeId, out var parsedChallengeId))
             return null;
 
-        var challenge = (MfaChallenge?)(await DataStoreProvider.Current.LoadAsync("MfaChallenge", parsedChallengeId, cancellationToken).ConfigureAwait(false));
-        if (challenge == null || challenge.IsExpired())
+        var challenge = await DataStoreProvider.Current.LoadAsync("MfaChallenge", parsedChallengeId, cancellationToken).ConfigureAwait(false);
+        if (challenge == null || MfaChallengeHelper.IsExpired(challenge))
         {
             if (challenge != null)
             {
-                challenge.IsUsed = true;
+                MfaChallengeHelper.SetIsUsed(challenge, true);
                 await DataStoreProvider.Current.SaveAsync(challenge.EntityTypeName, challenge, cancellationToken).ConfigureAwait(false);
             }
             context.DeleteCookie(MfaChallengeCookieName);

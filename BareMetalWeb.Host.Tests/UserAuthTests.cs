@@ -30,13 +30,11 @@ public class UserAuthTests : IDisposable
         // Arrange
         EnsureStore();
         var rawKey = "test-bearer-key-12345";
-        var principal = new SystemPrincipal
-        {
-            UserName = "chatgpt",
-            DisplayName = "ChatGPT",
-            IsActive = true
-        };
-        principal.AddApiKey(rawKey, iterations: 1);
+        var principal = SystemEntitySchemas.SystemPrincipal.CreateRecord();
+        principal.SetFieldValue(UserFields.UserName, "chatgpt");
+        principal.SetFieldValue(UserFields.DisplayName, "ChatGPT");
+        principal.SetFieldValue(UserFields.IsActive, true);
+        SystemPrincipalHelper.AddApiKey(principal, rawKey, iterations: 1);
         await DataStoreProvider.Current.SaveAsync(principal.EntityTypeName, principal);
 
         var context = new DefaultHttpContext();
@@ -48,9 +46,7 @@ public class UserAuthTests : IDisposable
 
         // Assert
         Assert.NotNull(user);
-        // DataScaffold metadata isn't registered in unit tests, so use the typed property
-        var resolved = Assert.IsType<SystemPrincipal>(user);
-        Assert.Equal("chatgpt", resolved.UserName);
+        Assert.Equal("chatgpt", user.GetFieldValue(UserFields.UserName)?.ToString());
     }
 
     [Fact]
@@ -59,13 +55,11 @@ public class UserAuthTests : IDisposable
         // Arrange
         EnsureStore();
         var rawKey = "bearer-valid-key-abc";
-        var principal = new SystemPrincipal
-        {
-            UserName = "external-client",
-            DisplayName = "External Client",
-            IsActive = true
-        };
-        principal.AddApiKey(rawKey, iterations: 1);
+        var principal = SystemEntitySchemas.SystemPrincipal.CreateRecord();
+        principal.SetFieldValue(UserFields.UserName, "external-client");
+        principal.SetFieldValue(UserFields.DisplayName, "External Client");
+        principal.SetFieldValue(UserFields.IsActive, true);
+        SystemPrincipalHelper.AddApiKey(principal, rawKey, iterations: 1);
         await DataStoreProvider.Current.SaveAsync(principal.EntityTypeName, principal);
 
         var context = new DefaultHttpContext();
@@ -116,13 +110,11 @@ public class UserAuthTests : IDisposable
         // Arrange
         EnsureStore();
         var rawKey = "apikey-header-test-999";
-        var principal = new SystemPrincipal
-        {
-            UserName = "cli-client",
-            DisplayName = "CLI Client",
-            IsActive = true
-        };
-        principal.AddApiKey(rawKey, iterations: 1);
+        var principal = SystemEntitySchemas.SystemPrincipal.CreateRecord();
+        principal.SetFieldValue(UserFields.UserName, "cli-client");
+        principal.SetFieldValue(UserFields.DisplayName, "CLI Client");
+        principal.SetFieldValue(UserFields.IsActive, true);
+        SystemPrincipalHelper.AddApiKey(principal, rawKey, iterations: 1);
         await DataStoreProvider.Current.SaveAsync(principal.EntityTypeName, principal);
 
         var context = new DefaultHttpContext();
@@ -142,13 +134,11 @@ public class UserAuthTests : IDisposable
         // Arrange
         EnsureStore();
         var rawKey = "inactive-principal-key";
-        var principal = new SystemPrincipal
-        {
-            UserName = "inactive-client",
-            DisplayName = "Inactive Client",
-            IsActive = false
-        };
-        principal.AddApiKey(rawKey, iterations: 1);
+        var principal = SystemEntitySchemas.SystemPrincipal.CreateRecord();
+        principal.SetFieldValue(UserFields.UserName, "inactive-client");
+        principal.SetFieldValue(UserFields.DisplayName, "Inactive Client");
+        principal.SetFieldValue(UserFields.IsActive, false);
+        SystemPrincipalHelper.AddApiKey(principal, rawKey, iterations: 1);
         await DataStoreProvider.Current.SaveAsync(principal.EntityTypeName, principal);
 
         var context = new DefaultHttpContext();
@@ -178,26 +168,24 @@ public class UserAuthTests : IDisposable
         // Arrange
         EnsureStore();
         var now = DateTime.UtcNow;
-        var session = new UserSession
-        {
-            UserId = "user123",
-            UserName = "testuser",
-            DisplayName = "Test User",
-            Permissions = Array.Empty<string>(),
-            IssuedUtc = now.AddHours(-2),
-            LastSeenUtc = now.AddHours(-1),
-            ExpiresUtc = now.AddHours(6), // 8 hours from issue - 2 hours ago = 6 hours left
-            RememberMe = false,
-            IsRevoked = false,
-            CreatedBy = "testuser",
-            UpdatedBy = "testuser"
-        };
+        var session = SystemEntitySchemas.UserSession.CreateRecord();
+        UserSessionHelper.SetUserId(session, "user123");
+        UserSessionHelper.SetUserName(session, "testuser");
+        UserSessionHelper.SetDisplayName(session, "Test User");
+        UserSessionHelper.SetPermissions(session, Array.Empty<string>());
+        UserSessionHelper.SetIssuedUtc(session, now.AddHours(-2));
+        UserSessionHelper.SetLastSeenUtc(session, now.AddHours(-1));
+        UserSessionHelper.SetExpiresUtc(session, now.AddHours(6)); // 8 hours from issue - 2 hours ago = 6 hours left
+        UserSessionHelper.SetRememberMe(session, false);
+        UserSessionHelper.SetIsRevoked(session, false);
+        session.CreatedBy = "testuser";
+        session.UpdatedBy = "testuser";
 
         await DataStoreProvider.Current.SaveAsync(session.EntityTypeName, session);
 
         var context = CreateHttpContext(session.Key.ToString());
-        var originalExpiresUtc = session.ExpiresUtc;
-        var originalLastSeenUtc = session.LastSeenUtc;
+        var originalExpiresUtc = UserSessionHelper.GetExpiresUtc(session);
+        var originalLastSeenUtc = UserSessionHelper.GetLastSeenUtc(session);
 
         // Act
         var result = await UserAuth.GetSessionAsync(context.ToBmw());
@@ -207,17 +195,17 @@ public class UserAuthTests : IDisposable
         Assert.Equal(session.Key, result.Key);
 
         // Reload session to check if it was updated
-        var updatedSession = (UserSession?)(await DataStoreProvider.Current.LoadAsync("UserSession", session.Key));
+        var updatedSession = await DataStoreProvider.Current.LoadAsync("UserSession", session.Key);
         Assert.NotNull(updatedSession);
         
         // LastSeenUtc should be updated to now (or very close)
-        Assert.True(updatedSession.LastSeenUtc > originalLastSeenUtc);
-        Assert.True((DateTime.UtcNow - updatedSession.LastSeenUtc).TotalSeconds < 2); // within 2 seconds
+        Assert.True(UserSessionHelper.GetLastSeenUtc(updatedSession) > originalLastSeenUtc);
+        Assert.True((DateTime.UtcNow - UserSessionHelper.GetLastSeenUtc(updatedSession)).TotalSeconds < 2); // within 2 seconds
         
         // ExpiresUtc should be extended (8 hours from LastSeenUtc for non-RememberMe)
-        Assert.True(updatedSession.ExpiresUtc > originalExpiresUtc);
-        var expectedExpiration = updatedSession.LastSeenUtc.AddHours(8);
-        Assert.True((updatedSession.ExpiresUtc - expectedExpiration).Duration().TotalSeconds < 2); // within 2 seconds
+        Assert.True(UserSessionHelper.GetExpiresUtc(updatedSession) > originalExpiresUtc);
+        var expectedExpiration = UserSessionHelper.GetLastSeenUtc(updatedSession).AddHours(8);
+        Assert.True((UserSessionHelper.GetExpiresUtc(updatedSession) - expectedExpiration).Duration().TotalSeconds < 2); // within 2 seconds
     }
 
     [Fact]
@@ -226,25 +214,23 @@ public class UserAuthTests : IDisposable
         // Arrange
         EnsureStore();
         var now = DateTime.UtcNow;
-        var session = new UserSession
-        {
-            UserId = "user123",
-            UserName = "testuser",
-            DisplayName = "Test User",
-            Permissions = Array.Empty<string>(),
-            IssuedUtc = now.AddDays(-5),
-            LastSeenUtc = now.AddDays(-1),
-            ExpiresUtc = now.AddDays(25), // 30 days from issue - 5 days ago = 25 days left
-            RememberMe = true,
-            IsRevoked = false,
-            CreatedBy = "testuser",
-            UpdatedBy = "testuser"
-        };
+        var session = SystemEntitySchemas.UserSession.CreateRecord();
+        UserSessionHelper.SetUserId(session, "user123");
+        UserSessionHelper.SetUserName(session, "testuser");
+        UserSessionHelper.SetDisplayName(session, "Test User");
+        UserSessionHelper.SetPermissions(session, Array.Empty<string>());
+        UserSessionHelper.SetIssuedUtc(session, now.AddDays(-5));
+        UserSessionHelper.SetLastSeenUtc(session, now.AddDays(-1));
+        UserSessionHelper.SetExpiresUtc(session, now.AddDays(25)); // 30 days from issue - 5 days ago = 25 days left
+        UserSessionHelper.SetRememberMe(session, true);
+        UserSessionHelper.SetIsRevoked(session, false);
+        session.CreatedBy = "testuser";
+        session.UpdatedBy = "testuser";
 
         await DataStoreProvider.Current.SaveAsync(session.EntityTypeName, session);
 
         var context = CreateHttpContext(session.Key.ToString());
-        var originalExpiresUtc = session.ExpiresUtc;
+        var originalExpiresUtc = UserSessionHelper.GetExpiresUtc(session);
 
         // Act
         var result = await UserAuth.GetSessionAsync(context.ToBmw());
@@ -253,13 +239,13 @@ public class UserAuthTests : IDisposable
         Assert.NotNull(result);
 
         // Reload session to check if it was updated
-        var updatedSession = (UserSession?)(await DataStoreProvider.Current.LoadAsync("UserSession", session.Key));
+        var updatedSession = await DataStoreProvider.Current.LoadAsync("UserSession", session.Key);
         Assert.NotNull(updatedSession);
         
         // ExpiresUtc should be extended (30 days from LastSeenUtc for RememberMe)
-        Assert.True(updatedSession.ExpiresUtc > originalExpiresUtc);
-        var expectedExpiration = updatedSession.LastSeenUtc.AddDays(30);
-        Assert.True((updatedSession.ExpiresUtc - expectedExpiration).Duration().TotalSeconds < 2); // within 2 seconds
+        Assert.True(UserSessionHelper.GetExpiresUtc(updatedSession) > originalExpiresUtc);
+        var expectedExpiration = UserSessionHelper.GetLastSeenUtc(updatedSession).AddDays(30);
+        Assert.True((UserSessionHelper.GetExpiresUtc(updatedSession) - expectedExpiration).Duration().TotalSeconds < 2); // within 2 seconds
     }
 
     [Fact]
@@ -268,26 +254,24 @@ public class UserAuthTests : IDisposable
         // Arrange
         EnsureStore();
         var now = DateTime.UtcNow;
-        var session = new UserSession
-        {
-            UserId = "user123",
-            UserName = "testuser",
-            DisplayName = "Test User",
-            Permissions = Array.Empty<string>(),
-            IssuedUtc = now.AddHours(-2),
-            LastSeenUtc = now.AddHours(-1),
-            ExpiresUtc = now.AddHours(6),
-            RememberMe = false,
-            IsRevoked = false,
-            CreatedBy = "testuser",
-            UpdatedBy = "testuser"
-        };
+        var session = SystemEntitySchemas.UserSession.CreateRecord();
+        UserSessionHelper.SetUserId(session, "user123");
+        UserSessionHelper.SetUserName(session, "testuser");
+        UserSessionHelper.SetDisplayName(session, "Test User");
+        UserSessionHelper.SetPermissions(session, Array.Empty<string>());
+        UserSessionHelper.SetIssuedUtc(session, now.AddHours(-2));
+        UserSessionHelper.SetLastSeenUtc(session, now.AddHours(-1));
+        UserSessionHelper.SetExpiresUtc(session, now.AddHours(6));
+        UserSessionHelper.SetRememberMe(session, false);
+        UserSessionHelper.SetIsRevoked(session, false);
+        session.CreatedBy = "testuser";
+        session.UpdatedBy = "testuser";
 
         DataStoreProvider.Current.Save(session.EntityTypeName, session);
 
         var context = CreateHttpContext(session.Key.ToString());
-        var originalExpiresUtc = session.ExpiresUtc;
-        var originalLastSeenUtc = session.LastSeenUtc;
+        var originalExpiresUtc = UserSessionHelper.GetExpiresUtc(session);
+        var originalLastSeenUtc = UserSessionHelper.GetLastSeenUtc(session);
 
         // Act
         var result = UserAuth.GetSession(context.ToBmw());
@@ -297,14 +281,14 @@ public class UserAuthTests : IDisposable
         Assert.Equal(session.Key, result.Key);
 
         // Reload session to check if it was updated
-        var updatedSession = (UserSession?)DataStoreProvider.Current.Load("UserSession", session.Key);
+        var updatedSession = DataStoreProvider.Current.Load("UserSession", session.Key);
         Assert.NotNull(updatedSession);
         
         // LastSeenUtc should be updated
-        Assert.True(updatedSession.LastSeenUtc > originalLastSeenUtc);
+        Assert.True(UserSessionHelper.GetLastSeenUtc(updatedSession) > originalLastSeenUtc);
         
         // ExpiresUtc should be extended
-        Assert.True(updatedSession.ExpiresUtc > originalExpiresUtc);
+        Assert.True(UserSessionHelper.GetExpiresUtc(updatedSession) > originalExpiresUtc);
     }
 
     [Fact]
@@ -313,20 +297,18 @@ public class UserAuthTests : IDisposable
         // Arrange
         EnsureStore();
         var now = DateTime.UtcNow;
-        var session = new UserSession
-        {
-            UserId = "user123",
-            UserName = "testuser",
-            DisplayName = "Test User",
-            Permissions = Array.Empty<string>(),
-            IssuedUtc = now.AddHours(-10),
-            LastSeenUtc = now.AddHours(-9),
-            ExpiresUtc = now.AddHours(-1), // Expired 1 hour ago
-            RememberMe = false,
-            IsRevoked = false,
-            CreatedBy = "testuser",
-            UpdatedBy = "testuser"
-        };
+        var session = SystemEntitySchemas.UserSession.CreateRecord();
+        UserSessionHelper.SetUserId(session, "user123");
+        UserSessionHelper.SetUserName(session, "testuser");
+        UserSessionHelper.SetDisplayName(session, "Test User");
+        UserSessionHelper.SetPermissions(session, Array.Empty<string>());
+        UserSessionHelper.SetIssuedUtc(session, now.AddHours(-10));
+        UserSessionHelper.SetLastSeenUtc(session, now.AddHours(-9));
+        UserSessionHelper.SetExpiresUtc(session, now.AddHours(-1)); // Expired 1 hour ago
+        UserSessionHelper.SetRememberMe(session, false);
+        UserSessionHelper.SetIsRevoked(session, false);
+        session.CreatedBy = "testuser";
+        session.UpdatedBy = "testuser";
 
         await DataStoreProvider.Current.SaveAsync(session.EntityTypeName, session);
 
@@ -339,9 +321,9 @@ public class UserAuthTests : IDisposable
         Assert.Null(result);
 
         // Session should be marked as revoked
-        var updatedSession = (UserSession?)(await DataStoreProvider.Current.LoadAsync("UserSession", session.Key));
+        var updatedSession = await DataStoreProvider.Current.LoadAsync("UserSession", session.Key);
         Assert.NotNull(updatedSession);
-        Assert.True(updatedSession.IsRevoked);
+        Assert.True(UserSessionHelper.IsRevoked(updatedSession));
     }
 
     [Fact]
@@ -365,25 +347,23 @@ public class UserAuthTests : IDisposable
         EnsureStore();
         var now = DateTime.UtcNow;
         // Session was just created: ExpiresUtc is essentially now + 8h (< 1 minute elapsed since last extension)
-        var session = new UserSession
-        {
-            UserId = "user123",
-            UserName = "testuser",
-            DisplayName = "Test User",
-            Permissions = Array.Empty<string>(),
-            IssuedUtc = now,
-            LastSeenUtc = now,
-            ExpiresUtc = now.AddHours(8), // Just extended; newExpiry - ExpiresUtc ≈ 0 < 1 minute
-            RememberMe = false,
-            IsRevoked = false,
-            CreatedBy = "testuser",
-            UpdatedBy = "testuser"
-        };
+        var session = SystemEntitySchemas.UserSession.CreateRecord();
+        UserSessionHelper.SetUserId(session, "user123");
+        UserSessionHelper.SetUserName(session, "testuser");
+        UserSessionHelper.SetDisplayName(session, "Test User");
+        UserSessionHelper.SetPermissions(session, Array.Empty<string>());
+        UserSessionHelper.SetIssuedUtc(session, now);
+        UserSessionHelper.SetLastSeenUtc(session, now);
+        UserSessionHelper.SetExpiresUtc(session, now.AddHours(8)); // Just extended; newExpiry - ExpiresUtc ≈ 0 < 1 minute
+        UserSessionHelper.SetRememberMe(session, false);
+        UserSessionHelper.SetIsRevoked(session, false);
+        session.CreatedBy = "testuser";
+        session.UpdatedBy = "testuser";
 
         await DataStoreProvider.Current.SaveAsync(session.EntityTypeName, session);
 
         var context = CreateHttpContext(session.Key.ToString());
-        var originalExpiresUtc = session.ExpiresUtc;
+        var originalExpiresUtc = UserSessionHelper.GetExpiresUtc(session);
 
         // Act
         var result = await UserAuth.GetSessionAsync(context.ToBmw());
@@ -393,9 +373,9 @@ public class UserAuthTests : IDisposable
         Assert.Equal(session.Key, result.Key);
 
         // Session should NOT have been re-saved because the extension gain is < 1 minute
-        var storedSession = (UserSession?)(await DataStoreProvider.Current.LoadAsync("UserSession", session.Key));
+        var storedSession = await DataStoreProvider.Current.LoadAsync("UserSession", session.Key);
         Assert.NotNull(storedSession);
-        Assert.Equal(originalExpiresUtc, storedSession.ExpiresUtc);
+        Assert.Equal(originalExpiresUtc, UserSessionHelper.GetExpiresUtc(storedSession));
     }
 
     [Fact]
@@ -404,25 +384,23 @@ public class UserAuthTests : IDisposable
         // Arrange
         EnsureStore();
         var now = DateTime.UtcNow;
-        var session = new UserSession
-        {
-            UserId = "user123",
-            UserName = "testuser",
-            DisplayName = "Test User",
-            Permissions = Array.Empty<string>(),
-            IssuedUtc = now,
-            LastSeenUtc = now,
-            ExpiresUtc = now.AddHours(8),
-            RememberMe = false,
-            IsRevoked = false,
-            CreatedBy = "testuser",
-            UpdatedBy = "testuser"
-        };
+        var session = SystemEntitySchemas.UserSession.CreateRecord();
+        UserSessionHelper.SetUserId(session, "user123");
+        UserSessionHelper.SetUserName(session, "testuser");
+        UserSessionHelper.SetDisplayName(session, "Test User");
+        UserSessionHelper.SetPermissions(session, Array.Empty<string>());
+        UserSessionHelper.SetIssuedUtc(session, now);
+        UserSessionHelper.SetLastSeenUtc(session, now);
+        UserSessionHelper.SetExpiresUtc(session, now.AddHours(8));
+        UserSessionHelper.SetRememberMe(session, false);
+        UserSessionHelper.SetIsRevoked(session, false);
+        session.CreatedBy = "testuser";
+        session.UpdatedBy = "testuser";
 
         DataStoreProvider.Current.Save(session.EntityTypeName, session);
 
         var context = CreateHttpContext(session.Key.ToString());
-        var originalExpiresUtc = session.ExpiresUtc;
+        var originalExpiresUtc = UserSessionHelper.GetExpiresUtc(session);
 
         // Act
         var result = UserAuth.GetSession(context.ToBmw());
@@ -431,9 +409,9 @@ public class UserAuthTests : IDisposable
         Assert.NotNull(result);
 
         // Session should NOT have been re-saved because the extension gain is < 1 minute
-        var storedSession = (UserSession?)DataStoreProvider.Current.Load("UserSession", session.Key);
+        var storedSession = DataStoreProvider.Current.Load("UserSession", session.Key);
         Assert.NotNull(storedSession);
-        Assert.Equal(originalExpiresUtc, storedSession.ExpiresUtc);
+        Assert.Equal(originalExpiresUtc, UserSessionHelper.GetExpiresUtc(storedSession));
     }
 
     [Fact]
@@ -441,33 +419,29 @@ public class UserAuthTests : IDisposable
     {
         // Arrange — two users with distinct credentials
         EnsureStore();
-        var root = new User
-        {
-            Key = 1,
-            UserName = "root",
-            DisplayName = "Root User",
-            Email = "root@example.com",
-            Permissions = new[] { "admin", "monitoring" },
-            IsActive = true
-        };
-        root.SetPassword("rootpass");
+        var root = SystemEntitySchemas.User.CreateRecord();
+        root.Key = 1;
+        root.SetFieldValue(UserFields.UserName, "root");
+        root.SetFieldValue(UserFields.DisplayName, "Root User");
+        root.SetFieldValue(UserFields.Email, "root@example.com");
+        root.SetFieldValue(UserFields.Permissions, new[] { "admin", "monitoring" });
+        root.SetFieldValue(UserFields.IsActive, true);
+        UserAuth.SetPassword(root, "rootpass");
         await DataStoreProvider.Current.SaveAsync(root.EntityTypeName, root);
 
-        var secondUser = new User
-        {
-            Key = 2,
-            UserName = "son",
-            DisplayName = "Son User",
-            Email = "son@example.com",
-            Permissions = new[] { "user" },
-            IsActive = true
-        };
-        secondUser.SetPassword("sonpass");
+        var secondUser = SystemEntitySchemas.User.CreateRecord();
+        secondUser.Key = 2;
+        secondUser.SetFieldValue(UserFields.UserName, "son");
+        secondUser.SetFieldValue(UserFields.DisplayName, "Son User");
+        secondUser.SetFieldValue(UserFields.Email, "son@example.com");
+        secondUser.SetFieldValue(UserFields.Permissions, new[] { "user" });
+        secondUser.SetFieldValue(UserFields.IsActive, true);
+        UserAuth.SetPassword(secondUser, "sonpass");
         await DataStoreProvider.Current.SaveAsync(secondUser.EntityTypeName, secondUser);
 
         // Act — look up by username
-        var foundRoot = await Users.FindByEmailOrUserNameAsync("root");
-        var foundSon = await Users.FindByEmailOrUserNameAsync("son");
+        var foundRoot = await UserAuthHelper.FindUserByEmailOrUserNameAsync("root");
+        var foundSon = await UserAuthHelper.FindUserByEmailOrUserNameAsync("son");
 
         // Assert — each lookup returns the correct user
         Assert.NotNull(foundRoot);
@@ -484,33 +458,29 @@ public class UserAuthTests : IDisposable
     {
         // Arrange — two users with distinct credentials
         EnsureStore();
-        var root = new User
-        {
-            Key = 1,
-            UserName = "root",
-            DisplayName = "Root User",
-            Email = "root@example.com",
-            Permissions = new[] { "admin", "monitoring" },
-            IsActive = true
-        };
-        root.SetPassword("rootpass");
+        var root = SystemEntitySchemas.User.CreateRecord();
+        root.Key = 1;
+        root.SetFieldValue(UserFields.UserName, "root");
+        root.SetFieldValue(UserFields.DisplayName, "Root User");
+        root.SetFieldValue(UserFields.Email, "root@example.com");
+        root.SetFieldValue(UserFields.Permissions, new[] { "admin", "monitoring" });
+        root.SetFieldValue(UserFields.IsActive, true);
+        UserAuth.SetPassword(root, "rootpass");
         await DataStoreProvider.Current.SaveAsync(root.EntityTypeName, root);
 
-        var secondUser = new User
-        {
-            Key = 2,
-            UserName = "son",
-            DisplayName = "Son User",
-            Email = "son@example.com",
-            Permissions = new[] { "user" },
-            IsActive = true
-        };
-        secondUser.SetPassword("sonpass");
+        var secondUser = SystemEntitySchemas.User.CreateRecord();
+        secondUser.Key = 2;
+        secondUser.SetFieldValue(UserFields.UserName, "son");
+        secondUser.SetFieldValue(UserFields.DisplayName, "Son User");
+        secondUser.SetFieldValue(UserFields.Email, "son@example.com");
+        secondUser.SetFieldValue(UserFields.Permissions, new[] { "user" });
+        secondUser.SetFieldValue(UserFields.IsActive, true);
+        UserAuth.SetPassword(secondUser, "sonpass");
         await DataStoreProvider.Current.SaveAsync(secondUser.EntityTypeName, secondUser);
 
         // Act — look up by email
-        var foundRoot = await Users.FindByEmailOrUserNameAsync("root@example.com");
-        var foundSon = await Users.FindByEmailOrUserNameAsync("son@example.com");
+        var foundRoot = await UserAuthHelper.FindUserByEmailOrUserNameAsync("root@example.com");
+        var foundSon = await UserAuthHelper.FindUserByEmailOrUserNameAsync("son@example.com");
 
         // Assert — each lookup returns the correct user
         Assert.NotNull(foundRoot);
@@ -526,32 +496,28 @@ public class UserAuthTests : IDisposable
         // Arrange — simulates the reported bug:
         // a second user is added; root must still be found by its own credentials
         EnsureStore();
-        var root = new User
-        {
-            Key = 1,
-            UserName = "admin",
-            DisplayName = "Administrator",
-            Email = "admin@example.com",
-            Permissions = new[] { "admin", "monitoring" },
-            IsActive = true
-        };
-        root.SetPassword("AdminPass1!");
+        var root = SystemEntitySchemas.User.CreateRecord();
+        root.Key = 1;
+        root.SetFieldValue(UserFields.UserName, "admin");
+        root.SetFieldValue(UserFields.DisplayName, "Administrator");
+        root.SetFieldValue(UserFields.Email, "admin@example.com");
+        root.SetFieldValue(UserFields.Permissions, new[] { "admin", "monitoring" });
+        root.SetFieldValue(UserFields.IsActive, true);
+        UserAuth.SetPassword(root, "AdminPass1!");
         await DataStoreProvider.Current.SaveAsync(root.EntityTypeName, root);
 
-        var secondUser = new User
-        {
-            Key = 2,
-            UserName = "son",
-            DisplayName = "Son",
-            Email = "son@example.com",
-            Permissions = new[] { "user" },
-            IsActive = true
-        };
-        secondUser.SetPassword("SonPass1!");
+        var secondUser = SystemEntitySchemas.User.CreateRecord();
+        secondUser.Key = 2;
+        secondUser.SetFieldValue(UserFields.UserName, "son");
+        secondUser.SetFieldValue(UserFields.DisplayName, "Son");
+        secondUser.SetFieldValue(UserFields.Email, "son@example.com");
+        secondUser.SetFieldValue(UserFields.Permissions, new[] { "user" });
+        secondUser.SetFieldValue(UserFields.IsActive, true);
+        UserAuth.SetPassword(secondUser, "SonPass1!");
         await DataStoreProvider.Current.SaveAsync(secondUser.EntityTypeName, secondUser);
 
         // Act — root login lookup after second user exists
-        var found = await Users.FindByEmailOrUserNameAsync("admin");
+        var found = await UserAuthHelper.FindUserByEmailOrUserNameAsync("admin");
 
         // Assert — root is found and its password still verifies correctly
         Assert.NotNull(found);
@@ -565,16 +531,14 @@ public class UserAuthTests : IDisposable
     {
         // Arrange
         EnsureStore();
-        var user = new User
-        {
-            UserName = "existing",
-            Email = "existing@example.com",
-            IsActive = true
-        };
+        var user = SystemEntitySchemas.User.CreateRecord();
+        user.SetFieldValue(UserFields.UserName, "existing");
+        user.SetFieldValue(UserFields.Email, "existing@example.com");
+        user.SetFieldValue(UserFields.IsActive, true);
         await DataStoreProvider.Current.SaveAsync(user.EntityTypeName, user);
 
         // Act
-        var found = await Users.FindByUserNameAsync("nonexistent");
+        var found = await UserAuthHelper.FindUserByUserNameAsync("nonexistent");
 
         // Assert
         Assert.Null(found);
@@ -585,16 +549,14 @@ public class UserAuthTests : IDisposable
     {
         // Arrange
         EnsureStore();
-        var user = new User
-        {
-            UserName = "test",
-            Email = "test@example.com",
-            IsActive = true
-        };
+        var user = SystemEntitySchemas.User.CreateRecord();
+        user.SetFieldValue(UserFields.UserName, "test");
+        user.SetFieldValue(UserFields.Email, "test@example.com");
+        user.SetFieldValue(UserFields.IsActive, true);
         await DataStoreProvider.Current.SaveAsync(user.EntityTypeName, user);
 
         // Act
-        var found = await Users.FindByEmailAsync("nobody@example.com");
+        var found = await UserAuthHelper.FindUserByEmailAsync("nobody@example.com");
 
         // Assert
         Assert.Null(found);
@@ -609,17 +571,15 @@ public class UserAuthTests : IDisposable
     {
         // Arrange – simulate the state the clone operation would create
         EnsureStore();
-        var original = new User
-        {
-            UserName = "admin",
-            Email = "admin@example.com",
-            IsActive = true
-        };
-        original.SetPassword("AdminPass1!");
+        var original = SystemEntitySchemas.User.CreateRecord();
+        original.SetFieldValue(UserFields.UserName, "admin");
+        original.SetFieldValue(UserFields.Email, "admin@example.com");
+        original.SetFieldValue(UserFields.IsActive, true);
+        UserAuth.SetPassword(original, "AdminPass1!");
         await DataStoreProvider.Current.SaveAsync(original.EntityTypeName, original);
 
         // Act – the same username already exists; uniqueness check must catch it
-        var exists = await Users.ExistsByEmailOrUserNameAsync("admin");
+        var exists = await UserAuthHelper.ExistsByEmailOrUserNameAsync("admin");
 
         // Assert – the guard should detect the conflict so no clone is saved
         Assert.True(exists);
@@ -630,17 +590,15 @@ public class UserAuthTests : IDisposable
     {
         // Arrange
         EnsureStore();
-        var original = new User
-        {
-            UserName = "alice",
-            Email = "alice@example.com",
-            IsActive = true
-        };
-        original.SetPassword("AlicePass1!");
+        var original = SystemEntitySchemas.User.CreateRecord();
+        original.SetFieldValue(UserFields.UserName, "alice");
+        original.SetFieldValue(UserFields.Email, "alice@example.com");
+        original.SetFieldValue(UserFields.IsActive, true);
+        UserAuth.SetPassword(original, "AlicePass1!");
         await DataStoreProvider.Current.SaveAsync(original.EntityTypeName, original);
 
         // Act
-        var exists = await Users.ExistsByEmailOrUserNameAsync("alice@example.com");
+        var exists = await UserAuthHelper.ExistsByEmailOrUserNameAsync("alice@example.com");
 
         // Assert
         Assert.True(exists);
@@ -653,17 +611,15 @@ public class UserAuthTests : IDisposable
         // this guards against regressions where a phantom duplicate (e.g. from a bad clone)
         // could shadow the real record and cause login to fail.
         EnsureStore();
-        var original = new User
-        {
-            UserName = "admin",
-            Email = "admin@example.com",
-            IsActive = true
-        };
-        original.SetPassword("CorrectPass1!");
+        var original = SystemEntitySchemas.User.CreateRecord();
+        original.SetFieldValue(UserFields.UserName, "admin");
+        original.SetFieldValue(UserFields.Email, "admin@example.com");
+        original.SetFieldValue(UserFields.IsActive, true);
+        UserAuth.SetPassword(original, "CorrectPass1!");
         await DataStoreProvider.Current.SaveAsync(original.EntityTypeName, original);
 
         // Act – lookup must return the record whose password verifies
-        var found = await Users.FindByUserNameAsync("admin");
+        var found = await UserAuthHelper.FindUserByUserNameAsync("admin");
 
         // Assert
         Assert.NotNull(found);

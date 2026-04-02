@@ -22,33 +22,25 @@ internal static class HostGalleryTestFixture
 
         // Register system entities first (non-generic, schema-driven)
         DataScaffold.RegisterEntity("AppSetting", SystemEntitySchemas.AppSetting,
-            DataScaffold.BuildStoreHandlers("AppSetting", () => new AppSetting()));
+            DataScaffold.BuildStoreHandlers("AppSetting", () => SystemEntitySchemas.AppSetting.CreateRecord()));
         DataScaffold.RegisterEntity("User", SystemEntitySchemas.User,
-            DataScaffold.BuildStoreHandlers("User", () => new User()));
+            DataScaffold.BuildStoreHandlers("User", () => SystemEntitySchemas.User.CreateRecord()));
         DataScaffold.RegisterEntity("AuditEntry", SystemEntitySchemas.AuditEntry,
-            DataScaffold.BuildStoreHandlers("AuditEntry", () => new AuditEntry()));
+            DataScaffold.BuildStoreHandlers("AuditEntry", () => SystemEntitySchemas.AuditEntry.CreateRecord()));
         DataScaffold.RegisterEntity("ReportDefinition", SystemEntitySchemas.ReportDefinition,
-            DataScaffold.BuildStoreHandlers("ReportDefinition", () => new ReportDefinition()));
+            DataScaffold.BuildStoreHandlers("ReportDefinition", () => SystemEntitySchemas.ReportDefinition.CreateRecord()));
         DataScaffold.RegisterEntity("EntityDefinition", SystemEntitySchemas.EntityDefinition,
-            DataScaffold.BuildStoreHandlers("EntityDefinition", () => new EntityDefinition()));
+            DataScaffold.BuildStoreHandlers("EntityDefinition", () => SystemEntitySchemas.EntityDefinition.CreateRecord()));
         DataScaffold.RegisterEntity("FieldDefinition", SystemEntitySchemas.FieldDefinition,
-            DataScaffold.BuildStoreHandlers("FieldDefinition", () => new FieldDefinition()));
+            DataScaffold.BuildStoreHandlers("FieldDefinition", () => SystemEntitySchemas.FieldDefinition.CreateRecord()));
         DataScaffold.RegisterEntity("IndexDefinition", SystemEntitySchemas.IndexDefinition,
-            DataScaffold.BuildStoreHandlers("IndexDefinition", () => new IndexDefinition()));
+            DataScaffold.BuildStoreHandlers("IndexDefinition", () => SystemEntitySchemas.IndexDefinition.CreateRecord()));
         DataScaffold.RegisterEntity("ActionDefinition", SystemEntitySchemas.ActionDefinition,
-            DataScaffold.BuildStoreHandlers("ActionDefinition", () => new ActionDefinition()));
+            DataScaffold.BuildStoreHandlers("ActionDefinition", () => SystemEntitySchemas.ActionDefinition.CreateRecord()));
         DataScaffold.RegisterEntity("ActionCommandDefinition", SystemEntitySchemas.ActionCommandDefinition,
-            DataScaffold.BuildStoreHandlers("ActionCommandDefinition", () => new ActionCommandDefinition()));
+            DataScaffold.BuildStoreHandlers("ActionCommandDefinition", () => SystemEntitySchemas.ActionCommandDefinition.CreateRecord()));
 
-        BinaryObjectSerializer.RegisterKnownType(typeof(AppSetting), () => new AppSetting());
-        BinaryObjectSerializer.RegisterKnownType(typeof(User), () => new User());
-        BinaryObjectSerializer.RegisterKnownType(typeof(AuditEntry), () => new AuditEntry());
-        BinaryObjectSerializer.RegisterKnownType(typeof(ReportDefinition), () => new ReportDefinition());
-        BinaryObjectSerializer.RegisterKnownType(typeof(EntityDefinition), () => new EntityDefinition());
-        BinaryObjectSerializer.RegisterKnownType(typeof(FieldDefinition), () => new FieldDefinition());
-        BinaryObjectSerializer.RegisterKnownType(typeof(IndexDefinition), () => new IndexDefinition());
-        BinaryObjectSerializer.RegisterKnownType(typeof(ActionDefinition), () => new ActionDefinition());
-        BinaryObjectSerializer.RegisterKnownType(typeof(ActionCommandDefinition), () => new ActionCommandDefinition());
+        BinaryObjectSerializer.RegisterKnownType(typeof(DataRecord), () => new DataRecord());
 
         var compiler = new RuntimeEntityCompiler();
         var walProvider = new WalDataProvider(tempDir);
