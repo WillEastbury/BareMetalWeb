@@ -2,7 +2,7 @@ using System;
 
 namespace BareMetalWeb.Data;
 
-public sealed class DeviceCodeAuth : BaseDataObject
+public sealed class DeviceCodeAuth : DataRecord
 {
     public override string EntityTypeName => "DeviceCodeAuth";
     private const int Ord_UserCode = BaseFieldCount + 0;

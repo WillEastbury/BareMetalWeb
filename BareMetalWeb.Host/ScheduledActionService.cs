@@ -70,7 +70,7 @@ public sealed class ScheduledActionService
             return;
 
         var schedulesResult = await schedMeta.Handlers.QueryAsync(null, ct);
-        var schedules = new List<BaseDataObject>();
+        var schedules = new List<DataRecord>();
         foreach (var s in schedulesResult)
             schedules.Add(s);
 
@@ -118,7 +118,7 @@ public sealed class ScheduledActionService
                     : new QueryDefinition();
 
                 var queryResults = await meta.Handlers.QueryAsync(query, ct);
-                var items = new List<BaseDataObject>();
+                var items = new List<DataRecord>();
                 foreach (var item in queryResults)
                     items.Add(item);
                 int count = 0;

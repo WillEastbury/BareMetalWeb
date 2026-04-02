@@ -40,7 +40,7 @@ public sealed class ViewExecutionPlan
     /// <summary>
     /// Output column descriptors, in projection order.
     /// Each entry contains the entity slug, field name, display alias and a compiled getter delegate
-    /// that extracts the field value from a <see cref="BaseDataObject"/> without reflection.
+    /// that extracts the field value from a <see cref="DataRecord"/> without reflection.
     /// </summary>
     public ViewProjectionEntry[] ProjectionMap { get; init; } = Array.Empty<ViewProjectionEntry>();
 
@@ -87,7 +87,7 @@ public sealed class ViewProjectionEntry
     /// <summary>Display alias / column header.</summary>
     public string Alias { get; init; } = string.Empty;
     /// <summary>
-    /// Compiled getter that extracts this field's value from a <see cref="BaseDataObject"/>
+    /// Compiled getter that extracts this field's value from a <see cref="DataRecord"/>
     /// without reflection.  Null when the field could not be resolved at compile time.
     /// </summary>
     public Func<object, object?>? Getter { get; init; }

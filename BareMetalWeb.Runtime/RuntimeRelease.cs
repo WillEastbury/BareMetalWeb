@@ -8,7 +8,7 @@ namespace BareMetalWeb.Runtime;
 /// Tracks version, architecture, SHA256 hash, and ring targeting.
 /// </summary>
 [DataEntity("Runtime Releases", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1020)]
-public class RuntimeRelease : BaseDataObject
+public class RuntimeRelease : DataRecord
 {
     public override string EntityTypeName => "RuntimeRelease";
     private new const int Ord_Version = BaseFieldCount + 0;

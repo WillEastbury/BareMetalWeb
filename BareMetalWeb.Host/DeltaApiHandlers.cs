@@ -316,7 +316,7 @@ public static class DeltaApiHandlers
         };
     }
 
-    private static void WriteEntityJson(Utf8JsonWriter writer, BaseDataObject entity, EntityLayout layout)
+    private static void WriteEntityJson(Utf8JsonWriter writer, DataRecord entity, EntityLayout layout)
     {
         writer.WriteStartObject();
         foreach (var field in layout.Fields)

@@ -8,7 +8,7 @@ namespace BareMetalWeb.Runtime;
 /// BitNet inference engine, maintaining context across multiple turns.
 /// </summary>
 [DataEntity("Chat Sessions", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1010)]
-public class ChatSession : BaseDataObject
+public class ChatSession : DataRecord
 {
     public override string EntityTypeName => "ChatSession";
     private const int Ord_UserName = BaseFieldCount + 0;

@@ -40,7 +40,7 @@ internal static class ColumnQueryExecutor
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static bool IsEligible<T>(IReadOnlyList<T> rows, QueryDefinition? query)
-        where T : BaseDataObject
+        where T : DataRecord
         => query != null
            && rows.Count >= VectorizationThreshold
            && query.Groups.Count == 0
@@ -56,7 +56,7 @@ internal static class ColumnQueryExecutor
         QueryDefinition query,
         int skip = 0,
         int top = int.MaxValue)
-        where T : BaseDataObject
+        where T : DataRecord
     {
         var meta = DataScaffold.GetEntityByName(entityName);
         if (meta == null)
@@ -103,7 +103,7 @@ internal static class ColumnQueryExecutor
         DataFieldMetadata field,
         int n,
         int wordCount)
-        where T : BaseDataObject
+        where T : DataRecord
     {
         var propType = Nullable.GetUnderlyingType(field.ClrType) ?? field.ClrType;
 
@@ -136,7 +136,7 @@ internal static class ColumnQueryExecutor
         int target,
         int n,
         int wordCount)
-        where T : BaseDataObject
+        where T : DataRecord
     {
         var bitmask = new ulong[wordCount];
         var column  = new int[n];
@@ -167,7 +167,7 @@ internal static class ColumnQueryExecutor
         long target,
         int n,
         int wordCount)
-        where T : BaseDataObject
+        where T : DataRecord
     {
         var bitmask = new ulong[wordCount];
         var column  = new long[n];
@@ -198,7 +198,7 @@ internal static class ColumnQueryExecutor
         double target,
         int n,
         int wordCount)
-        where T : BaseDataObject
+        where T : DataRecord
     {
         var bitmask = new ulong[wordCount];
         var column  = new double[n];
@@ -230,7 +230,7 @@ internal static class ColumnQueryExecutor
         float target,
         int n,
         int wordCount)
-        where T : BaseDataObject
+        where T : DataRecord
     {
         var bitmask = new ulong[wordCount];
         var column  = new float[n];
@@ -262,7 +262,7 @@ internal static class ColumnQueryExecutor
         QueryClause clause,
         int n,
         int wordCount)
-        where T : BaseDataObject
+        where T : DataRecord
     {
         var bitmask = new ulong[wordCount];
         // Wrap the single clause in a lightweight query for reuse across all rows.
@@ -436,7 +436,7 @@ internal static class ColumnQueryExecutor
         int n,
         int skip,
         int top)
-        where T : BaseDataObject
+        where T : DataRecord
     {
         var result  = new List<T>(Math.Min(top, n));
         int matched = 0;
@@ -597,7 +597,7 @@ internal static class ColumnQueryExecutor
         QueryDefinition query,
         int skip,
         int top)
-        where T : BaseDataObject
+        where T : DataRecord
     {
         var result  = new List<T>(Math.Min(top, rows.Count));
         int matched = 0;

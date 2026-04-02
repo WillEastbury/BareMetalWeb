@@ -503,7 +503,7 @@ internal static class OpenApiHandler
 
     // ── Permission helpers ────────────────────────────────────────────────────
 
-    private static bool IsEntityAccessible(DataEntityMetadata entity, BaseDataObject? user, string[] userPermissions)
+    private static bool IsEntityAccessible(DataEntityMetadata entity, DataRecord? user, string[] userPermissions)
     {
         var perms = entity.Permissions ?? string.Empty;
         if (string.IsNullOrWhiteSpace(perms) || string.Equals(perms, "Public", StringComparison.OrdinalIgnoreCase))

@@ -208,8 +208,8 @@ public sealed class RuntimeEntityModel
             QueryAsync: async (query, ct) =>
             {
                 var items = await walProvider.QueryRecordsAsync(schema, query, ct).ConfigureAwait(false);
-                var result = new List<BaseDataObject>();
-                foreach (var item in items) result.Add((BaseDataObject)item);
+                var result = new List<DataRecord>();
+                foreach (var item in items) result.Add((DataRecord)item);
                 return result;
             },
             CountAsync: (query, ct) => walProvider.CountRecordsAsync(schema, query, ct)

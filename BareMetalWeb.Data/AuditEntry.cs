@@ -15,7 +15,7 @@ namespace BareMetalWeb.Data;
     NavOrder = 30,
     IdGeneration = AutoIdStrategy.Sequential
 )]
-public sealed class AuditEntry : BaseDataObject
+public sealed class AuditEntry : DataRecord
 {
     public override string EntityTypeName => "AuditEntry";
     private const int Ord_EntityType = BaseFieldCount + 0;

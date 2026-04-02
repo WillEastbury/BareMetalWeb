@@ -126,7 +126,7 @@ public static class CrudTools
         if (!DataScaffold.TryGetEntity(entitySlug, out var meta))
             return $"Entity '{entitySlug}' not found.";
 
-        BaseDataObject instance;
+        DataRecord instance;
         if (key > 0)
         {
             var existing = await meta.Handlers.LoadAsync(key, CancellationToken.None)

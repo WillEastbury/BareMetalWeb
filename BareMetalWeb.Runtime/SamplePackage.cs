@@ -33,10 +33,10 @@ public sealed class SamplePackage
     public List<IndexDefinition> Indexes { get; set; } = new();
 
     /// <summary>Action definitions — stored as DataRecord via "action-definitions" slug.</summary>
-    public List<BaseDataObject> Actions { get; set; } = new();
+    public List<DataRecord> Actions { get; set; } = new();
 
     /// <summary>Action commands — stored as DataRecord via "action-commands" slug.</summary>
-    public List<BaseDataObject> ActionCommands { get; set; } = new();
+    public List<DataRecord> ActionCommands { get; set; } = new();
 
     public List<SampleReport> Reports { get; set; } = new();
 
@@ -47,13 +47,13 @@ public sealed class SamplePackage
     public List<SamplePermission> Permissions { get; set; } = new();
 
     /// <summary>Aggregation definitions — stored as DataRecord via "aggregation-definitions" slug.</summary>
-    public List<BaseDataObject> Aggregations { get; set; } = new();
+    public List<DataRecord> Aggregations { get; set; } = new();
 
     /// <summary>Scheduled actions — stored as DataRecord via "scheduled-actions" slug.</summary>
-    public List<BaseDataObject> ScheduledActions { get; set; } = new();
+    public List<DataRecord> ScheduledActions { get; set; } = new();
 
     /// <summary>Workflow / automation rules — stored as DataRecord via "domain-event-subscriptions" slug.</summary>
-    public List<BaseDataObject> WorkflowRules { get; set; } = new();
+    public List<DataRecord> WorkflowRules { get; set; } = new();
 }
 
 /// <summary>

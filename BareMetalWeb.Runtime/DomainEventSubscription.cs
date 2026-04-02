@@ -26,7 +26,7 @@ namespace BareMetalWeb.Runtime;
     NavGroup = "Admin",
     NavOrder = 1005,
     IdGeneration = AutoIdStrategy.Sequential)]
-public class DomainEventSubscription : BaseDataObject
+public class DomainEventSubscription : DataRecord
 {
     public override string EntityTypeName => "DomainEventSubscription";
     private const int Ord_Name = BaseFieldCount + 0;

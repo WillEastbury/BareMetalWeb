@@ -2,7 +2,7 @@ using System;
 
 namespace BareMetalWeb.Data;
 
-public sealed class MfaChallenge : BaseDataObject
+public sealed class MfaChallenge : DataRecord
 {
     public override string EntityTypeName => "MfaChallenge";
     private const int Ord_UserId = BaseFieldCount + 0;

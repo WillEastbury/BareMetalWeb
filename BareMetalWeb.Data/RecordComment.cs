@@ -13,7 +13,7 @@ namespace BareMetalWeb.Data;
     ShowOnNav = false,
     IdGeneration = AutoIdStrategy.Sequential
 )]
-public sealed class RecordComment : BaseDataObject
+public sealed class RecordComment : DataRecord
 {
     public override string EntityTypeName => "RecordComment";
     private const int Ord_RecordType = BaseFieldCount + 0;

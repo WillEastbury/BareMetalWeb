@@ -20,7 +20,7 @@ public static class SettingsService
         => DataScaffold.TryGetEntity("app-settings", out meta)
             || DataScaffold.TryGetEntity("settings", out meta);
 
-    private static string GetFieldString(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
+    private static string GetFieldString(DataRecord obj, DataEntityMetadata meta, string fieldName)
         => meta.FindField(fieldName)?.GetValueFn(obj)?.ToString() ?? string.Empty;
 
     // Per-tenant caches: tenantId → (settingId → value)
@@ -57,10 +57,10 @@ public static class SettingsService
         };
 
         var settings = meta.Handlers.QueryAsync(query, CancellationToken.None).GetAwaiter().GetResult();
-        BaseDataObject? setting = null;
+        DataRecord? setting = null;
         foreach (var s in settings)
         {
-            if (s is BaseDataObject obj
+            if (s is DataRecord obj
                 && string.Equals(GetFieldString(obj, meta, "SettingId"), settingId, StringComparison.OrdinalIgnoreCase))
             {
                 setting = obj;
@@ -114,11 +114,11 @@ public static class SettingsService
             return;
         }
 
-        var existing = new Dictionary<string, BaseDataObject>(StringComparer.OrdinalIgnoreCase);
+        var existing = new Dictionary<string, DataRecord>(StringComparer.OrdinalIgnoreCase);
         var allSettings = await meta.Handlers.QueryAsync(null, cancellationToken).ConfigureAwait(false);
         foreach (var s in allSettings)
         {
-            if (s is not BaseDataObject settingObj)
+            if (s is not DataRecord settingObj)
                 continue;
 
             var existingSettingId = GetFieldString(settingObj, meta, "SettingId");

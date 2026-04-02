@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Globalization;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data;
@@ -6,7 +6,7 @@ using BareMetalWeb.Data;
 namespace BareMetalWeb.PerformanceTests;
 
 [DataEntity("Perf Addresses", Slug = "perf-addresses")]
-class Address : BaseDataObject
+class Address : DataRecord
 {
     [DataField(Label = "Label", Order = 1)] public string Label { get; set; } = "";
     [DataField(Label = "Line1", Order = 2)] public string Line1 { get; set; } = "";
@@ -18,7 +18,7 @@ class Address : BaseDataObject
 }
 
 [DataEntity("Perf Customers", Slug = "perf-customers")]
-class Customer : BaseDataObject
+class Customer : DataRecord
 {
     [DataField(Label = "Name", Order = 1)] public string Name { get; set; } = "";
     [DataField(Label = "Email", Order = 2)] public string Email { get; set; } = "";
@@ -31,7 +31,7 @@ class Customer : BaseDataObject
 }
 
 [DataEntity("Perf Products", Slug = "perf-products")]
-class Product : BaseDataObject
+class Product : DataRecord
 {
     [DataField(Label = "Name", Order = 1)] public string Name { get; set; } = "";
     [DataField(Label = "Sku", Order = 2)] public string Sku { get; set; } = "";
@@ -47,7 +47,7 @@ class Product : BaseDataObject
 }
 
 [DataEntity("Perf UOM", Slug = "perf-units-of-measure")]
-class UnitOfMeasure : BaseDataObject
+class UnitOfMeasure : DataRecord
 {
     [DataField(Label = "Name", Order = 1)] public string Name { get; set; } = "";
     [DataField(Label = "Abbreviation", Order = 2)] public string Abbreviation { get; set; } = "";
@@ -366,7 +366,7 @@ class Program
         return list;
     }
 
-    static void EnsureUniqueKey(BaseDataObject obj, HashSet<uint> usedKeys)
+    static void EnsureUniqueKey(DataRecord obj, HashSet<uint> usedKeys)
     {
         while (usedKeys.Contains(obj.Key))
         {

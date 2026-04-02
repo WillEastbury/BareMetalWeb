@@ -125,14 +125,14 @@ public static class BinaryApiHandlers
         var descriptors = new List<BinaryObjectSerializer.FieldPlanDescriptor>(meta.Fields.Count + 8);
 
         // Base properties
-        AddBaseDescriptor(descriptors, "CreatedBy", typeof(string), BareMetalWeb.Data.BaseDataObject.Ord_CreatedBy);
-        AddBaseDescriptor(descriptors, "CreatedOnUtc", typeof(DateTime), BareMetalWeb.Data.BaseDataObject.Ord_CreatedOnUtc);
-        AddBaseDescriptor(descriptors, "ETag", typeof(string), BareMetalWeb.Data.BaseDataObject.Ord_ETag);
-        AddBaseDescriptor(descriptors, "Identifier", typeof(BareMetalWeb.Data.IdentifierValue), BareMetalWeb.Data.BaseDataObject.Ord_Identifier);
-        AddBaseDescriptor(descriptors, "Key", typeof(uint), BareMetalWeb.Data.BaseDataObject.Ord_Key);
-        AddBaseDescriptor(descriptors, "UpdatedBy", typeof(string), BareMetalWeb.Data.BaseDataObject.Ord_UpdatedBy);
-        AddBaseDescriptor(descriptors, "UpdatedOnUtc", typeof(DateTime), BareMetalWeb.Data.BaseDataObject.Ord_UpdatedOnUtc);
-        AddBaseDescriptor(descriptors, "Version", typeof(uint), BareMetalWeb.Data.BaseDataObject.Ord_Version);
+        AddBaseDescriptor(descriptors, "CreatedBy", typeof(string), BareMetalWeb.Data.DataRecord.Ord_CreatedBy);
+        AddBaseDescriptor(descriptors, "CreatedOnUtc", typeof(DateTime), BareMetalWeb.Data.DataRecord.Ord_CreatedOnUtc);
+        AddBaseDescriptor(descriptors, "ETag", typeof(string), BareMetalWeb.Data.DataRecord.Ord_ETag);
+        AddBaseDescriptor(descriptors, "Identifier", typeof(BareMetalWeb.Data.IdentifierValue), BareMetalWeb.Data.DataRecord.Ord_Identifier);
+        AddBaseDescriptor(descriptors, "Key", typeof(uint), BareMetalWeb.Data.DataRecord.Ord_Key);
+        AddBaseDescriptor(descriptors, "UpdatedBy", typeof(string), BareMetalWeb.Data.DataRecord.Ord_UpdatedBy);
+        AddBaseDescriptor(descriptors, "UpdatedOnUtc", typeof(DateTime), BareMetalWeb.Data.DataRecord.Ord_UpdatedOnUtc);
+        AddBaseDescriptor(descriptors, "Version", typeof(uint), BareMetalWeb.Data.DataRecord.Ord_Version);
 
         // Entity-specific fields from metadata
         foreach (var fieldMeta in meta.Fields)
@@ -169,8 +169,8 @@ public static class BinaryApiHandlers
             Name = name,
             WireType = wireType,
             IsNullable = isNullable,
-            Getter = obj => ((BareMetalWeb.Data.BaseDataObject)obj).GetFieldValue(ord),
-            Setter = (obj, val) => ((BareMetalWeb.Data.BaseDataObject)obj).SetFieldValue(ord, val),
+            Getter = obj => ((BareMetalWeb.Data.DataRecord)obj).GetFieldValue(ord),
+            Setter = (obj, val) => ((BareMetalWeb.Data.DataRecord)obj).SetFieldValue(ord, val),
             ClrType = effectiveType,
             EnumUnderlying = enumUnderlying,
         });
@@ -591,7 +591,7 @@ public static class BinaryApiHandlers
             var entity = await ReadEntityFromRequest(context, plan, meta.Type);
             if (entity == null) { await WriteError(context, (400, "Invalid request body.")); return; }
 
-            if (entity is BaseDataObject bdo && bdo.Key != id)
+            if (entity is DataRecord bdo && bdo.Key != id)
                 bdo.Key = id;
 
             await DataScaffold.SaveAsync(meta, entity, context.RequestAborted);

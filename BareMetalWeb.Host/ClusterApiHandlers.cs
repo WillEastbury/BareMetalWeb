@@ -188,7 +188,7 @@ public static class ClusterApiHandlers
                 if (r is InstanceHeartbeat hb) { latest = hb; break; }
                 if (r != null)
                 {
-                    // Use metadata-driven field access for DataRecord or other BaseDataObject subtypes
+                    // Use metadata-driven field access for DataRecord or other DataRecord subtypes
                     latest = new InstanceHeartbeat
                     {
                         InstanceId   = GetFieldString(r, "InstanceId"),
@@ -257,7 +257,7 @@ public static class ClusterApiHandlers
         if (obj is DataRecord rec && rec.Schema != null)
             return rec.GetField(rec.Schema, fieldName);
 
-        if (obj is BaseDataObject bdo)
+        if (obj is DataRecord bdo)
         {
             var meta = DataScaffold.GetEntityByName(bdo.EntityTypeName);
             if (meta != null)

@@ -63,17 +63,17 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         InstanceFactory.TryAdd(typeof(Dictionary<int, T>), static () => new Dictionary<int, T>());
     }
 
-    // Base property accessors for BaseDataObject — ordinal-indexed, zero reflection.
+    // Base property accessors for DataRecord — ordinal-indexed, zero reflection.
     private static readonly MemberAccessor[] BasePropertyAccessors = new[]
     {
-        new MemberAccessor("CreatedBy",    typeof(string),          obj => ((BaseDataObject)obj).GetFieldValue(BaseDataObject.Ord_CreatedBy),    (obj, val) => ((BaseDataObject)obj).SetFieldValue(BaseDataObject.Ord_CreatedBy, val)),
-        new MemberAccessor("CreatedOnUtc", typeof(DateTime),        obj => ((BaseDataObject)obj).GetFieldValue(BaseDataObject.Ord_CreatedOnUtc), (obj, val) => ((BaseDataObject)obj).SetFieldValue(BaseDataObject.Ord_CreatedOnUtc, val)),
-        new MemberAccessor("ETag",         typeof(string),          obj => ((BaseDataObject)obj).GetFieldValue(BaseDataObject.Ord_ETag),         (obj, val) => ((BaseDataObject)obj).SetFieldValue(BaseDataObject.Ord_ETag, val)),
-        new MemberAccessor("Identifier",   typeof(IdentifierValue), obj => ((BaseDataObject)obj).GetFieldValue(BaseDataObject.Ord_Identifier),  (obj, val) => ((BaseDataObject)obj).SetFieldValue(BaseDataObject.Ord_Identifier, val)),
-        new MemberAccessor("Key",          typeof(uint),            obj => ((BaseDataObject)obj).GetFieldValue(BaseDataObject.Ord_Key),          (obj, val) => ((BaseDataObject)obj).SetFieldValue(BaseDataObject.Ord_Key, val)),
-        new MemberAccessor("UpdatedBy",    typeof(string),          obj => ((BaseDataObject)obj).GetFieldValue(BaseDataObject.Ord_UpdatedBy),    (obj, val) => ((BaseDataObject)obj).SetFieldValue(BaseDataObject.Ord_UpdatedBy, val)),
-        new MemberAccessor("UpdatedOnUtc", typeof(DateTime),        obj => ((BaseDataObject)obj).GetFieldValue(BaseDataObject.Ord_UpdatedOnUtc), (obj, val) => ((BaseDataObject)obj).SetFieldValue(BaseDataObject.Ord_UpdatedOnUtc, val)),
-        new MemberAccessor("Version",      typeof(uint),            obj => ((BaseDataObject)obj).GetFieldValue(BaseDataObject.Ord_Version),      (obj, val) => ((BaseDataObject)obj).SetFieldValue(BaseDataObject.Ord_Version, val)),
+        new MemberAccessor("CreatedBy",    typeof(string),          obj => ((DataRecord)obj).GetFieldValue(DataRecord.Ord_CreatedBy),    (obj, val) => ((DataRecord)obj).SetFieldValue(DataRecord.Ord_CreatedBy, val)),
+        new MemberAccessor("CreatedOnUtc", typeof(DateTime),        obj => ((DataRecord)obj).GetFieldValue(DataRecord.Ord_CreatedOnUtc), (obj, val) => ((DataRecord)obj).SetFieldValue(DataRecord.Ord_CreatedOnUtc, val)),
+        new MemberAccessor("ETag",         typeof(string),          obj => ((DataRecord)obj).GetFieldValue(DataRecord.Ord_ETag),         (obj, val) => ((DataRecord)obj).SetFieldValue(DataRecord.Ord_ETag, val)),
+        new MemberAccessor("Identifier",   typeof(IdentifierValue), obj => ((DataRecord)obj).GetFieldValue(DataRecord.Ord_Identifier),  (obj, val) => ((DataRecord)obj).SetFieldValue(DataRecord.Ord_Identifier, val)),
+        new MemberAccessor("Key",          typeof(uint),            obj => ((DataRecord)obj).GetFieldValue(DataRecord.Ord_Key),          (obj, val) => ((DataRecord)obj).SetFieldValue(DataRecord.Ord_Key, val)),
+        new MemberAccessor("UpdatedBy",    typeof(string),          obj => ((DataRecord)obj).GetFieldValue(DataRecord.Ord_UpdatedBy),    (obj, val) => ((DataRecord)obj).SetFieldValue(DataRecord.Ord_UpdatedBy, val)),
+        new MemberAccessor("UpdatedOnUtc", typeof(DateTime),        obj => ((DataRecord)obj).GetFieldValue(DataRecord.Ord_UpdatedOnUtc), (obj, val) => ((DataRecord)obj).SetFieldValue(DataRecord.Ord_UpdatedOnUtc, val)),
+        new MemberAccessor("Version",      typeof(uint),            obj => ((DataRecord)obj).GetFieldValue(DataRecord.Ord_Version),      (obj, val) => ((DataRecord)obj).SetFieldValue(DataRecord.Ord_Version, val)),
     };
     private const int Magic = 0x314F5342; // "BSO1" in little-endian
     private const int CurrentVersion = 3;
@@ -1978,10 +1978,10 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
 
                 for (int i = 0; i < schema.FieldCount; i++)
                 {
-                    int ord = BaseDataObject.BaseFieldCount + i;
+                    int ord = DataRecord.BaseFieldCount + i;
                     list.Add(new MemberAccessor(schema.Names[i], schema.ClrTypes[i],
-                        obj => ((BaseDataObject)obj).GetFieldValue(ord),
-                        (obj, val) => ((BaseDataObject)obj).SetFieldValue(ord, val)));
+                        obj => ((DataRecord)obj).GetFieldValue(ord),
+                        (obj, val) => ((DataRecord)obj).SetFieldValue(ord, val)));
                 }
                 list.Sort(static (a, b) => StringComparer.Ordinal.Compare(a.Name, b.Name));
                 return list.ToArray();

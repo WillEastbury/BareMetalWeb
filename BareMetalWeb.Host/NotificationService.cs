@@ -184,7 +184,7 @@ public sealed class InAppNotificationChannel : INotificationChannel
 /// <summary>
 /// Notification service that resolves channels from metadata-defined notification records
 /// and sends templated messages. Integrates with scheduled actions.
-/// Works with any BaseDataObject (typed NotificationDefinition or DataRecord).
+/// Works with any DataRecord (typed NotificationDefinition or DataRecord).
 /// </summary>
 public static class NotificationService
 {
@@ -201,7 +201,7 @@ public static class NotificationService
         return _channelMeta;
     }
 
-    private static string F(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
+    private static string F(DataRecord obj, DataEntityMetadata meta, string fieldName)
     {
         var field = meta.FindField(fieldName);
         return field?.GetValueFn?.Invoke(obj)?.ToString() ?? string.Empty;
@@ -212,7 +212,7 @@ public static class NotificationService
     /// field placeholders in subject/body templates.
     /// </summary>
     public static async ValueTask SendAsync(
-        BaseDataObject channel,
+        DataRecord channel,
         string recipient,
         Dictionary<string, string>? fields,
         CancellationToken ct)
@@ -285,7 +285,7 @@ public static class NotificationService
 
     /// <summary>Send to all default recipients configured on the channel.</summary>
     public static async ValueTask SendToDefaultRecipientsAsync(
-        BaseDataObject channel,
+        DataRecord channel,
         Dictionary<string, string>? fields,
         CancellationToken ct)
     {

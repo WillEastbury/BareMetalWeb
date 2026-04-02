@@ -17,7 +17,7 @@ public static class PrincipalAuthorizationPolicy
     /// Determines whether <paramref name="user"/> is a role-restricted <see cref="SystemPrincipal"/>.
     /// Returns null for regular web users (session-based), which are not subject to principal-role checks.
     /// </summary>
-    public static BaseDataObject? AsRestrictedPrincipal(BaseDataObject? user)
+    public static DataRecord? AsRestrictedPrincipal(DataRecord? user)
     {
         var role = GetPrincipalRole(user);
         if (string.IsNullOrWhiteSpace(role) || RoleEquals(role, nameof(PrincipalRole.FullAccess)))
@@ -30,7 +30,7 @@ public static class PrincipalAuthorizationPolicy
     /// the entity identified by <paramref name="entitySlug"/>.
     /// Returns null when the action is permitted, or a denial reason string otherwise.
     /// </summary>
-    public static string? CheckEntityAction(BaseDataObject principal, string entitySlug, string action)
+    public static string? CheckEntityAction(DataRecord principal, string entitySlug, string action)
     {
         var role = GetPrincipalRole(principal);
         if (string.IsNullOrWhiteSpace(role) || RoleEquals(role, nameof(PrincipalRole.FullAccess)))
@@ -51,7 +51,7 @@ public static class PrincipalAuthorizationPolicy
     /// (create, rotate, or revoke keys on SystemPrincipal records).
     /// Only FullAccess principals may modify API keys.
     /// </summary>
-    public static bool CanManageApiKeys(BaseDataObject? user)
+    public static bool CanManageApiKeys(DataRecord? user)
     {
         var role = GetPrincipalRole(user);
         return string.IsNullOrWhiteSpace(role) || RoleEquals(role, nameof(PrincipalRole.FullAccess));
@@ -59,10 +59,10 @@ public static class PrincipalAuthorizationPolicy
 
     /// <summary>
     /// Checks whether a <see cref="PrincipalRole.TenantCallback"/> principal owns
-    /// the specified record, based on matching <see cref="BaseDataObject.CreatedBy"/>
+    /// the specified record, based on matching <see cref="DataRecord.CreatedBy"/>
     /// against the principal's user name, or matching the record's principal key when applicable.
     /// </summary>
-    public static bool IsRecordOwner(BaseDataObject principal, BaseDataObject record)
+    public static bool IsRecordOwner(DataRecord principal, DataRecord record)
     {
         var principalUserName = GetUserName(principal);
         if (!string.IsNullOrEmpty(principalUserName) &&
@@ -79,8 +79,8 @@ public static class PrincipalAuthorizationPolicy
     /// Filters a sequence of records to only those owned by the specified
     /// <see cref="PrincipalRole.TenantCallback"/> principal.
     /// </summary>
-    public static List<T> FilterOwnedRecords<T>(BaseDataObject principal, IEnumerable<T> records)
-        where T : BaseDataObject
+    public static List<T> FilterOwnedRecords<T>(DataRecord principal, IEnumerable<T> records)
+        where T : DataRecord
     {
         var result = new List<T>();
         foreach (var record in records)
@@ -145,7 +145,7 @@ public static class PrincipalAuthorizationPolicy
                string.Equals(action, "Update", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string? GetPrincipalRole(BaseDataObject? principal)
+    private static string? GetPrincipalRole(DataRecord? principal)
     {
         if (principal == null)
             return null;
@@ -154,7 +154,7 @@ public static class PrincipalAuthorizationPolicy
         return meta?.FindField("Role")?.GetValueFn(principal)?.ToString();
     }
 
-    private static string? GetUserName(BaseDataObject principal)
+    private static string? GetUserName(DataRecord principal)
     {
         var meta = ResolveAuthMeta(principal);
         if (meta == null)
@@ -164,7 +164,7 @@ public static class PrincipalAuthorizationPolicy
         return string.IsNullOrWhiteSpace(value) ? null : value;
     }
 
-    private static bool IsSystemPrincipal(BaseDataObject record)
+    private static bool IsSystemPrincipal(DataRecord record)
     {
         var meta = ResolveAuthMeta(record);
         return meta != null && string.Equals(meta.Slug, SystemPrincipalSlug, StringComparison.OrdinalIgnoreCase);
@@ -173,7 +173,7 @@ public static class PrincipalAuthorizationPolicy
     private static bool RoleEquals(string role, string expected)
         => string.Equals(role, expected, StringComparison.OrdinalIgnoreCase);
 
-    private static DataEntityMetadata? ResolveAuthMeta(BaseDataObject? record)
+    private static DataEntityMetadata? ResolveAuthMeta(DataRecord? record)
     {
         if (record == null)
             return null;

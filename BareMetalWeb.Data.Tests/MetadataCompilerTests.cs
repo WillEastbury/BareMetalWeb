@@ -14,10 +14,10 @@ public class MetadataCompilerTests
     // Shared no-op handlers for test metadata
     private static readonly DataEntityHandlers DummyHandlers = new(
         Create: () => throw new NotSupportedException(),
-        LoadAsync: (_, _) => ValueTask.FromResult<BaseDataObject?>(null),
+        LoadAsync: (_, _) => ValueTask.FromResult<DataRecord?>(null),
         SaveAsync: (_, _) => ValueTask.CompletedTask,
         DeleteAsync: (_, _) => ValueTask.CompletedTask,
-        QueryAsync: (_, _) => ValueTask.FromResult<IEnumerable<BaseDataObject>>(Array.Empty<BaseDataObject>()),
+        QueryAsync: (_, _) => ValueTask.FromResult<IEnumerable<DataRecord>>(Array.Empty<DataRecord>()),
         CountAsync: (_, _) => ValueTask.FromResult(0)
     );
 

@@ -7,7 +7,7 @@ namespace BareMetalWeb.Runtime;
 /// Each user has at most one open basket; completing checkout closes it.
 /// </summary>
 [DataEntity("Baskets", ShowOnNav = false, Permissions = "Public")]
-public class Basket : BaseDataObject
+public class Basket : DataRecord
 {
     public override string EntityTypeName => "Basket";
     private const int Ord_UserId = BaseFieldCount + 0;
@@ -86,7 +86,7 @@ public enum BasketStatus
 /// A line item within a shopping basket.
 /// </summary>
 [DataEntity("Basket Items", ShowOnNav = false, Permissions = "Public")]
-public class BasketItem : BaseDataObject
+public class BasketItem : DataRecord
 {
     public override string EntityTypeName => "BasketItem";
     private const int Ord_BasketId = BaseFieldCount + 0;

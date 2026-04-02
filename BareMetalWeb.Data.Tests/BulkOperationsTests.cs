@@ -64,57 +64,57 @@ public class BulkOperationsTests : IDisposable
 
     private class InMemoryDataStore : IDataObjectStore
     {
-        private readonly Dictionary<(Type, uint), BaseDataObject> _store = new();
+        private readonly Dictionary<(Type, uint), DataRecord> _store = new();
 
         public IReadOnlyList<IDataProvider> Providers => Array.Empty<IDataProvider>();
         public void RegisterProvider(IDataProvider provider, bool prepend = false) { }
         public void RegisterFallbackProvider(IDataProvider provider) { }
         public void ClearProviders() { }
 
-        public void Save<T>(T obj) where T : BaseDataObject
+        public void Save<T>(T obj) where T : DataRecord
             => _store[(typeof(T), obj.Key)] = obj;
 
-        public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : DataRecord
         { Save(obj); return ValueTask.CompletedTask; }
 
-        public T? Load<T>(uint key) where T : BaseDataObject
+        public T? Load<T>(uint key) where T : DataRecord
             => _store.TryGetValue((typeof(T), key), out var obj) ? obj as T : null;
 
-        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : DataRecord
             => ValueTask.FromResult(Load<T>(key));
 
-        public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
+        public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : DataRecord
             => _store.Values.OfType<T>();
 
-        public ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : DataRecord
             => ValueTask.FromResult(Query<T>(query));
 
-        public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : DataRecord
             => ValueTask.FromResult(Query<T>(query).Count());
 
-        public void Delete<T>(uint key) where T : BaseDataObject
+        public void Delete<T>(uint key) where T : DataRecord
             => _store.Remove((typeof(T), key));
 
-        public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : DataRecord
         { Delete<T>(key); return ValueTask.CompletedTask; }
 
         // ── Non-generic stubs (string + ordinal) ───────────────────────
-        public void Save(string e, BaseDataObject o) => throw new NotSupportedException();
-        public BaseDataObject? Load(string e, uint k) => throw new NotSupportedException();
-        public IEnumerable<BaseDataObject> Query(string e, QueryDefinition? q = null) => throw new NotSupportedException();
+        public void Save(string e, DataRecord o) => throw new NotSupportedException();
+        public DataRecord? Load(string e, uint k) => throw new NotSupportedException();
+        public IEnumerable<DataRecord> Query(string e, QueryDefinition? q = null) => throw new NotSupportedException();
         public void Delete(string e, uint k) => throw new NotSupportedException();
-        public ValueTask SaveAsync(string e, BaseDataObject o, CancellationToken ct = default) => throw new NotSupportedException();
-        public ValueTask<BaseDataObject?> LoadAsync(string e, uint k, CancellationToken ct = default) => throw new NotSupportedException();
-        public ValueTask<IEnumerable<BaseDataObject>> QueryAsync(string e, QueryDefinition? q = null, CancellationToken ct = default) => throw new NotSupportedException();
+        public ValueTask SaveAsync(string e, DataRecord o, CancellationToken ct = default) => throw new NotSupportedException();
+        public ValueTask<DataRecord?> LoadAsync(string e, uint k, CancellationToken ct = default) => throw new NotSupportedException();
+        public ValueTask<IEnumerable<DataRecord>> QueryAsync(string e, QueryDefinition? q = null, CancellationToken ct = default) => throw new NotSupportedException();
         public ValueTask<int> CountAsync(string e, QueryDefinition? q = null, CancellationToken ct = default) => throw new NotSupportedException();
         public ValueTask DeleteAsync(string e, uint k, CancellationToken ct = default) => throw new NotSupportedException();
-        public void Save(int o, BaseDataObject obj) => throw new NotSupportedException();
-        public BaseDataObject? Load(int o, uint k) => throw new NotSupportedException();
-        public IEnumerable<BaseDataObject> Query(int o, QueryDefinition? q = null) => throw new NotSupportedException();
+        public void Save(int o, DataRecord obj) => throw new NotSupportedException();
+        public DataRecord? Load(int o, uint k) => throw new NotSupportedException();
+        public IEnumerable<DataRecord> Query(int o, QueryDefinition? q = null) => throw new NotSupportedException();
         public void Delete(int o, uint k) => throw new NotSupportedException();
-        public ValueTask SaveAsync(int o, BaseDataObject obj, CancellationToken ct = default) => throw new NotSupportedException();
-        public ValueTask<BaseDataObject?> LoadAsync(int o, uint k, CancellationToken ct = default) => throw new NotSupportedException();
-        public ValueTask<IEnumerable<BaseDataObject>> QueryAsync(int o, QueryDefinition? q = null, CancellationToken ct = default) => throw new NotSupportedException();
+        public ValueTask SaveAsync(int o, DataRecord obj, CancellationToken ct = default) => throw new NotSupportedException();
+        public ValueTask<DataRecord?> LoadAsync(int o, uint k, CancellationToken ct = default) => throw new NotSupportedException();
+        public ValueTask<IEnumerable<DataRecord>> QueryAsync(int o, QueryDefinition? q = null, CancellationToken ct = default) => throw new NotSupportedException();
         public ValueTask<int> CountAsync(int o, QueryDefinition? q = null, CancellationToken ct = default) => throw new NotSupportedException();
         public ValueTask DeleteAsync(int o, uint k, CancellationToken ct = default) => throw new NotSupportedException();
     }

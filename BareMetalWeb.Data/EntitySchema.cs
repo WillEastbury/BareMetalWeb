@@ -116,7 +116,7 @@ public sealed class EntitySchema
 
     /// <summary>
     /// Builds <see cref="BinaryObjectSerializer.FieldPlanDescriptor"/> entries
-    /// for this schema. Includes BaseDataObject structural fields (Key, timestamps,
+    /// for this schema. Includes DataRecord structural fields (Key, timestamps,
     /// audit, ETag, Version, EntityTypeName) followed by schema-defined fields.
     /// All getters/setters are simple closures — no reflection, fully AOT-safe.
     /// </summary>
@@ -156,7 +156,7 @@ public sealed class EntitySchema
 
         for (int i = 0; i < FieldCount; i++)
         {
-            int ord = BaseDataObject.BaseFieldCount + i; // offset past base fields
+            int ord = DataRecord.BaseFieldCount + i; // offset past base fields
             var (wireType, wireNullable, enumUnderlying) =
                 BinaryObjectSerializer.ResolveWireType(ClrTypes[i]);
             descriptors[basePlans.Length + i] = new BinaryObjectSerializer.FieldPlanDescriptor
@@ -257,7 +257,7 @@ public sealed class EntitySchema
             // with the base fields (Key, Identifier, timestamps, etc.) in _values[].
             var dict = new Dictionary<string, int>(count, StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < count; i++)
-                dict[names[i]] = BaseDataObject.BaseFieldCount + i;
+                dict[names[i]] = DataRecord.BaseFieldCount + i;
 
             // Compute FNV-1a schema hash
             ulong hash = 14695981039346656037UL;

@@ -7,233 +7,233 @@ namespace BareMetalWeb.Data;
 /// </summary>
 public static class UserFields
 {
-    public const int UserName = BaseDataObject.BaseFieldCount + 0;
-    public const int DisplayName = BaseDataObject.BaseFieldCount + 1;
-    public const int Email = BaseDataObject.BaseFieldCount + 2;
-    public const int PasswordHash = BaseDataObject.BaseFieldCount + 3;
-    public const int PasswordSalt = BaseDataObject.BaseFieldCount + 4;
-    public const int PasswordIterations = BaseDataObject.BaseFieldCount + 5;
-    public const int Permissions = BaseDataObject.BaseFieldCount + 6;
-    public const int IsActive = BaseDataObject.BaseFieldCount + 7;
-    public const int LastLoginUtc = BaseDataObject.BaseFieldCount + 8;
-    public const int FailedLoginCount = BaseDataObject.BaseFieldCount + 9;
-    public const int LockoutUntilUtc = BaseDataObject.BaseFieldCount + 10;
-    public const int MfaEnabled = BaseDataObject.BaseFieldCount + 11;
-    public const int MfaSecret = BaseDataObject.BaseFieldCount + 12;
-    public const int MfaLastVerifiedStep = BaseDataObject.BaseFieldCount + 13;
-    public const int MfaSecretEncrypted = BaseDataObject.BaseFieldCount + 14;
-    public const int MfaPendingSecret = BaseDataObject.BaseFieldCount + 15;
-    public const int MfaPendingExpiresUtc = BaseDataObject.BaseFieldCount + 16;
-    public const int MfaPendingFailedAttempts = BaseDataObject.BaseFieldCount + 17;
-    public const int MfaPendingSecretEncrypted = BaseDataObject.BaseFieldCount + 18;
-    public const int MfaBackupCodeHashes = BaseDataObject.BaseFieldCount + 19;
-    public const int MfaBackupCodesGeneratedUtc = BaseDataObject.BaseFieldCount + 20;
+    public const int UserName = DataRecord.BaseFieldCount + 0;
+    public const int DisplayName = DataRecord.BaseFieldCount + 1;
+    public const int Email = DataRecord.BaseFieldCount + 2;
+    public const int PasswordHash = DataRecord.BaseFieldCount + 3;
+    public const int PasswordSalt = DataRecord.BaseFieldCount + 4;
+    public const int PasswordIterations = DataRecord.BaseFieldCount + 5;
+    public const int Permissions = DataRecord.BaseFieldCount + 6;
+    public const int IsActive = DataRecord.BaseFieldCount + 7;
+    public const int LastLoginUtc = DataRecord.BaseFieldCount + 8;
+    public const int FailedLoginCount = DataRecord.BaseFieldCount + 9;
+    public const int LockoutUntilUtc = DataRecord.BaseFieldCount + 10;
+    public const int MfaEnabled = DataRecord.BaseFieldCount + 11;
+    public const int MfaSecret = DataRecord.BaseFieldCount + 12;
+    public const int MfaLastVerifiedStep = DataRecord.BaseFieldCount + 13;
+    public const int MfaSecretEncrypted = DataRecord.BaseFieldCount + 14;
+    public const int MfaPendingSecret = DataRecord.BaseFieldCount + 15;
+    public const int MfaPendingExpiresUtc = DataRecord.BaseFieldCount + 16;
+    public const int MfaPendingFailedAttempts = DataRecord.BaseFieldCount + 17;
+    public const int MfaPendingSecretEncrypted = DataRecord.BaseFieldCount + 18;
+    public const int MfaBackupCodeHashes = DataRecord.BaseFieldCount + 19;
+    public const int MfaBackupCodesGeneratedUtc = DataRecord.BaseFieldCount + 20;
 }
 
 /// <summary>Ordinal constants for <see cref="UserSession"/> fields.</summary>
 public static class UserSessionFields
 {
-    public const int UserId = BaseDataObject.BaseFieldCount + 0;
-    public const int UserName = BaseDataObject.BaseFieldCount + 1;
-    public const int DisplayName = BaseDataObject.BaseFieldCount + 2;
-    public const int Permissions = BaseDataObject.BaseFieldCount + 3;
-    public const int IssuedUtc = BaseDataObject.BaseFieldCount + 4;
-    public const int ExpiresUtc = BaseDataObject.BaseFieldCount + 5;
-    public const int LastSeenUtc = BaseDataObject.BaseFieldCount + 6;
-    public const int RememberMe = BaseDataObject.BaseFieldCount + 7;
-    public const int IsRevoked = BaseDataObject.BaseFieldCount + 8;
+    public const int UserId = DataRecord.BaseFieldCount + 0;
+    public const int UserName = DataRecord.BaseFieldCount + 1;
+    public const int DisplayName = DataRecord.BaseFieldCount + 2;
+    public const int Permissions = DataRecord.BaseFieldCount + 3;
+    public const int IssuedUtc = DataRecord.BaseFieldCount + 4;
+    public const int ExpiresUtc = DataRecord.BaseFieldCount + 5;
+    public const int LastSeenUtc = DataRecord.BaseFieldCount + 6;
+    public const int RememberMe = DataRecord.BaseFieldCount + 7;
+    public const int IsRevoked = DataRecord.BaseFieldCount + 8;
 }
 
 /// <summary>Ordinal constants for <see cref="AuditEntry"/> fields.</summary>
 public static class AuditEntryFields
 {
-    public const int EntityType = BaseDataObject.BaseFieldCount + 0;
-    public const int EntityKey = BaseDataObject.BaseFieldCount + 1;
-    public const int Operation = BaseDataObject.BaseFieldCount + 2;
-    public const int TimestampUtc = BaseDataObject.BaseFieldCount + 3;
-    public const int UserName = BaseDataObject.BaseFieldCount + 4;
-    public const int FieldChangesJson = BaseDataObject.BaseFieldCount + 5;
-    public const int CommandName = BaseDataObject.BaseFieldCount + 6;
-    public const int CommandParameters = BaseDataObject.BaseFieldCount + 7;
-    public const int CommandResult = BaseDataObject.BaseFieldCount + 8;
-    public const int Notes = BaseDataObject.BaseFieldCount + 9;
+    public const int EntityType = DataRecord.BaseFieldCount + 0;
+    public const int EntityKey = DataRecord.BaseFieldCount + 1;
+    public const int Operation = DataRecord.BaseFieldCount + 2;
+    public const int TimestampUtc = DataRecord.BaseFieldCount + 3;
+    public const int UserName = DataRecord.BaseFieldCount + 4;
+    public const int FieldChangesJson = DataRecord.BaseFieldCount + 5;
+    public const int CommandName = DataRecord.BaseFieldCount + 6;
+    public const int CommandParameters = DataRecord.BaseFieldCount + 7;
+    public const int CommandResult = DataRecord.BaseFieldCount + 8;
+    public const int Notes = DataRecord.BaseFieldCount + 9;
 }
 
 /// <summary>Ordinal constants for <see cref="AppSetting"/> fields.</summary>
 public static class AppSettingFields
 {
-    public const int SettingId = BaseDataObject.BaseFieldCount + 0;
-    public const int Value = BaseDataObject.BaseFieldCount + 1;
-    public const int Description = BaseDataObject.BaseFieldCount + 2;
+    public const int SettingId = DataRecord.BaseFieldCount + 0;
+    public const int Value = DataRecord.BaseFieldCount + 1;
+    public const int Description = DataRecord.BaseFieldCount + 2;
 }
 
 /// <summary>Ordinal constants for <see cref="ReportDefinition"/> fields.</summary>
 public static class ReportDefinitionFields
 {
-    public const int Name = BaseDataObject.BaseFieldCount + 0;
-    public const int Description = BaseDataObject.BaseFieldCount + 1;
-    public const int RootEntity = BaseDataObject.BaseFieldCount + 2;
-    public const int JoinsJson = BaseDataObject.BaseFieldCount + 3;
-    public const int ColumnsJson = BaseDataObject.BaseFieldCount + 4;
-    public const int FiltersJson = BaseDataObject.BaseFieldCount + 5;
-    public const int ParametersJson = BaseDataObject.BaseFieldCount + 6;
-    public const int SortField = BaseDataObject.BaseFieldCount + 7;
-    public const int SortDescending = BaseDataObject.BaseFieldCount + 8;
+    public const int Name = DataRecord.BaseFieldCount + 0;
+    public const int Description = DataRecord.BaseFieldCount + 1;
+    public const int RootEntity = DataRecord.BaseFieldCount + 2;
+    public const int JoinsJson = DataRecord.BaseFieldCount + 3;
+    public const int ColumnsJson = DataRecord.BaseFieldCount + 4;
+    public const int FiltersJson = DataRecord.BaseFieldCount + 5;
+    public const int ParametersJson = DataRecord.BaseFieldCount + 6;
+    public const int SortField = DataRecord.BaseFieldCount + 7;
+    public const int SortDescending = DataRecord.BaseFieldCount + 8;
 }
 
 /// <summary>Ordinal constants for Permission fields.</summary>
 public static class PermissionFields
 {
-    public const int Code = BaseDataObject.BaseFieldCount + 0;
-    public const int Description = BaseDataObject.BaseFieldCount + 1;
-    public const int TargetEntity = BaseDataObject.BaseFieldCount + 2;
-    public const int Actions = BaseDataObject.BaseFieldCount + 3;
-    public const int ConditionExpression = BaseDataObject.BaseFieldCount + 4;
-    public const int RequiresElevation = BaseDataObject.BaseFieldCount + 5;
+    public const int Code = DataRecord.BaseFieldCount + 0;
+    public const int Description = DataRecord.BaseFieldCount + 1;
+    public const int TargetEntity = DataRecord.BaseFieldCount + 2;
+    public const int Actions = DataRecord.BaseFieldCount + 3;
+    public const int ConditionExpression = DataRecord.BaseFieldCount + 4;
+    public const int RequiresElevation = DataRecord.BaseFieldCount + 5;
 }
 
 /// <summary>Ordinal constants for SecurityRole fields.</summary>
 public static class SecurityRoleFields
 {
-    public const int RoleName = BaseDataObject.BaseFieldCount + 0;
-    public const int Description = BaseDataObject.BaseFieldCount + 1;
-    public const int PermissionCodes = BaseDataObject.BaseFieldCount + 2;
+    public const int RoleName = DataRecord.BaseFieldCount + 0;
+    public const int Description = DataRecord.BaseFieldCount + 1;
+    public const int PermissionCodes = DataRecord.BaseFieldCount + 2;
 }
 
 /// <summary>Ordinal constants for SecurityGroup fields.</summary>
 public static class SecurityGroupFields
 {
-    public const int GroupName = BaseDataObject.BaseFieldCount + 0;
-    public const int Description = BaseDataObject.BaseFieldCount + 1;
-    public const int RoleNames = BaseDataObject.BaseFieldCount + 2;
-    public const int MemberKeys = BaseDataObject.BaseFieldCount + 3;
-    public const int NestedGroupKeys = BaseDataObject.BaseFieldCount + 4;
+    public const int GroupName = DataRecord.BaseFieldCount + 0;
+    public const int Description = DataRecord.BaseFieldCount + 1;
+    public const int RoleNames = DataRecord.BaseFieldCount + 2;
+    public const int MemberKeys = DataRecord.BaseFieldCount + 3;
+    public const int NestedGroupKeys = DataRecord.BaseFieldCount + 4;
 }
 
 /// <summary>Ordinal constants for <see cref="MfaChallenge"/> fields.</summary>
 public static class MfaChallengeFields
 {
-    public const int UserId = BaseDataObject.BaseFieldCount + 0;
-    public const int RememberMe = BaseDataObject.BaseFieldCount + 1;
-    public const int ExpiresUtc = BaseDataObject.BaseFieldCount + 2;
-    public const int IsUsed = BaseDataObject.BaseFieldCount + 3;
+    public const int UserId = DataRecord.BaseFieldCount + 0;
+    public const int RememberMe = DataRecord.BaseFieldCount + 1;
+    public const int ExpiresUtc = DataRecord.BaseFieldCount + 2;
+    public const int IsUsed = DataRecord.BaseFieldCount + 3;
 }
 
 /// <summary>Ordinal constants for <see cref="DeviceCodeAuth"/> fields.</summary>
 public static class DeviceCodeAuthFields
 {
-    public const int UserCode = BaseDataObject.BaseFieldCount + 0;
-    public const int DeviceCode = BaseDataObject.BaseFieldCount + 1;
-    public const int ExpiresUtc = BaseDataObject.BaseFieldCount + 2;
-    public const int Status = BaseDataObject.BaseFieldCount + 3;
-    public const int UserId = BaseDataObject.BaseFieldCount + 4;
-    public const int ClientDescription = BaseDataObject.BaseFieldCount + 5;
+    public const int UserCode = DataRecord.BaseFieldCount + 0;
+    public const int DeviceCode = DataRecord.BaseFieldCount + 1;
+    public const int ExpiresUtc = DataRecord.BaseFieldCount + 2;
+    public const int Status = DataRecord.BaseFieldCount + 3;
+    public const int UserId = DataRecord.BaseFieldCount + 4;
+    public const int ClientDescription = DataRecord.BaseFieldCount + 5;
 }
 
 /// <summary>Ordinal constants for EntityDefinition fields.</summary>
 public static class EntityDefinitionFields
 {
-    public const int EntityId = BaseDataObject.BaseFieldCount + 0;
-    public const int Name = BaseDataObject.BaseFieldCount + 1;
-    public const int Slug = BaseDataObject.BaseFieldCount + 2;
-    public const int Version = BaseDataObject.BaseFieldCount + 3;
-    public const int IdStrategy = BaseDataObject.BaseFieldCount + 4;
-    public const int ShowOnNav = BaseDataObject.BaseFieldCount + 5;
-    public const int Permissions = BaseDataObject.BaseFieldCount + 6;
-    public const int NavGroup = BaseDataObject.BaseFieldCount + 7;
-    public const int NavOrder = BaseDataObject.BaseFieldCount + 8;
-    public const int SchemaHash = BaseDataObject.BaseFieldCount + 9;
+    public const int EntityId = DataRecord.BaseFieldCount + 0;
+    public const int Name = DataRecord.BaseFieldCount + 1;
+    public const int Slug = DataRecord.BaseFieldCount + 2;
+    public const int Version = DataRecord.BaseFieldCount + 3;
+    public const int IdStrategy = DataRecord.BaseFieldCount + 4;
+    public const int ShowOnNav = DataRecord.BaseFieldCount + 5;
+    public const int Permissions = DataRecord.BaseFieldCount + 6;
+    public const int NavGroup = DataRecord.BaseFieldCount + 7;
+    public const int NavOrder = DataRecord.BaseFieldCount + 8;
+    public const int SchemaHash = DataRecord.BaseFieldCount + 9;
 }
 
 /// <summary>Ordinal constants for FieldDefinition fields.</summary>
 public static class FieldDefinitionFields
 {
-    public const int FieldId = BaseDataObject.BaseFieldCount + 0;
-    public const int EntityId = BaseDataObject.BaseFieldCount + 1;
-    public const int Name = BaseDataObject.BaseFieldCount + 2;
-    public const int Label = BaseDataObject.BaseFieldCount + 3;
-    public const int Ordinal = BaseDataObject.BaseFieldCount + 4;
-    public const int Type = BaseDataObject.BaseFieldCount + 5;
-    public const int IsNullable = BaseDataObject.BaseFieldCount + 6;
-    public const int Required = BaseDataObject.BaseFieldCount + 7;
-    public const int List = BaseDataObject.BaseFieldCount + 8;
-    public const int View = BaseDataObject.BaseFieldCount + 9;
-    public const int Edit = BaseDataObject.BaseFieldCount + 10;
-    public const int Create = BaseDataObject.BaseFieldCount + 11;
-    public const int ReadOnly = BaseDataObject.BaseFieldCount + 12;
-    public const int DefaultValue = BaseDataObject.BaseFieldCount + 13;
-    public const int Placeholder = BaseDataObject.BaseFieldCount + 14;
-    public const int MinLength = BaseDataObject.BaseFieldCount + 15;
-    public const int MaxLength = BaseDataObject.BaseFieldCount + 16;
-    public const int RangeMin = BaseDataObject.BaseFieldCount + 17;
-    public const int RangeMax = BaseDataObject.BaseFieldCount + 18;
-    public const int Pattern = BaseDataObject.BaseFieldCount + 19;
-    public const int EnumValues = BaseDataObject.BaseFieldCount + 20;
-    public const int LookupEntitySlug = BaseDataObject.BaseFieldCount + 21;
-    public const int LookupValueField = BaseDataObject.BaseFieldCount + 22;
-    public const int LookupDisplayField = BaseDataObject.BaseFieldCount + 23;
-    public const int Multiline = BaseDataObject.BaseFieldCount + 24;
-    public const int ChildEntitySlug = BaseDataObject.BaseFieldCount + 25;
-    public const int LookupCopyFields = BaseDataObject.BaseFieldCount + 26;
-    public const int CalculatedExpression = BaseDataObject.BaseFieldCount + 27;
-    public const int CalculatedDisplayFormat = BaseDataObject.BaseFieldCount + 28;
-    public const int CopyFromParentField = BaseDataObject.BaseFieldCount + 29;
-    public const int CopyFromParentSlug = BaseDataObject.BaseFieldCount + 30;
-    public const int CopyFromParentSourceField = BaseDataObject.BaseFieldCount + 31;
-    public const int RelatedDocumentSlug = BaseDataObject.BaseFieldCount + 32;
-    public const int RelatedDocumentDisplayField = BaseDataObject.BaseFieldCount + 33;
-    public const int CascadeFromField = BaseDataObject.BaseFieldCount + 34;
-    public const int CascadeFilterField = BaseDataObject.BaseFieldCount + 35;
-    public const int FieldGroup = BaseDataObject.BaseFieldCount + 36;
-    public const int ColumnSpan = BaseDataObject.BaseFieldCount + 37;
+    public const int FieldId = DataRecord.BaseFieldCount + 0;
+    public const int EntityId = DataRecord.BaseFieldCount + 1;
+    public const int Name = DataRecord.BaseFieldCount + 2;
+    public const int Label = DataRecord.BaseFieldCount + 3;
+    public const int Ordinal = DataRecord.BaseFieldCount + 4;
+    public const int Type = DataRecord.BaseFieldCount + 5;
+    public const int IsNullable = DataRecord.BaseFieldCount + 6;
+    public const int Required = DataRecord.BaseFieldCount + 7;
+    public const int List = DataRecord.BaseFieldCount + 8;
+    public const int View = DataRecord.BaseFieldCount + 9;
+    public const int Edit = DataRecord.BaseFieldCount + 10;
+    public const int Create = DataRecord.BaseFieldCount + 11;
+    public const int ReadOnly = DataRecord.BaseFieldCount + 12;
+    public const int DefaultValue = DataRecord.BaseFieldCount + 13;
+    public const int Placeholder = DataRecord.BaseFieldCount + 14;
+    public const int MinLength = DataRecord.BaseFieldCount + 15;
+    public const int MaxLength = DataRecord.BaseFieldCount + 16;
+    public const int RangeMin = DataRecord.BaseFieldCount + 17;
+    public const int RangeMax = DataRecord.BaseFieldCount + 18;
+    public const int Pattern = DataRecord.BaseFieldCount + 19;
+    public const int EnumValues = DataRecord.BaseFieldCount + 20;
+    public const int LookupEntitySlug = DataRecord.BaseFieldCount + 21;
+    public const int LookupValueField = DataRecord.BaseFieldCount + 22;
+    public const int LookupDisplayField = DataRecord.BaseFieldCount + 23;
+    public const int Multiline = DataRecord.BaseFieldCount + 24;
+    public const int ChildEntitySlug = DataRecord.BaseFieldCount + 25;
+    public const int LookupCopyFields = DataRecord.BaseFieldCount + 26;
+    public const int CalculatedExpression = DataRecord.BaseFieldCount + 27;
+    public const int CalculatedDisplayFormat = DataRecord.BaseFieldCount + 28;
+    public const int CopyFromParentField = DataRecord.BaseFieldCount + 29;
+    public const int CopyFromParentSlug = DataRecord.BaseFieldCount + 30;
+    public const int CopyFromParentSourceField = DataRecord.BaseFieldCount + 31;
+    public const int RelatedDocumentSlug = DataRecord.BaseFieldCount + 32;
+    public const int RelatedDocumentDisplayField = DataRecord.BaseFieldCount + 33;
+    public const int CascadeFromField = DataRecord.BaseFieldCount + 34;
+    public const int CascadeFilterField = DataRecord.BaseFieldCount + 35;
+    public const int FieldGroup = DataRecord.BaseFieldCount + 36;
+    public const int ColumnSpan = DataRecord.BaseFieldCount + 37;
 }
 
 /// <summary>Ordinal constants for IndexDefinition fields.</summary>
 public static class IndexDefinitionFields
 {
-    public const int EntityId = BaseDataObject.BaseFieldCount + 0;
-    public const int FieldNames = BaseDataObject.BaseFieldCount + 1;
-    public const int Type = BaseDataObject.BaseFieldCount + 2;
+    public const int EntityId = DataRecord.BaseFieldCount + 0;
+    public const int FieldNames = DataRecord.BaseFieldCount + 1;
+    public const int Type = DataRecord.BaseFieldCount + 2;
 }
 
 /// <summary>Ordinal constants for ActionDefinition fields.</summary>
 public static class ActionDefinitionFields
 {
-    public const int EntityId = BaseDataObject.BaseFieldCount + 0;
-    public const int Name = BaseDataObject.BaseFieldCount + 1;
-    public const int Label = BaseDataObject.BaseFieldCount + 2;
-    public const int Icon = BaseDataObject.BaseFieldCount + 3;
-    public const int Permission = BaseDataObject.BaseFieldCount + 4;
-    public const int EnabledWhen = BaseDataObject.BaseFieldCount + 5;
-    public const int Operations = BaseDataObject.BaseFieldCount + 6;
-    public const int Version = BaseDataObject.BaseFieldCount + 7;
+    public const int EntityId = DataRecord.BaseFieldCount + 0;
+    public const int Name = DataRecord.BaseFieldCount + 1;
+    public const int Label = DataRecord.BaseFieldCount + 2;
+    public const int Icon = DataRecord.BaseFieldCount + 3;
+    public const int Permission = DataRecord.BaseFieldCount + 4;
+    public const int EnabledWhen = DataRecord.BaseFieldCount + 5;
+    public const int Operations = DataRecord.BaseFieldCount + 6;
+    public const int Version = DataRecord.BaseFieldCount + 7;
 }
 
 /// <summary>Ordinal constants for ActionCommandDefinition fields.</summary>
 public static class ActionCommandDefinitionFields
 {
-    public const int ActionId = BaseDataObject.BaseFieldCount + 0;
-    public const int CommandType = BaseDataObject.BaseFieldCount + 1;
-    public const int Order = BaseDataObject.BaseFieldCount + 2;
-    public const int ParentCommandId = BaseDataObject.BaseFieldCount + 3;
-    public const int Condition = BaseDataObject.BaseFieldCount + 4;
-    public const int FieldId = BaseDataObject.BaseFieldCount + 5;
-    public const int ValueExpression = BaseDataObject.BaseFieldCount + 6;
-    public const int ListFieldId = BaseDataObject.BaseFieldCount + 7;
-    public const int Severity = BaseDataObject.BaseFieldCount + 8;
-    public const int ErrorCode = BaseDataObject.BaseFieldCount + 9;
-    public const int Message = BaseDataObject.BaseFieldCount + 10;
-    public const int TargetEntityType = BaseDataObject.BaseFieldCount + 11;
-    public const int TargetActionId = BaseDataObject.BaseFieldCount + 12;
-    public const int ParameterMap = BaseDataObject.BaseFieldCount + 13;
+    public const int ActionId = DataRecord.BaseFieldCount + 0;
+    public const int CommandType = DataRecord.BaseFieldCount + 1;
+    public const int Order = DataRecord.BaseFieldCount + 2;
+    public const int ParentCommandId = DataRecord.BaseFieldCount + 3;
+    public const int Condition = DataRecord.BaseFieldCount + 4;
+    public const int FieldId = DataRecord.BaseFieldCount + 5;
+    public const int ValueExpression = DataRecord.BaseFieldCount + 6;
+    public const int ListFieldId = DataRecord.BaseFieldCount + 7;
+    public const int Severity = DataRecord.BaseFieldCount + 8;
+    public const int ErrorCode = DataRecord.BaseFieldCount + 9;
+    public const int Message = DataRecord.BaseFieldCount + 10;
+    public const int TargetEntityType = DataRecord.BaseFieldCount + 11;
+    public const int TargetActionId = DataRecord.BaseFieldCount + 12;
+    public const int ParameterMap = DataRecord.BaseFieldCount + 13;
 }
 
 /// <summary>Ordinal constants for SessionLog fields.</summary>
 public static class SessionLogFields
 {
-    public const int UserName = BaseDataObject.BaseFieldCount + 0;
-    public const int LoginUtc = BaseDataObject.BaseFieldCount + 1;
-    public const int LogoutUtc = BaseDataObject.BaseFieldCount + 2;
-    public const int IpAddress = BaseDataObject.BaseFieldCount + 3;
-    public const int UserAgent = BaseDataObject.BaseFieldCount + 4;
+    public const int UserName = DataRecord.BaseFieldCount + 0;
+    public const int LoginUtc = DataRecord.BaseFieldCount + 1;
+    public const int LogoutUtc = DataRecord.BaseFieldCount + 2;
+    public const int IpAddress = DataRecord.BaseFieldCount + 3;
+    public const int UserAgent = DataRecord.BaseFieldCount + 4;
 }

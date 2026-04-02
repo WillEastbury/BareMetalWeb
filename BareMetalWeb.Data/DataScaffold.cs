@@ -78,9 +78,9 @@ public sealed record DataFieldMetadata(
         if (StorageOrdinal < 0)
             throw new InvalidOperationException(
                 $"Field '{Name}' has no storage ordinal. All entity properties must be backed by _values[]. " +
-                $"Ensure the entity class uses ordinal-indexed storage in BaseDataObject.");
+                $"Ensure the entity class uses ordinal-indexed storage in DataRecord.");
         var ord = StorageOrdinal;
-        return obj => ((BareMetalWeb.Data.BaseDataObject)obj).GetFieldValue(ord);
+        return obj => ((BareMetalWeb.Data.DataRecord)obj).GetFieldValue(ord);
     }
 
     private Action<object, object?> BuildSetter()
@@ -88,9 +88,9 @@ public sealed record DataFieldMetadata(
         if (StorageOrdinal < 0)
             throw new InvalidOperationException(
                 $"Field '{Name}' has no storage ordinal. All entity properties must be backed by _values[]. " +
-                $"Ensure the entity class uses ordinal-indexed storage in BaseDataObject.");
+                $"Ensure the entity class uses ordinal-indexed storage in DataRecord.");
         var ord = StorageOrdinal;
-        return (obj, val) => ((BareMetalWeb.Data.BaseDataObject)obj).SetFieldValue(ord, val);
+        return (obj, val) => ((BareMetalWeb.Data.DataRecord)obj).SetFieldValue(ord, val);
     }
 }
 
@@ -174,11 +174,11 @@ public sealed record DataEntityMetadata(
 }
 
 public sealed record DataEntityHandlers(
-    Func<BaseDataObject> Create,
-    Func<uint, CancellationToken, ValueTask<BaseDataObject?>> LoadAsync,
-    Func<BaseDataObject, CancellationToken, ValueTask> SaveAsync,
+    Func<DataRecord> Create,
+    Func<uint, CancellationToken, ValueTask<DataRecord?>> LoadAsync,
+    Func<DataRecord, CancellationToken, ValueTask> SaveAsync,
     Func<uint, CancellationToken, ValueTask> DeleteAsync,
-    Func<QueryDefinition?, CancellationToken, ValueTask<IEnumerable<BaseDataObject>>> QueryAsync,
+    Func<QueryDefinition?, CancellationToken, ValueTask<IEnumerable<DataRecord>>> QueryAsync,
     Func<QueryDefinition?, CancellationToken, ValueTask<int>> CountAsync
 );
 
@@ -348,7 +348,7 @@ public static class DataScaffold
     /// using entity-name-based (non-generic) APIs. Used when registering entities
     /// without a compiled CLR type.
     /// </summary>
-    public static DataEntityHandlers BuildStoreHandlers(string entityName, Func<BaseDataObject> create)
+    public static DataEntityHandlers BuildStoreHandlers(string entityName, Func<DataRecord> create)
     {
         return new DataEntityHandlers(
             Create: create,
@@ -389,7 +389,7 @@ public static class DataScaffold
                 Calculated: null,
                 Validation: null,
                 IsIndexed: schema.IsIndexed[i],
-                StorageOrdinal: BaseDataObject.BaseFieldCount + i
+                StorageOrdinal: DataRecord.BaseFieldCount + i
             );
         }
 
@@ -448,12 +448,12 @@ public static class DataScaffold
 
     public static async ValueTask SaveAsync(DataEntityMetadata metadata, object instance, CancellationToken cancellationToken = default)
     {
-        await metadata.Handlers.SaveAsync((BaseDataObject)instance, cancellationToken);
+        await metadata.Handlers.SaveAsync((DataRecord)instance, cancellationToken);
 
         var slug = metadata.Slug;
         if ((string.Equals(slug, "app-settings", StringComparison.OrdinalIgnoreCase)
              || string.Equals(slug, "settings", StringComparison.OrdinalIgnoreCase))
-            && instance is BaseDataObject setting)
+            && instance is DataRecord setting)
         {
             var settingIdField = metadata.FindField("SettingId");
             var settingId = settingIdField?.GetValueFn(setting)?.ToString();
@@ -493,7 +493,7 @@ public static class DataScaffold
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _sequenceSeeded = new(StringComparer.OrdinalIgnoreCase);
 
-    public static async ValueTask ApplyAutoIdAsync(DataEntityMetadata metadata, BaseDataObject instance, CancellationToken cancellationToken = default)
+    public static async ValueTask ApplyAutoIdAsync(DataEntityMetadata metadata, DataRecord instance, CancellationToken cancellationToken = default)
     {
         switch (metadata.IdGeneration)
         {
@@ -532,7 +532,7 @@ public static class DataScaffold
                 foreach (var f in metadata.Fields)
                 {
                     if (f.IdGeneration == IdGenerationStrategy.Sequential &&
-                        string.Equals(f.Name, nameof(BaseDataObject.Key), StringComparison.Ordinal))
+                        string.Equals(f.Name, nameof(DataRecord.Key), StringComparison.Ordinal))
                     {
                         seqField = f;
                         break;
@@ -574,7 +574,7 @@ public static class DataScaffold
         }
     }
 
-    public static async ValueTask ApplyComputedFieldsAsync(DataEntityMetadata metadata, BaseDataObject instance, ComputedTrigger trigger, CancellationToken cancellationToken = default)
+    public static async ValueTask ApplyComputedFieldsAsync(DataEntityMetadata metadata, DataRecord instance, ComputedTrigger trigger, CancellationToken cancellationToken = default)
     {
         await ComputedFieldService.ApplyComputedValuesAsync(metadata, instance, trigger, cancellationToken);
     }
@@ -1071,7 +1071,7 @@ public static class DataScaffold
                 {
                     var childField = editableFields[i];
                     object? rawValue = null;
-                    if (item is BaseDataObject bdo && bdo.Schema != null
+                    if (item is DataRecord bdo && bdo.Schema != null
                         && bdo.Schema.TryGetOrdinal(childField.Name, out var ord))
                     {
                         rawValue = bdo.GetFieldValue(ord);
@@ -1088,7 +1088,7 @@ public static class DataScaffold
         return result;
     }
 
-    public static TableRowActions? BuildRowActionsMetadata(BaseDataObject? dataObject, string rowBasePath, string? cloneToken = null, string? cloneReturnUrl = null)
+    public static TableRowActions? BuildRowActionsMetadata(DataRecord? dataObject, string rowBasePath, string? cloneToken = null, string? cloneReturnUrl = null)
     {
         if (dataObject == null)
             return null;
@@ -1166,7 +1166,7 @@ public static class DataScaffold
                 values.Add(WebUtility.HtmlEncode(ToDisplayString(rawValue, field.ClrType)));
             }
 
-            if (includeActions && item is BaseDataObject dataObject)
+            if (includeActions && item is DataRecord dataObject)
             {
                 var id = GetIdValue(dataObject);
                 var safeId = Uri.EscapeDataString(id ?? string.Empty);
@@ -1183,7 +1183,7 @@ public static class DataScaffold
                 values.Insert(0, $"<a class=\"btn btn-sm btn-outline-info me-1\" href=\"{viewUrl}\" title=\"Open\" aria-label=\"Open\"><i class=\"bi bi-search\" aria-hidden=\"true\"></i></a><a class=\"btn btn-sm btn-outline-warning me-1\" href=\"{editUrl}\" title=\"Edit\" aria-label=\"Edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i></a>{cloneHtml}<a class=\"btn btn-sm btn-outline-danger\" href=\"{deleteUrl}\" title=\"Delete\" aria-label=\"Delete\"><i class=\"bi bi-x-lg\" aria-hidden=\"true\"></i></a>");
             }
             
-            if (includeBulkSelection && item is BaseDataObject selectionDataObject)
+            if (includeBulkSelection && item is DataRecord selectionDataObject)
             {
                 var id = GetIdValue(selectionDataObject);
                 var safeId = WebUtility.HtmlEncode(id ?? string.Empty);
@@ -1199,8 +1199,8 @@ public static class DataScaffold
     private static void RenderTreeNode(
         StringBuilder html,
         DataEntityMetadata metadata,
-        BaseDataObject item,
-        List<BaseDataObject> allItems,
+        DataRecord item,
+        List<DataRecord> allItems,
         string? selectedId,
         string basePath,
         int depth)
@@ -1217,7 +1217,7 @@ public static class DataScaffold
         var viewUrl = $"{basePath}?view=tree&selected={safeId}";
 
         // Find children
-        var children = new List<BaseDataObject>();
+        var children = new List<DataRecord>();
         if (metadata.ParentField != null)
         {
             foreach (var child in allItems)
@@ -1266,12 +1266,12 @@ public static class DataScaffold
         html.Append("</li>");
     }
 
-    private static bool IsAncestorSelected(BaseDataObject item, List<BaseDataObject> allItems, DataFieldMetadata parentField, string? selectedId)
+    private static bool IsAncestorSelected(DataRecord item, List<DataRecord> allItems, DataFieldMetadata parentField, string? selectedId)
     {
         if (string.IsNullOrWhiteSpace(selectedId))
             return false;
 
-        var itemsById = new Dictionary<string, BaseDataObject>(StringComparer.OrdinalIgnoreCase);
+        var itemsById = new Dictionary<string, DataRecord>(StringComparer.OrdinalIgnoreCase);
         foreach (var i in allItems)
             itemsById[GetIdValue(i) ?? string.Empty] = i;
         var itemId = GetIdValue(item) ?? string.Empty;
@@ -1303,8 +1303,8 @@ public static class DataScaffold
     private static void RenderOrgChartNode(
         StringBuilder html,
         DataEntityMetadata metadata,
-        BaseDataObject item,
-        List<BaseDataObject> allItems,
+        DataRecord item,
+        List<DataRecord> allItems,
         string selectedId,
         string basePath,
         int depth)
@@ -1354,7 +1354,7 @@ public static class DataScaffold
         // Find children
         if (metadata.ParentField != null)
         {
-            var children = new List<BaseDataObject>();
+            var children = new List<DataRecord>();
             foreach (var child in allItems)
             {
                 var parentId = metadata.ParentField.GetValueFn(child)?.ToString();
@@ -1442,7 +1442,7 @@ public static class DataScaffold
         return false;
     }
 
-    private static string GetDisplayValue(DataEntityMetadata metadata, BaseDataObject item)
+    private static string GetDisplayValue(DataEntityMetadata metadata, DataRecord item)
     {
         // Try to find a Name field
         DataFieldMetadata? nameField = null;
@@ -1853,7 +1853,7 @@ public static class DataScaffold
         // Normalize "Id" → "Key" for DataRecord compatibility
         var effectiveValueField = valueField;
         if (string.Equals(effectiveValueField, "Id", StringComparison.OrdinalIgnoreCase))
-            effectiveValueField = nameof(BaseDataObject.Key);
+            effectiveValueField = nameof(DataRecord.Key);
 
         foreach (var item in items)
         {
@@ -1864,7 +1864,7 @@ public static class DataScaffold
             if (item is DataRecord dr && dr.Schema != null)
             {
                 object? value;
-                if (string.Equals(effectiveValueField, nameof(BaseDataObject.Key), StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(effectiveValueField, nameof(DataRecord.Key), StringComparison.OrdinalIgnoreCase))
                     value = dr.Key;
                 else
                     value = dr.GetField(dr.Schema, effectiveValueField);
@@ -1880,7 +1880,7 @@ public static class DataScaffold
             }
 
             // Compiled entities: use cached compiled delegates
-            var itemEntityName = (item is BaseDataObject bdoItem) ? bdoItem.EntityTypeName : string.Empty;
+            var itemEntityName = (item is DataRecord bdoItem) ? bdoItem.EntityTypeName : string.Empty;
             if (string.IsNullOrEmpty(itemEntityName)) continue;
             if (itemEntityName != cachedType)
             {
@@ -1951,7 +1951,7 @@ public static class DataScaffold
         return false;
     }
 
-    public static string? GetIdValue(BaseDataObject instance)
+    public static string? GetIdValue(DataRecord instance)
         => instance.Key.ToString();
 
     public static bool IsTruthy(object? value)
@@ -2739,7 +2739,7 @@ public static class DataScaffold
     /// Evaluates all calculated fields on an entity instance server-side.
     /// Call this before saving to ensure calculated values match server-side evaluation.
     /// </summary>
-    public static void ApplyCalculatedFields(DataEntityMetadata metadata, BaseDataObject instance)
+    public static void ApplyCalculatedFields(DataEntityMetadata metadata, DataRecord instance)
     {
         CalculatedFieldService.EvaluateCalculatedFields(instance);
     }

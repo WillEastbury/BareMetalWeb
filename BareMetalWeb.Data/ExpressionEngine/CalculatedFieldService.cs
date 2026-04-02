@@ -57,7 +57,7 @@ public static class CalculatedFieldService
     /// <summary>
     /// Evaluates all calculated fields on an entity instance.
     /// </summary>
-    public static void EvaluateCalculatedFields(BaseDataObject instance)
+    public static void EvaluateCalculatedFields(DataRecord instance)
     {
         var entityName = instance.EntityTypeName;
         if (string.IsNullOrEmpty(entityName)) return;
@@ -103,7 +103,7 @@ public static class CalculatedFieldService
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public static async ValueTask EvaluateCalculatedFieldsAsync(
-        BaseDataObject instance,
+        DataRecord instance,
         string entitySlug,
         ILookupResolver? resolver = null,
         IReadOnlyDictionary<string, object?>? parentContext = null,
@@ -311,7 +311,7 @@ public static class CalculatedFieldService
         return dependencies;
     }
 
-    private static Dictionary<string, object?> BuildContext(BaseDataObject instance, string entityName)
+    private static Dictionary<string, object?> BuildContext(DataRecord instance, string entityName)
     {
         var meta = DataScaffold.GetEntityByName(entityName);
         if (meta != null)

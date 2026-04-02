@@ -1025,7 +1025,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
     public void BuildEntitySchema_LookupWithKeyValueField_EmitsIdAsValueField()
     {
         // Arrange — SubjectId on TimeTablePlan has [DataLookup(typeof(Subject))] which
-        // defaults ValueField to nameof(BaseDataObject.Key) = "Key".
+        // defaults ValueField to nameof(DataRecord.Key) = "Key".
         _ = HostGalleryTestFixture.State;
         Assert.True(DataScaffold.TryGetEntity("time-table-plans", out var meta));
 
@@ -1289,7 +1289,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
 
     private class InMemoryDataStore : IDataObjectStore
     {
-        private readonly Dictionary<(Type, uint), BaseDataObject> _store = new();
+        private readonly Dictionary<(Type, uint), DataRecord> _store = new();
 
         public IReadOnlyList<IDataProvider> Providers => Array.Empty<IDataProvider>();
         public void RegisterProvider(IDataProvider provider, bool prepend = false) { }
@@ -1297,33 +1297,33 @@ public class RouteRegistrationExtensionsTests : IDisposable
         public void ClearProviders() { }
         public void Clear() => _store.Clear();
 
-        public void Save<T>(T obj) where T : BaseDataObject => _store[(typeof(T), obj.Key)] = obj;
-        public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject { Save(obj); return ValueTask.CompletedTask; }
-        public T? Load<T>(uint key) where T : BaseDataObject => _store.TryGetValue((typeof(T), key), out var obj) ? obj as T : null;
-        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject => ValueTask.FromResult(Load<T>(key));
-        public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject => _store.Values.OfType<T>();
-        public ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject => ValueTask.FromResult(Query<T>(query));
-        public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject => ValueTask.FromResult(Query<T>(query).Count());
-        public void Delete<T>(uint key) where T : BaseDataObject => _store.Remove((typeof(T), key));
-        public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject { Delete<T>(key); return ValueTask.CompletedTask; }
+        public void Save<T>(T obj) where T : DataRecord => _store[(typeof(T), obj.Key)] = obj;
+        public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : DataRecord { Save(obj); return ValueTask.CompletedTask; }
+        public T? Load<T>(uint key) where T : DataRecord => _store.TryGetValue((typeof(T), key), out var obj) ? obj as T : null;
+        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : DataRecord => ValueTask.FromResult(Load<T>(key));
+        public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : DataRecord => _store.Values.OfType<T>();
+        public ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : DataRecord => ValueTask.FromResult(Query<T>(query));
+        public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : DataRecord => ValueTask.FromResult(Query<T>(query).Count());
+        public void Delete<T>(uint key) where T : DataRecord => _store.Remove((typeof(T), key));
+        public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : DataRecord { Delete<T>(key); return ValueTask.CompletedTask; }
 
         // ── Non-generic stubs (string + ordinal) ───────────────────────
-        public void Save(string e, BaseDataObject o) { _store[(typeof(BaseDataObject), o.Key)] = o; }
-        public BaseDataObject? Load(string e, uint k) => _store.TryGetValue((typeof(BaseDataObject), k), out var obj) ? obj : null;
-        public IEnumerable<BaseDataObject> Query(string e, QueryDefinition? q = null) => Array.Empty<BaseDataObject>();
-        public void Delete(string e, uint k) => _store.Remove((typeof(BaseDataObject), k));
-        public ValueTask SaveAsync(string e, BaseDataObject o, CancellationToken ct = default) { Save(e, o); return ValueTask.CompletedTask; }
-        public ValueTask<BaseDataObject?> LoadAsync(string e, uint k, CancellationToken ct = default) => ValueTask.FromResult(Load(e, k));
-        public ValueTask<IEnumerable<BaseDataObject>> QueryAsync(string e, QueryDefinition? q = null, CancellationToken ct = default) => ValueTask.FromResult<IEnumerable<BaseDataObject>>(Array.Empty<BaseDataObject>());
+        public void Save(string e, DataRecord o) { _store[(typeof(DataRecord), o.Key)] = o; }
+        public DataRecord? Load(string e, uint k) => _store.TryGetValue((typeof(DataRecord), k), out var obj) ? obj : null;
+        public IEnumerable<DataRecord> Query(string e, QueryDefinition? q = null) => Array.Empty<DataRecord>();
+        public void Delete(string e, uint k) => _store.Remove((typeof(DataRecord), k));
+        public ValueTask SaveAsync(string e, DataRecord o, CancellationToken ct = default) { Save(e, o); return ValueTask.CompletedTask; }
+        public ValueTask<DataRecord?> LoadAsync(string e, uint k, CancellationToken ct = default) => ValueTask.FromResult(Load(e, k));
+        public ValueTask<IEnumerable<DataRecord>> QueryAsync(string e, QueryDefinition? q = null, CancellationToken ct = default) => ValueTask.FromResult<IEnumerable<DataRecord>>(Array.Empty<DataRecord>());
         public ValueTask<int> CountAsync(string e, QueryDefinition? q = null, CancellationToken ct = default) => ValueTask.FromResult(0);
         public ValueTask DeleteAsync(string e, uint k, CancellationToken ct = default) { Delete(e, k); return ValueTask.CompletedTask; }
-        public void Save(int o, BaseDataObject obj) { }
-        public BaseDataObject? Load(int o, uint k) => null;
-        public IEnumerable<BaseDataObject> Query(int o, QueryDefinition? q = null) => Array.Empty<BaseDataObject>();
+        public void Save(int o, DataRecord obj) { }
+        public DataRecord? Load(int o, uint k) => null;
+        public IEnumerable<DataRecord> Query(int o, QueryDefinition? q = null) => Array.Empty<DataRecord>();
         public void Delete(int o, uint k) { }
-        public ValueTask SaveAsync(int o, BaseDataObject obj, CancellationToken ct = default) => ValueTask.CompletedTask;
-        public ValueTask<BaseDataObject?> LoadAsync(int o, uint k, CancellationToken ct = default) => ValueTask.FromResult<BaseDataObject?>(null);
-        public ValueTask<IEnumerable<BaseDataObject>> QueryAsync(int o, QueryDefinition? q = null, CancellationToken ct = default) => ValueTask.FromResult<IEnumerable<BaseDataObject>>(Array.Empty<BaseDataObject>());
+        public ValueTask SaveAsync(int o, DataRecord obj, CancellationToken ct = default) => ValueTask.CompletedTask;
+        public ValueTask<DataRecord?> LoadAsync(int o, uint k, CancellationToken ct = default) => ValueTask.FromResult<DataRecord?>(null);
+        public ValueTask<IEnumerable<DataRecord>> QueryAsync(int o, QueryDefinition? q = null, CancellationToken ct = default) => ValueTask.FromResult<IEnumerable<DataRecord>>(Array.Empty<DataRecord>());
         public ValueTask<int> CountAsync(int o, QueryDefinition? q = null, CancellationToken ct = default) => ValueTask.FromResult(0);
         public ValueTask DeleteAsync(int o, uint k, CancellationToken ct = default) => ValueTask.CompletedTask;
     }

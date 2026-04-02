@@ -45,7 +45,7 @@ public class VirtualEntityDataRecordTests : IDisposable
             QueryAsync: async (query, ct) =>
             {
                 var items = await _provider.QueryRecordsAsync(_schema, query, ct).ConfigureAwait(false);
-                return items.Cast<BaseDataObject>();
+                return items.Cast<DataRecord>();
             },
             CountAsync: (query, ct) => _provider.CountRecordsAsync(_schema, query, ct)
         );
@@ -67,7 +67,7 @@ public class VirtualEntityDataRecordTests : IDisposable
         var rec = (DataRecord)obj;
         Assert.Equal("Ticket", rec.EntityTypeName);
         Assert.NotNull(rec.Schema);
-        Assert.Equal(BaseDataObject.BaseFieldCount + 4, rec.FieldCount);
+        Assert.Equal(DataRecord.BaseFieldCount + 4, rec.FieldCount);
     }
 
     // ── CRUD round-trip via handlers ───────────────────────────────────────
@@ -184,7 +184,7 @@ public class VirtualEntityDataRecordTests : IDisposable
         int titleOrd = _schema.TryGetOrdinal("Title", out var tOrd) ? tOrd : -1;
         rec.SetValue(titleOrd, "Test title");
 
-        // Name-based access via BaseDataObject.GetFieldByName
+        // Name-based access via DataRecord.GetFieldByName
         Assert.Equal("Test title", rec.GetFieldByName("Title"));
     }
 

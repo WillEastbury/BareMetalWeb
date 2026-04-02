@@ -55,11 +55,11 @@ public sealed class QueryService : IQueryService
     // ── Serialization ──────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Serializes a <see cref="BaseDataObject"/> to a field-name → value dictionary
+    /// Serializes a <see cref="DataRecord"/> to a field-name → value dictionary
     /// using the entity's field metadata. Works for both compiled and dynamic objects.
     /// </summary>
     internal static Dictionary<string, object?> SerializeObject(
-        BaseDataObject obj,
+        DataRecord obj,
         DataEntityMetadata meta)
     {
         var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)

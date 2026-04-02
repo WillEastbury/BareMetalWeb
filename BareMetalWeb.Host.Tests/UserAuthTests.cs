@@ -472,11 +472,11 @@ public class UserAuthTests : IDisposable
         // Assert — each lookup returns the correct user
         Assert.NotNull(foundRoot);
         Assert.Equal(root.Key, foundRoot.Key);
-        Assert.Equal("root", foundRoot.UserName);
+        Assert.Equal("root", foundRoot.GetFieldValue(UserFields.UserName)?.ToString());
 
         Assert.NotNull(foundSon);
         Assert.Equal(secondUser.Key, foundSon.Key);
-        Assert.Equal("son", foundSon.UserName);
+        Assert.Equal("son", foundSon.GetFieldValue(UserFields.UserName)?.ToString());
     }
 
     [Fact]
@@ -556,8 +556,8 @@ public class UserAuthTests : IDisposable
         // Assert — root is found and its password still verifies correctly
         Assert.NotNull(found);
         Assert.Equal(root.Key, found.Key);
-        Assert.True(found.VerifyPassword("AdminPass1!"), "Root password should verify correctly");
-        Assert.False(found.VerifyPassword("SonPass1!"), "Second user password must not match root");
+        Assert.True(UserAuth.VerifyPassword(found, "AdminPass1!"), "Root password should verify correctly");
+        Assert.False(UserAuth.VerifyPassword(found, "SonPass1!"), "Second user password must not match root");
     }
 
     [Fact]
@@ -668,7 +668,7 @@ public class UserAuthTests : IDisposable
         // Assert
         Assert.NotNull(found);
         Assert.Equal(original.Key, found.Key);
-        Assert.True(found.VerifyPassword("CorrectPass1!"), "Original user password must verify correctly.");
+        Assert.True(UserAuth.VerifyPassword(found, "CorrectPass1!"), "Original user password must verify correctly.");
     }
 
     private static HttpContext CreateHttpContext(string? sessionId)
@@ -688,7 +688,7 @@ public class UserAuthTests : IDisposable
 
     private class InMemoryDataStore : IDataObjectStore
     {
-        private readonly Dictionary<(string, uint), BaseDataObject> _store = new();
+        private readonly Dictionary<(string, uint), DataRecord> _store = new();
 
         public IReadOnlyList<IDataProvider> Providers => Array.Empty<IDataProvider>();
 
@@ -697,28 +697,28 @@ public class UserAuthTests : IDisposable
         public void ClearProviders() { }
 
         // ── String-based CRUD ──────────────────────────────────────────
-        public void Save(string entityTypeName, BaseDataObject obj)
+        public void Save(string entityTypeName, DataRecord obj)
         {
             _store[(entityTypeName, obj.Key)] = obj;
         }
 
-        public ValueTask SaveAsync(string entityTypeName, BaseDataObject obj, CancellationToken cancellationToken = default)
+        public ValueTask SaveAsync(string entityTypeName, DataRecord obj, CancellationToken cancellationToken = default)
         {
             Save(entityTypeName, obj);
             return ValueTask.CompletedTask;
         }
 
-        public BaseDataObject? Load(string entityTypeName, uint key)
+        public DataRecord? Load(string entityTypeName, uint key)
         {
             return _store.TryGetValue((entityTypeName, key), out var obj) ? obj : null;
         }
 
-        public ValueTask<BaseDataObject?> LoadAsync(string entityTypeName, uint key, CancellationToken cancellationToken = default)
+        public ValueTask<DataRecord?> LoadAsync(string entityTypeName, uint key, CancellationToken cancellationToken = default)
         {
             return ValueTask.FromResult(Load(entityTypeName, key));
         }
 
-        public IEnumerable<BaseDataObject> Query(string entityTypeName, QueryDefinition? query = null)
+        public IEnumerable<DataRecord> Query(string entityTypeName, QueryDefinition? query = null)
         {
             foreach (var kv in _store)
             {
@@ -727,7 +727,7 @@ public class UserAuthTests : IDisposable
             }
         }
 
-        public ValueTask<IEnumerable<BaseDataObject>> QueryAsync(string entityTypeName, QueryDefinition? query = null, CancellationToken cancellationToken = default)
+        public ValueTask<IEnumerable<DataRecord>> QueryAsync(string entityTypeName, QueryDefinition? query = null, CancellationToken cancellationToken = default)
         {
             return ValueTask.FromResult(Query(entityTypeName, query));
         }
@@ -749,13 +749,13 @@ public class UserAuthTests : IDisposable
         }
 
         // ── Ordinal-based (delegate to string-based) ───────────────────
-        public void Save(int o, BaseDataObject obj) => Save(obj.EntityTypeName, obj);
-        public BaseDataObject? Load(int o, uint k) => throw new NotSupportedException("Ordinal Load not supported in test store");
-        public IEnumerable<BaseDataObject> Query(int o, QueryDefinition? q = null) => throw new NotSupportedException("Ordinal Query not supported in test store");
+        public void Save(int o, DataRecord obj) => Save(obj.EntityTypeName, obj);
+        public DataRecord? Load(int o, uint k) => throw new NotSupportedException("Ordinal Load not supported in test store");
+        public IEnumerable<DataRecord> Query(int o, QueryDefinition? q = null) => throw new NotSupportedException("Ordinal Query not supported in test store");
         public void Delete(int o, uint k) => throw new NotSupportedException("Ordinal Delete not supported in test store");
-        public ValueTask SaveAsync(int o, BaseDataObject obj, CancellationToken ct = default) { Save(o, obj); return ValueTask.CompletedTask; }
-        public ValueTask<BaseDataObject?> LoadAsync(int o, uint k, CancellationToken ct = default) => throw new NotSupportedException("Ordinal LoadAsync not supported in test store");
-        public ValueTask<IEnumerable<BaseDataObject>> QueryAsync(int o, QueryDefinition? q = null, CancellationToken ct = default) => throw new NotSupportedException("Ordinal QueryAsync not supported in test store");
+        public ValueTask SaveAsync(int o, DataRecord obj, CancellationToken ct = default) { Save(o, obj); return ValueTask.CompletedTask; }
+        public ValueTask<DataRecord?> LoadAsync(int o, uint k, CancellationToken ct = default) => throw new NotSupportedException("Ordinal LoadAsync not supported in test store");
+        public ValueTask<IEnumerable<DataRecord>> QueryAsync(int o, QueryDefinition? q = null, CancellationToken ct = default) => throw new NotSupportedException("Ordinal QueryAsync not supported in test store");
         public ValueTask<int> CountAsync(int o, QueryDefinition? q = null, CancellationToken ct = default) => throw new NotSupportedException("Ordinal CountAsync not supported in test store");
         public ValueTask DeleteAsync(int o, uint k, CancellationToken ct = default) => throw new NotSupportedException("Ordinal DeleteAsync not supported in test store");
     }

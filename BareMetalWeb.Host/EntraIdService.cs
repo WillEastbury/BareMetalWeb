@@ -210,7 +210,7 @@ public static class EntraIdService
     /// Provisions or updates a local User from Entra ID claims.
     /// Returns the user ready for sign-in.
     /// </summary>
-    public static async Task<BaseDataObject?> ProvisionUserAsync(
+    public static async Task<DataRecord?> ProvisionUserAsync(
         EntraIdOptions options,
         EntraIdUserInfo userInfo,
         CancellationToken cancellationToken = default)
@@ -221,7 +221,7 @@ public static class EntraIdService
         _logger?.LogInfo($"SSO|provision|email={LogRedactor.RedactEmail(userInfo.Email)}|objectId={userInfo.ObjectId}");
 
         // Find existing user by email
-        BaseDataObject? user = await UserAuthHelper.FindUserByEmailAsync(userInfo.Email, cancellationToken)
+        DataRecord? user = await UserAuthHelper.FindUserByEmailAsync(userInfo.Email, cancellationToken)
             .ConfigureAwait(false);
 
         if (user == null)

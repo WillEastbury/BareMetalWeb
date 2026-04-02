@@ -7,7 +7,7 @@ using BareMetalWeb.Rendering.Models;
 namespace BareMetalWeb.Data;
 
 [DataEntity("Users", ShowOnNav = false, NavGroup = "Admin", NavOrder = 10, Permissions = "admin")]
-public class User : BaseDataObject
+public class User : DataRecord
 {
     public override string EntityTypeName => "User";
     private const int Ord_UserName = BaseFieldCount + 0;
@@ -115,8 +115,15 @@ public class User : BaseDataObject
     [DataField(Label = "Permissions", Order = 4, Required = false, List = true, View = true, Edit = true, Create = true, Placeholder = "comma,separated,roles")]
     public string[] Permissions
     {
-        get => (string[]?)_values[Ord_Permissions] ?? Array.Empty<string>();
-        set => _values[Ord_Permissions] = value;
+        get
+        {
+            var val = _values[Ord_Permissions];
+            if (val is string[] arr) return arr;
+            if (val is string s && !string.IsNullOrEmpty(s))
+                return s.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            return Array.Empty<string>();
+        }
+        set => _values[Ord_Permissions] = string.Join(",", value ?? Array.Empty<string>());
     }
 
     [DataField(Label = "Active", Order = 5, Required = false, List = true, View = true, Edit = true, Create = true, FieldType = FormFieldType.YesNo)]
@@ -198,8 +205,15 @@ public class User : BaseDataObject
 
     public string[] MfaBackupCodeHashes
     {
-        get => (string[]?)_values[Ord_MfaBackupCodeHashes] ?? Array.Empty<string>();
-        set => _values[Ord_MfaBackupCodeHashes] = value;
+        get
+        {
+            var val = _values[Ord_MfaBackupCodeHashes];
+            if (val is string[] arr) return arr;
+            if (val is string s && !string.IsNullOrEmpty(s))
+                return s.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            return Array.Empty<string>();
+        }
+        set => _values[Ord_MfaBackupCodeHashes] = string.Join(",", value ?? Array.Empty<string>());
     }
 
     public DateTime? MfaBackupCodesGeneratedUtc
@@ -210,8 +224,8 @@ public class User : BaseDataObject
 
     public bool IsLockedOut => LockoutUntilUtc.HasValue && LockoutUntilUtc.Value > DateTime.UtcNow;
 
-    public static async ValueTask<User?> GetByIdAsync(uint key, CancellationToken cancellationToken = default)
-        => (User?)(await DataStoreProvider.Current.LoadAsync("User", key, cancellationToken).ConfigureAwait(false));
+    public static async ValueTask<DataRecord?> GetByIdAsync(uint key, CancellationToken cancellationToken = default)
+        => await DataStoreProvider.Current.LoadAsync("User", key, cancellationToken).ConfigureAwait(false);
 
     public ValueTask SaveAsync(CancellationToken cancellationToken = default)
         => DataStoreProvider.Current.SaveAsync("User", this, cancellationToken);

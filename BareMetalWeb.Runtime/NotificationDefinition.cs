@@ -9,7 +9,7 @@ namespace BareMetalWeb.Runtime;
 /// Notifications can be triggered by scheduled actions or long-running processes.
 /// </summary>
 [DataEntity("Notification Channels", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1007)]
-public class NotificationDefinition : BaseDataObject
+public class NotificationDefinition : DataRecord
 {
     public override string EntityTypeName => "NotificationDefinition";
     private const int Ord_Name = BaseFieldCount + 0;

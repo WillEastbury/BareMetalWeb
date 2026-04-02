@@ -62,7 +62,7 @@ public static partial class PageRenderer
             Top = 1
         };
         var pages = await meta.Handlers.QueryAsync(queryDef, context.RequestAborted);
-        BaseDataObject? pageObj = null;
+        DataRecord? pageObj = null;
         foreach (var p in pages)
         {
             pageObj = p;
@@ -242,7 +242,7 @@ public static partial class PageRenderer
         return false;
     }
 
-    private static string GetField(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
+    private static string GetField(DataRecord obj, DataEntityMetadata meta, string fieldName)
     {
         BareMetalWeb.Core.DataFieldMetadata? field = null;
         foreach (var f in meta.Fields)

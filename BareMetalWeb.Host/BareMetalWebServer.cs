@@ -1369,7 +1369,7 @@ public class BareMetalWebServer : IBareWebHost
         return builder.Uri.ToString();
     }
 
-    private static string BuildMenuCacheKey(BaseDataObject? user, int routesVersion)
+    private static string BuildMenuCacheKey(DataRecord? user, int routesVersion)
     {
         if (user == null)
             return $"anon|routes:{routesVersion}";

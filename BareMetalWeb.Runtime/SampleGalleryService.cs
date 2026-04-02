@@ -244,7 +244,7 @@ public static class SampleGalleryService
                 foreach (var srcAction in package.Actions)
                 {
                     if (F(actionMeta, srcAction, "EntityId") != oldEntityId) continue;
-                    var newAction = (BaseDataObject)actionMeta.Handlers.Create();
+                    var newAction = (DataRecord)actionMeta.Handlers.Create();
                     CopyFields(actionMeta, srcAction, newAction);
                     actionMeta.FindField("EntityId")?.SetValueFn(newAction, newEntity.EntityId);
                     await DataScaffold.ApplyAutoIdAsync(actionMeta, newAction, cancellationToken).ConfigureAwait(false);
@@ -256,7 +256,7 @@ public static class SampleGalleryService
                         foreach (var srcCmd in package.ActionCommands)
                         {
                             if (F(cmdMeta, srcCmd, "ActionId") != F(actionMeta, srcAction, "Name")) continue;
-                            var newCmd = (BaseDataObject)cmdMeta.Handlers.Create();
+                            var newCmd = (DataRecord)cmdMeta.Handlers.Create();
                             CopyFields(cmdMeta, srcCmd, newCmd);
                             cmdMeta.FindField("ActionId")?.SetValueFn(newCmd, newAction.Key.ToString());
                             await DataScaffold.ApplyAutoIdAsync(cmdMeta, newCmd, cancellationToken).ConfigureAwait(false);
@@ -272,7 +272,7 @@ public static class SampleGalleryService
                 foreach (var srcReport in package.Reports)
                 {
                     if (!string.Equals(srcReport.RootEntity, srcEntity.Slug, StringComparison.OrdinalIgnoreCase)) continue;
-                    var newReport = (BaseDataObject)reportMeta.Handlers.Create();
+                    var newReport = (DataRecord)reportMeta.Handlers.Create();
                     reportMeta.FindField("Name")?.SetValueFn(newReport, srcReport.Name);
                     reportMeta.FindField("Description")?.SetValueFn(newReport, srcReport.Description);
                     reportMeta.FindField("RootEntity")?.SetValueFn(newReport, newEntity.Slug);
@@ -292,7 +292,7 @@ public static class SampleGalleryService
                 foreach (var srcAgg in package.Aggregations)
                 {
                     if (F(aggMeta, srcAgg, "EntityId") != oldEntityId) continue;
-                    var newAgg = (BaseDataObject)aggMeta.Handlers.Create();
+                    var newAgg = (DataRecord)aggMeta.Handlers.Create();
                     CopyFields(aggMeta, srcAgg, newAgg);
                     aggMeta.FindField("EntityId")?.SetValueFn(newAgg, newEntity.EntityId);
                     await DataScaffold.ApplyAutoIdAsync(aggMeta, newAgg, cancellationToken).ConfigureAwait(false);
@@ -306,7 +306,7 @@ public static class SampleGalleryService
                 foreach (var srcSched in package.ScheduledActions)
                 {
                     if (F(schedMeta, srcSched, "EntityId") != oldEntityId) continue;
-                    var newSched = (BaseDataObject)schedMeta.Handlers.Create();
+                    var newSched = (DataRecord)schedMeta.Handlers.Create();
                     CopyFields(schedMeta, srcSched, newSched);
                     schedMeta.FindField("EntityId")?.SetValueFn(newSched, newEntity.EntityId);
                     await DataScaffold.ApplyAutoIdAsync(schedMeta, newSched, cancellationToken).ConfigureAwait(false);
@@ -320,7 +320,7 @@ public static class SampleGalleryService
                 foreach (var srcRule in package.WorkflowRules)
                 {
                     if (!string.Equals(F(ruleMeta, srcRule, "SourceEntity"), srcEntity.Slug, StringComparison.OrdinalIgnoreCase)) continue;
-                    var newRule = (BaseDataObject)ruleMeta.Handlers.Create();
+                    var newRule = (DataRecord)ruleMeta.Handlers.Create();
                     CopyFields(ruleMeta, srcRule, newRule);
                     ruleMeta.FindField("SourceEntity")?.SetValueFn(newRule, newEntity.Slug);
                     await DataScaffold.ApplyAutoIdAsync(ruleMeta, newRule, cancellationToken).ConfigureAwait(false);
@@ -561,7 +561,7 @@ public static class SampleGalleryService
         };
         if (DataScaffold.TryGetEntity("action-definitions", out var actionMeta2))
         {
-            var actions = new List<BaseDataObject>(await actionMeta2.Handlers.QueryAsync(actionQuery, ct).ConfigureAwait(false));
+            var actions = new List<DataRecord>(await actionMeta2.Handlers.QueryAsync(actionQuery, ct).ConfigureAwait(false));
             foreach (var action in actions)
             {
                 if (DataScaffold.TryGetEntity("action-commands", out var cmdMeta2))
@@ -570,7 +570,7 @@ public static class SampleGalleryService
                     {
                         Clauses = { new QueryClause { Field = "ActionId", Operator = QueryOperator.Equals, Value = action.Key } }
                     };
-                    var cmds = new List<BaseDataObject>(await cmdMeta2.Handlers.QueryAsync(cmdQuery, ct).ConfigureAwait(false));
+                    var cmds = new List<DataRecord>(await cmdMeta2.Handlers.QueryAsync(cmdQuery, ct).ConfigureAwait(false));
                     foreach (var cmd in cmds)
                         await cmdMeta2.Handlers.DeleteAsync(cmd.Key, ct).ConfigureAwait(false);
                 }
@@ -585,7 +585,7 @@ public static class SampleGalleryService
         };
         if (DataScaffold.TryGetEntity("report-definitions", out var reportMeta2))
         {
-            var reports = new List<BaseDataObject>(await reportMeta2.Handlers.QueryAsync(reportQuery, ct).ConfigureAwait(false));
+            var reports = new List<DataRecord>(await reportMeta2.Handlers.QueryAsync(reportQuery, ct).ConfigureAwait(false));
             foreach (var report in reports)
                 await reportMeta2.Handlers.DeleteAsync(report.Key, ct).ConfigureAwait(false);
         }
@@ -593,7 +593,7 @@ public static class SampleGalleryService
         // Delete aggregation definitions
         if (DataScaffold.TryGetEntity("aggregation-definitions", out var aggMeta2))
         {
-            var aggs = new List<BaseDataObject>(await aggMeta2.Handlers.QueryAsync(entityIdQuery, ct).ConfigureAwait(false));
+            var aggs = new List<DataRecord>(await aggMeta2.Handlers.QueryAsync(entityIdQuery, ct).ConfigureAwait(false));
             foreach (var agg in aggs)
                 await aggMeta2.Handlers.DeleteAsync(agg.Key, ct).ConfigureAwait(false);
         }
@@ -601,7 +601,7 @@ public static class SampleGalleryService
         // Delete scheduled actions
         if (DataScaffold.TryGetEntity("scheduled-actions", out var schedMeta))
         {
-            var scheds = new List<BaseDataObject>(await schedMeta.Handlers.QueryAsync(entityIdQuery, ct).ConfigureAwait(false));
+            var scheds = new List<DataRecord>(await schedMeta.Handlers.QueryAsync(entityIdQuery, ct).ConfigureAwait(false));
             foreach (var sched in scheds)
                 await schedMeta.Handlers.DeleteAsync(sched.Key, ct).ConfigureAwait(false);
         }
@@ -613,18 +613,18 @@ public static class SampleGalleryService
         };
         if (DataScaffold.TryGetEntity("domain-event-subscriptions", out var ruleMeta))
         {
-            var rules = new List<BaseDataObject>(await ruleMeta.Handlers.QueryAsync(rulesQuery, ct).ConfigureAwait(false));
+            var rules = new List<DataRecord>(await ruleMeta.Handlers.QueryAsync(rulesQuery, ct).ConfigureAwait(false));
             foreach (var rule in rules)
                 await ruleMeta.Handlers.DeleteAsync(rule.Key, ct).ConfigureAwait(false);
         }
     }
 
-    /// <summary>Read a field value as string from a BaseDataObject using metadata.</summary>
-    private static string F(DataEntityMetadata meta, BaseDataObject obj, string fieldName)
+    /// <summary>Read a field value as string from a DataRecord using metadata.</summary>
+    private static string F(DataEntityMetadata meta, DataRecord obj, string fieldName)
         => meta.FindField(fieldName)?.GetValueFn(obj)?.ToString() ?? string.Empty;
 
     /// <summary>Copy all non-core field values from source to target using metadata.</summary>
-    private static void CopyFields(DataEntityMetadata meta, BaseDataObject source, BaseDataObject target)
+    private static void CopyFields(DataEntityMetadata meta, DataRecord source, DataRecord target)
     {
         foreach (var field in meta.Fields)
         {

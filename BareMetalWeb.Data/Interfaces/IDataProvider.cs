@@ -23,12 +23,12 @@ public interface IDataProvider
     string IndexTempExtension { get; }
 
     // ── Entity-name-based CRUD (canonical API) ──────────────────────────
-    void Save(string entityTypeName, BaseDataObject obj);
-    ValueTask SaveAsync(string entityTypeName, BaseDataObject obj, CancellationToken cancellationToken = default);
-    BaseDataObject? Load(string entityTypeName, uint key);
-    ValueTask<BaseDataObject?> LoadAsync(string entityTypeName, uint key, CancellationToken cancellationToken = default);
-    IEnumerable<BaseDataObject> Query(string entityTypeName, QueryDefinition? query = null);
-    ValueTask<IEnumerable<BaseDataObject>> QueryAsync(string entityTypeName, QueryDefinition? query = null, CancellationToken cancellationToken = default);
+    void Save(string entityTypeName, DataRecord obj);
+    ValueTask SaveAsync(string entityTypeName, DataRecord obj, CancellationToken cancellationToken = default);
+    DataRecord? Load(string entityTypeName, uint key);
+    ValueTask<DataRecord?> LoadAsync(string entityTypeName, uint key, CancellationToken cancellationToken = default);
+    IEnumerable<DataRecord> Query(string entityTypeName, QueryDefinition? query = null);
+    ValueTask<IEnumerable<DataRecord>> QueryAsync(string entityTypeName, QueryDefinition? query = null, CancellationToken cancellationToken = default);
     int Count(string entityTypeName, QueryDefinition? query = null);
     ValueTask<int> CountAsync(string entityTypeName, QueryDefinition? query = null, CancellationToken cancellationToken = default);
     void Delete(string entityTypeName, uint key);

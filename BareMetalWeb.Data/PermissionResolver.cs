@@ -18,7 +18,7 @@ public static class PermissionResolver
     /// role assignments, and individual permission entries.
     /// </summary>
     public static async ValueTask<ResolvedPermissionSet> ResolveAsync(
-        BaseDataObject principal, CancellationToken ct = default)
+        DataRecord principal, CancellationToken ct = default)
     {
         var gen = Interlocked.Read(ref _generation);
         if (_cache.TryGetValue(principal.Key, out var cached) && cached.Generation == gen)
@@ -55,14 +55,14 @@ public static class PermissionResolver
         var permissions = await LoadEntitiesAsync("permissions", ct);
 
         // Build lookup tables
-        var rolesByName = new Dictionary<string, BaseDataObject>(StringComparer.OrdinalIgnoreCase);
+        var rolesByName = new Dictionary<string, DataRecord>(StringComparer.OrdinalIgnoreCase);
         foreach (var r in roles)
         {
             var name = GetField(r, "roles", "RoleName");
             if (!string.IsNullOrEmpty(name)) rolesByName[name] = r;
         }
 
-        var permsByCode = new Dictionary<string, BaseDataObject>(StringComparer.OrdinalIgnoreCase);
+        var permsByCode = new Dictionary<string, DataRecord>(StringComparer.OrdinalIgnoreCase);
         foreach (var p in permissions)
         {
             var code = GetField(p, "permissions", "Code");
@@ -95,7 +95,7 @@ public static class PermissionResolver
         // Also include the principal's existing flat Permissions array (backward compat)
         if (DataScaffold.TryGetEntity("users", out var userMeta))
         {
-            var user = await DataScaffold.LoadAsync(userMeta, principalKey, ct) as BaseDataObject;
+            var user = await DataScaffold.LoadAsync(userMeta, principalKey, ct) as DataRecord;
             if (user != null)
             {
                 var permsField = FindFieldByName(userMeta.Fields, "Permissions");
@@ -158,7 +158,7 @@ public static class PermissionResolver
     /// <param name="result">Accumulates discovered group keys; also used for cycle detection.</param>
     /// <param name="depth">Current recursion depth (capped at 10 to prevent infinite loops).</param>
     private static void FindMemberGroups(
-        uint principalKey, IReadOnlyList<BaseDataObject> allGroups,
+        uint principalKey, IReadOnlyList<DataRecord> allGroups,
         HashSet<uint> result, int depth)
     {
         if (depth > 10) return;
@@ -196,14 +196,14 @@ public static class PermissionResolver
         }
     }
 
-    private static async ValueTask<IReadOnlyList<BaseDataObject>> LoadEntitiesAsync(
+    private static async ValueTask<IReadOnlyList<DataRecord>> LoadEntitiesAsync(
         string slug, CancellationToken ct)
     {
         if (!DataScaffold.TryGetEntity(slug, out var meta))
-            return Array.Empty<BaseDataObject>();
+            return Array.Empty<DataRecord>();
 
         var items = await meta.Handlers.QueryAsync(null, ct);
-        var list = new List<BaseDataObject>();
+        var list = new List<DataRecord>();
         foreach (var item in items)
             list.Add(item);
         return list;
@@ -211,7 +211,7 @@ public static class PermissionResolver
 
     private static readonly ConcurrentDictionary<string, Func<object, object?>?> _getterCache = new();
 
-    private static string GetField(BaseDataObject obj, string entitySlug, string fieldName)
+    private static string GetField(DataRecord obj, string entitySlug, string fieldName)
     {
         var key = $"{entitySlug}.{fieldName}";
         var getter = _getterCache.GetOrAdd(key, _ =>
@@ -223,7 +223,7 @@ public static class PermissionResolver
         return getter?.Invoke(obj)?.ToString() ?? string.Empty;
     }
 
-    private static bool GetBoolField(BaseDataObject obj, string entitySlug, string fieldName)
+    private static bool GetBoolField(DataRecord obj, string entitySlug, string fieldName)
     {
         var val = GetField(obj, entitySlug, fieldName);
         return string.Equals(val, "True", StringComparison.OrdinalIgnoreCase);

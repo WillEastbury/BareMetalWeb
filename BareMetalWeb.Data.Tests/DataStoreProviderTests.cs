@@ -213,16 +213,16 @@ public class DataStoreProviderTests
         public string IndexSnapshotExtension => string.Empty;
         public string IndexTempExtension => string.Empty;
         public bool CanHandle(Type type) => true;
-        public void Save<T>(T obj) where T : BaseDataObject { }
-        public System.Threading.Tasks.ValueTask SaveAsync<T>(T obj, System.Threading.CancellationToken cancellationToken = default) where T : BaseDataObject => System.Threading.Tasks.ValueTask.CompletedTask;
-        public T? Load<T>(uint key) where T : BaseDataObject => null;
-        public System.Threading.Tasks.ValueTask<T?> LoadAsync<T>(uint key, System.Threading.CancellationToken cancellationToken = default) where T : BaseDataObject => System.Threading.Tasks.ValueTask.FromResult<T?>(null);
-        public System.Collections.Generic.IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject => Array.Empty<T>();
-        public System.Threading.Tasks.ValueTask<System.Collections.Generic.IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null, System.Threading.CancellationToken cancellationToken = default) where T : BaseDataObject => System.Threading.Tasks.ValueTask.FromResult<System.Collections.Generic.IEnumerable<T>>(Array.Empty<T>());
-        public int Count<T>(QueryDefinition? query = null) where T : BaseDataObject => 0;
-        public System.Threading.Tasks.ValueTask<int> CountAsync<T>(QueryDefinition? query = null, System.Threading.CancellationToken cancellationToken = default) where T : BaseDataObject => System.Threading.Tasks.ValueTask.FromResult(0);
-        public void Delete<T>(uint key) where T : BaseDataObject { }
-        public System.Threading.Tasks.ValueTask DeleteAsync<T>(uint key, System.Threading.CancellationToken cancellationToken = default) where T : BaseDataObject => System.Threading.Tasks.ValueTask.CompletedTask;
+        public void Save<T>(T obj) where T : DataRecord { }
+        public System.Threading.Tasks.ValueTask SaveAsync<T>(T obj, System.Threading.CancellationToken cancellationToken = default) where T : DataRecord => System.Threading.Tasks.ValueTask.CompletedTask;
+        public T? Load<T>(uint key) where T : DataRecord => null;
+        public System.Threading.Tasks.ValueTask<T?> LoadAsync<T>(uint key, System.Threading.CancellationToken cancellationToken = default) where T : DataRecord => System.Threading.Tasks.ValueTask.FromResult<T?>(null);
+        public System.Collections.Generic.IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : DataRecord => Array.Empty<T>();
+        public System.Threading.Tasks.ValueTask<System.Collections.Generic.IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null, System.Threading.CancellationToken cancellationToken = default) where T : DataRecord => System.Threading.Tasks.ValueTask.FromResult<System.Collections.Generic.IEnumerable<T>>(Array.Empty<T>());
+        public int Count<T>(QueryDefinition? query = null) where T : DataRecord => 0;
+        public System.Threading.Tasks.ValueTask<int> CountAsync<T>(QueryDefinition? query = null, System.Threading.CancellationToken cancellationToken = default) where T : DataRecord => System.Threading.Tasks.ValueTask.FromResult(0);
+        public void Delete<T>(uint key) where T : DataRecord { }
+        public System.Threading.Tasks.ValueTask DeleteAsync<T>(uint key, System.Threading.CancellationToken cancellationToken = default) where T : DataRecord => System.Threading.Tasks.ValueTask.CompletedTask;
         public IDisposable AcquireIndexLock(string entityName, string fieldName) => new DummyDisposable();
         public bool IndexFileExists(string entityName, string fieldName, IndexFileKind kind) => false;
         public System.IO.Stream OpenIndexRead(string entityName, string fieldName, IndexFileKind kind) => throw new NotImplementedException();
@@ -242,12 +242,12 @@ public class DataStoreProviderTests
         }
 
         // ── Non-generic stubs ──────────────────────────────────────────
-        public void Save(string e, BaseDataObject o) => throw new NotSupportedException();
-        public ValueTask SaveAsync(string e, BaseDataObject o, CancellationToken ct = default) => throw new NotSupportedException();
-        public BaseDataObject? Load(string e, uint k) => throw new NotSupportedException();
-        public ValueTask<BaseDataObject?> LoadAsync(string e, uint k, CancellationToken ct = default) => throw new NotSupportedException();
-        public IEnumerable<BaseDataObject> Query(string e, QueryDefinition? q = null) => throw new NotSupportedException();
-        public ValueTask<IEnumerable<BaseDataObject>> QueryAsync(string e, QueryDefinition? q = null, CancellationToken ct = default) => throw new NotSupportedException();
+        public void Save(string e, DataRecord o) => throw new NotSupportedException();
+        public ValueTask SaveAsync(string e, DataRecord o, CancellationToken ct = default) => throw new NotSupportedException();
+        public DataRecord? Load(string e, uint k) => throw new NotSupportedException();
+        public ValueTask<DataRecord?> LoadAsync(string e, uint k, CancellationToken ct = default) => throw new NotSupportedException();
+        public IEnumerable<DataRecord> Query(string e, QueryDefinition? q = null) => throw new NotSupportedException();
+        public ValueTask<IEnumerable<DataRecord>> QueryAsync(string e, QueryDefinition? q = null, CancellationToken ct = default) => throw new NotSupportedException();
         public int Count(string e, QueryDefinition? q = null) => throw new NotSupportedException();
         public ValueTask<int> CountAsync(string e, QueryDefinition? q = null, CancellationToken ct = default) => throw new NotSupportedException();
         public void Delete(string e, uint k) => throw new NotSupportedException();

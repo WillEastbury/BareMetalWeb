@@ -13,15 +13,15 @@ namespace BareMetalWeb.Runtime;
 /// </summary>
 public static class MetadataExtractor
 {
-    // Properties inherited from BaseDataObject that must not be included as schema fields.
+    // Properties inherited from DataRecord that must not be included as schema fields.
     private static readonly HashSet<string> CorePropertyNames = new(StringComparer.Ordinal)
     {
-        nameof(BaseDataObject.Key),
-        nameof(BaseDataObject.CreatedOnUtc),
-        nameof(BaseDataObject.UpdatedOnUtc),
-        nameof(BaseDataObject.CreatedBy),
-        nameof(BaseDataObject.UpdatedBy),
-        nameof(BaseDataObject.ETag),
+        nameof(DataRecord.Key),
+        nameof(DataRecord.CreatedOnUtc),
+        nameof(DataRecord.UpdatedOnUtc),
+        nameof(DataRecord.CreatedBy),
+        nameof(DataRecord.UpdatedBy),
+        nameof(DataRecord.ETag),
         "EntityTypeName"
     };
 

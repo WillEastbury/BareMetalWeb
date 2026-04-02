@@ -217,7 +217,7 @@ public sealed class ViewEngine
         var rootRowsRaw = await plan.RootEntityMeta.Handlers.QueryAsync(rootFilter, cancellationToken)
             .ConfigureAwait(false);
 
-        using var rootRows = new BmwValueList<BaseDataObject>(64);
+        using var rootRows = new BmwValueList<DataRecord>(64);
         foreach (var r in rootRowsRaw)
         {
             if (rootRows.Count >= ReportExecutor.MaxEntityLoadSize) break;
@@ -226,13 +226,13 @@ public sealed class ViewEngine
 
         // ── Step 2: build join hash maps ────────────────────────────────────
         // For each join, load target entity and build a string-keyed hash map.
-        var joinMaps = new Dictionary<string, BaseDataObject>[plan.JoinLookupFunctions.Length];
+        var joinMaps = new Dictionary<string, DataRecord>[plan.JoinLookupFunctions.Length];
         for (int ji = 0; ji < plan.JoinLookupFunctions.Length; ji++)
         {
             var je = plan.JoinLookupFunctions[ji];
             if (je.TargetMeta == null || je.TargetKeyExtractor == null)
             {
-                joinMaps[ji] = new Dictionary<string, BaseDataObject>(StringComparer.OrdinalIgnoreCase);
+                joinMaps[ji] = new Dictionary<string, DataRecord>(StringComparer.OrdinalIgnoreCase);
                 continue;
             }
 
@@ -242,7 +242,7 @@ public sealed class ViewEngine
 
             // Build hash: targetFieldValue → first matching row (many-to-one semantics for single-object join)
             // Use the existing multi-map pattern from ReportExecutor when multiple matches are possible.
-            var map = new Dictionary<string, BaseDataObject>(StringComparer.OrdinalIgnoreCase);
+            var map = new Dictionary<string, DataRecord>(StringComparer.OrdinalIgnoreCase);
             foreach (var tr in targetRows)
             {
                 var key = je.TargetKeyExtractor(tr);
@@ -264,9 +264,9 @@ public sealed class ViewEngine
         // Allocate selection vector + per-join selected-row buffers
         var sv         = new SelectionVector(SelectionVector.BatchSize);
         // Per-join parallel row buffer: joinedRows[ji][i] = the target row for selection i
-        var joinedRows = new BaseDataObject?[plan.JoinLookupFunctions.Length][];
+        var joinedRows = new DataRecord?[plan.JoinLookupFunctions.Length][];
         for (int ji = 0; ji < plan.JoinLookupFunctions.Length; ji++)
-            joinedRows[ji] = new BaseDataObject?[SelectionVector.BatchSize];
+            joinedRows[ji] = new DataRecord?[SelectionVector.BatchSize];
 
         int batchBase = 0;
         while (batchBase < totalRoot)
@@ -428,7 +428,7 @@ public sealed class ViewEngine
     private static void ApplyEntityFilters(
         ViewFilterEntry[] filters,
         string entitySlug,
-        BaseDataObject[] rows,
+        DataRecord[] rows,
         ref SelectionVector sv)
     {
         for (int fi = 0; fi < filters.Length; fi++)
@@ -453,7 +453,7 @@ public sealed class ViewEngine
     private static void ApplyJoinedEntityFilters(
         ViewFilterEntry[] filters,
         string entitySlug,
-        BaseDataObject?[] joinedBuf,
+        DataRecord?[] joinedBuf,
         ref SelectionVector sv)
     {
         for (int fi = 0; fi < filters.Length; fi++)

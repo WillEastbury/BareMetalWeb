@@ -312,7 +312,7 @@ public static class ProgramSetup
         };
 
         var usersEnumerable = await UserAuth.QueryUsersAsync(query, cancellationToken).ConfigureAwait(false);
-        var users = new List<BaseDataObject>();
+        var users = new List<DataRecord>();
         foreach (var u in usersEnumerable)
         {
             users.Add(u);

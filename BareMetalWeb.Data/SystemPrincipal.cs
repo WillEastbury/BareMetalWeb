@@ -94,9 +94,10 @@ public sealed class SystemPrincipal : User
         if (string.IsNullOrWhiteSpace(apiKey))
             return null;
 
-        var principals = (await DataStoreProvider.Current.QueryAsync("SystemPrincipal", null, cancellationToken).ConfigureAwait(false)).Cast<SystemPrincipal>();
-        foreach (var principal in principals)
+        var principals = await DataStoreProvider.Current.QueryAsync("SystemPrincipal", null, cancellationToken).ConfigureAwait(false);
+        foreach (var record in principals)
         {
+            var principal = record as SystemPrincipal ?? WrapRecord(record);
             if (principal == null || !principal.IsActive)
                 continue;
             if (principal.HasApiKey(apiKey))
@@ -104,6 +105,19 @@ public sealed class SystemPrincipal : User
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Wraps a DataRecord into a SystemPrincipal by copying the values array.
+    /// Used when the WAL returns generic DataRecord instead of typed SystemPrincipal.
+    /// </summary>
+    private static SystemPrincipal? WrapRecord(DataRecord record)
+    {
+        if (record == null) return null;
+        var sp = new SystemPrincipal();
+        sp.EnsureCapacity(record.FieldCount);
+        Array.Copy(record._values, sp._values, Math.Min(record.FieldCount, sp.FieldCount));
+        return sp;
     }
 
     public void AddApiKey(string apiKey, int iterations = 100_000)

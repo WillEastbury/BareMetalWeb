@@ -8,7 +8,7 @@ namespace BareMetalWeb.Runtime;
 /// Each record is a single turn (user prompt or assistant response).
 /// </summary>
 [DataEntity("Chat Messages", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1011)]
-public class ChatMessage : BaseDataObject
+public class ChatMessage : DataRecord
 {
     public override string EntityTypeName => "ChatMessage";
     private const int Ord_SessionId = BaseFieldCount + 0;

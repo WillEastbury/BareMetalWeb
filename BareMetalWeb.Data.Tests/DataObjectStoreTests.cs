@@ -12,7 +12,7 @@ namespace BareMetalWeb.Data.Tests;
 
 public class DataObjectStoreTests
 {
-    private class TestProduct : BaseDataObject
+    private class TestProduct : DataRecord
     {
         private const int Ord_Name = BaseFieldCount + 0;
         private const int Ord_Price = BaseFieldCount + 1;
@@ -49,7 +49,7 @@ public class DataObjectStoreTests
         }
     }
 
-    private class TestCustomer : BaseDataObject
+    private class TestCustomer : DataRecord
     {
         private const int Ord_CompanyName = BaseFieldCount + 0;
         private const int Ord_Email = BaseFieldCount + 1;
@@ -88,7 +88,7 @@ public class DataObjectStoreTests
 
     private class InMemoryDataProvider : IDataProvider
     {
-        private readonly Dictionary<(string, uint), BaseDataObject> _store = new();
+        private readonly Dictionary<(string, uint), DataRecord> _store = new();
 
         public string Name => "InMemory";
         public string IndexRootPath => string.Empty;
@@ -97,34 +97,34 @@ public class DataObjectStoreTests
         public string IndexSnapshotExtension => string.Empty;
         public string IndexTempExtension => string.Empty;
 
-        public void Save(string entityTypeName, BaseDataObject obj)
+        public void Save(string entityTypeName, DataRecord obj)
         {
             if (obj is null) throw new ArgumentNullException(nameof(obj));
             _store[(entityTypeName, obj.Key)] = obj;
         }
 
-        public ValueTask SaveAsync(string entityTypeName, BaseDataObject obj, CancellationToken cancellationToken = default)
+        public ValueTask SaveAsync(string entityTypeName, DataRecord obj, CancellationToken cancellationToken = default)
         {
             Save(entityTypeName, obj);
             return ValueTask.CompletedTask;
         }
 
-        public BaseDataObject? Load(string entityTypeName, uint key)
+        public DataRecord? Load(string entityTypeName, uint key)
         {
             return _store.TryGetValue((entityTypeName, key), out var obj) ? obj : null;
         }
 
-        public ValueTask<BaseDataObject?> LoadAsync(string entityTypeName, uint key, CancellationToken cancellationToken = default)
+        public ValueTask<DataRecord?> LoadAsync(string entityTypeName, uint key, CancellationToken cancellationToken = default)
         {
             return ValueTask.FromResult(Load(entityTypeName, key));
         }
 
-        public IEnumerable<BaseDataObject> Query(string entityTypeName, QueryDefinition? query = null)
+        public IEnumerable<DataRecord> Query(string entityTypeName, QueryDefinition? query = null)
         {
             return _store.Where(kv => kv.Key.Item1 == entityTypeName).Select(kv => kv.Value);
         }
 
-        public ValueTask<IEnumerable<BaseDataObject>> QueryAsync(string entityTypeName, QueryDefinition? query = null, CancellationToken cancellationToken = default)
+        public ValueTask<IEnumerable<DataRecord>> QueryAsync(string entityTypeName, QueryDefinition? query = null, CancellationToken cancellationToken = default)
         {
             return ValueTask.FromResult(Query(entityTypeName, query));
         }
@@ -207,7 +207,7 @@ public class DataObjectStoreTests
         store.RegisterProvider(provider);
 
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => store.Save("TestProduct", (BaseDataObject)null!));
+        Assert.Throws<ArgumentNullException>(() => store.Save("TestProduct", (DataRecord)null!));
     }
 
     [Fact]
@@ -239,7 +239,7 @@ public class DataObjectStoreTests
         store.RegisterProvider(provider);
 
         // Act & Assert
-        await Assert.ThrowsAsync<ArgumentNullException>(() => store.SaveAsync("TestProduct", (BaseDataObject)null!).AsTask());
+        await Assert.ThrowsAsync<ArgumentNullException>(() => store.SaveAsync("TestProduct", (DataRecord)null!).AsTask());
     }
 
     [Fact]

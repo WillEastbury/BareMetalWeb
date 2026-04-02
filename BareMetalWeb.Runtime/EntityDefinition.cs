@@ -8,7 +8,7 @@ namespace BareMetalWeb.Runtime;
 /// into an immutable <see cref="RuntimeEntityModel"/>.
 /// </summary>
 [DataEntity("Entity Definitions", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1000)]
-public class EntityDefinition : BaseDataObject
+public class EntityDefinition : DataRecord
 {
     public override string EntityTypeName => "EntityDefinition";
     private const int Ord_EntityId = BaseFieldCount + 0;

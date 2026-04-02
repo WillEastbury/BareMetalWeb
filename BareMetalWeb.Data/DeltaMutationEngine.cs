@@ -21,7 +21,7 @@ public static class DeltaMutationEngine
     /// 6. Save
     /// 7. Return updated entity
     /// </summary>
-    public static async ValueTask<(BaseDataObject? Entity, MutationResult Result)> ApplyDeltaAsync(
+    public static async ValueTask<(DataRecord? Entity, MutationResult Result)> ApplyDeltaAsync(
         DataEntityMetadata meta,
         EntityLayout layout,
         MutationDelta delta,
@@ -36,7 +36,7 @@ public static class DeltaMutationEngine
         var loaded = await DataScaffold.LoadAsync(meta, delta.RowId, cancellationToken);
         if (loaded is null)
             return (null, MutationResult.EntityNotFound);
-        if (loaded is not BaseDataObject entity)
+        if (loaded is not DataRecord entity)
             return (null, MutationResult.TypeMismatch);
 
         // Optimistic concurrency check
@@ -116,8 +116,8 @@ public static class DeltaMutationEngine
     /// </summary>
     public static MutationDelta BuildDeltaFromEntities(
         EntityLayout layout,
-        BaseDataObject oldEntity,
-        BaseDataObject newEntity)
+        DataRecord oldEntity,
+        DataRecord newEntity)
     {
         var changes = new List<FieldDelta>(layout.Fields.Length);
 

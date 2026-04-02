@@ -175,7 +175,7 @@ public sealed class ServerLookupResolver : ILookupResolver
             return rec.GetField(rec.Schema, fieldName);
 
         // Use metadata-first lookup (compiled delegates)
-        if (entity is BaseDataObject bdo)
+        if (entity is DataRecord bdo)
         {
             var meta = DataScaffold.GetEntityByName(bdo.EntityTypeName);
             if (meta != null)
@@ -187,7 +187,7 @@ public sealed class ServerLookupResolver : ILookupResolver
         }
 
         // Metadata-driven field access via cached compiled delegate
-        var entityName = entity is BaseDataObject bdoE ? bdoE.EntityTypeName : string.Empty;
+        var entityName = entity is DataRecord bdoE ? bdoE.EntityTypeName : string.Empty;
         var getter = _extractCache.GetOrAdd((entityName, fieldName), static key =>
         {
             var meta = DataScaffold.GetEntityByName(key.Item1);

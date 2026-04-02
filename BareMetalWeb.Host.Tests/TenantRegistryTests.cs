@@ -289,16 +289,16 @@ public sealed class TenantRegistryTests : IDisposable
         public string IndexSnapshotExtension => string.Empty;
         public string IndexTempExtension => string.Empty;
         public bool CanHandle(Type type) => true;
-        public void Save<T>(T obj) where T : BaseDataObject { }
-        public ValueTask SaveAsync<T>(T obj, CancellationToken ct = default) where T : BaseDataObject => ValueTask.CompletedTask;
-        public T? Load<T>(uint key) where T : BaseDataObject => null;
-        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken ct = default) where T : BaseDataObject => ValueTask.FromResult<T?>(null);
-        public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject => Array.Empty<T>();
-        public ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null, CancellationToken ct = default) where T : BaseDataObject => ValueTask.FromResult<IEnumerable<T>>(Array.Empty<T>());
-        public int Count<T>(QueryDefinition? query = null) where T : BaseDataObject => 0;
-        public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken ct = default) where T : BaseDataObject => ValueTask.FromResult(0);
-        public void Delete<T>(uint key) where T : BaseDataObject { }
-        public ValueTask DeleteAsync<T>(uint key, CancellationToken ct = default) where T : BaseDataObject => ValueTask.CompletedTask;
+        public void Save<T>(T obj) where T : DataRecord { }
+        public ValueTask SaveAsync<T>(T obj, CancellationToken ct = default) where T : DataRecord => ValueTask.CompletedTask;
+        public T? Load<T>(uint key) where T : DataRecord => null;
+        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken ct = default) where T : DataRecord => ValueTask.FromResult<T?>(null);
+        public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : DataRecord => Array.Empty<T>();
+        public ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null, CancellationToken ct = default) where T : DataRecord => ValueTask.FromResult<IEnumerable<T>>(Array.Empty<T>());
+        public int Count<T>(QueryDefinition? query = null) where T : DataRecord => 0;
+        public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken ct = default) where T : DataRecord => ValueTask.FromResult(0);
+        public void Delete<T>(uint key) where T : DataRecord { }
+        public ValueTask DeleteAsync<T>(uint key, CancellationToken ct = default) where T : DataRecord => ValueTask.CompletedTask;
         public IDisposable AcquireIndexLock(string e, string f) => new D();
         public bool IndexFileExists(string e, string f, IndexFileKind k) => false;
         public System.IO.Stream OpenIndexRead(string e, string f, IndexFileKind k) => throw new NotImplementedException();
@@ -314,12 +314,12 @@ public sealed class TenantRegistryTests : IDisposable
         private sealed class D : IDisposable { public void Dispose() { } }
 
         // ── Non-generic stubs ──────────────────────────────────────────
-        public void Save(string e, BaseDataObject o) => throw new NotSupportedException();
-        public ValueTask SaveAsync(string e, BaseDataObject o, CancellationToken ct = default) => throw new NotSupportedException();
-        public BaseDataObject? Load(string e, uint k) => throw new NotSupportedException();
-        public ValueTask<BaseDataObject?> LoadAsync(string e, uint k, CancellationToken ct = default) => throw new NotSupportedException();
-        public IEnumerable<BaseDataObject> Query(string e, QueryDefinition? q = null) => throw new NotSupportedException();
-        public ValueTask<IEnumerable<BaseDataObject>> QueryAsync(string e, QueryDefinition? q = null, CancellationToken ct = default) => throw new NotSupportedException();
+        public void Save(string e, DataRecord o) => throw new NotSupportedException();
+        public ValueTask SaveAsync(string e, DataRecord o, CancellationToken ct = default) => throw new NotSupportedException();
+        public DataRecord? Load(string e, uint k) => throw new NotSupportedException();
+        public ValueTask<DataRecord?> LoadAsync(string e, uint k, CancellationToken ct = default) => throw new NotSupportedException();
+        public IEnumerable<DataRecord> Query(string e, QueryDefinition? q = null) => throw new NotSupportedException();
+        public ValueTask<IEnumerable<DataRecord>> QueryAsync(string e, QueryDefinition? q = null, CancellationToken ct = default) => throw new NotSupportedException();
         public int Count(string e, QueryDefinition? q = null) => throw new NotSupportedException();
         public ValueTask<int> CountAsync(string e, QueryDefinition? q = null, CancellationToken ct = default) => throw new NotSupportedException();
         public void Delete(string e, uint k) => throw new NotSupportedException();

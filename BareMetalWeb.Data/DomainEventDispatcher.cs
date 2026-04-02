@@ -30,7 +30,7 @@ public static class DomainEventDispatcher
     /// </summary>
     public static async ValueTask<IReadOnlyList<DomainEventResult>> DispatchAsync(
         TransactionEnvelope envelope,
-        IReadOnlyDictionary<string, (DataEntityMetadata Meta, BaseDataObject BeforeEntity, BaseDataObject AfterEntity, EntityLayout Layout)> entityStates,
+        IReadOnlyDictionary<string, (DataEntityMetadata Meta, DataRecord BeforeEntity, DataRecord AfterEntity, EntityLayout Layout)> entityStates,
         Func<string, ActionDef?> actionResolver,
         TransactionCommitEngine commitEngine,
         string userName,
@@ -69,8 +69,8 @@ public static class DomainEventDispatcher
     private static List<SubscriptionEntry> FindMatchingSubscriptions(
         IReadOnlyList<SubscriptionEntry> all,
         string entitySlug,
-        BaseDataObject before,
-        BaseDataObject after,
+        DataRecord before,
+        DataRecord after,
         EntityLayout layout)
     {
         var matched = new List<SubscriptionEntry>();
@@ -127,7 +127,7 @@ public static class DomainEventDispatcher
 
     private static async ValueTask<DomainEventResult> FireSubscriptionAsync(
         SubscriptionEntry sub,
-        (DataEntityMetadata Meta, BaseDataObject BeforeEntity, BaseDataObject AfterEntity, EntityLayout Layout) state,
+        (DataEntityMetadata Meta, DataRecord BeforeEntity, DataRecord AfterEntity, EntityLayout Layout) state,
         AggregateMutation sourceMutation,
         Func<string, ActionDef?> actionResolver,
         TransactionCommitEngine commitEngine,
@@ -238,7 +238,7 @@ public static class DomainEventDispatcher
         return entries;
     }
 
-    private static string GetField(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
+    private static string GetField(DataRecord obj, DataEntityMetadata meta, string fieldName)
     {
         DataFieldMetadata? field = null;
         foreach (var f in meta.Fields)

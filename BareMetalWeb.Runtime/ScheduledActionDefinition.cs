@@ -8,7 +8,7 @@ namespace BareMetalWeb.Runtime;
 /// and executes matching actions against qualifying records.
 /// </summary>
 [DataEntity("Scheduled Actions", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1006)]
-public class ScheduledActionDefinition : BaseDataObject
+public class ScheduledActionDefinition : DataRecord
 {
     public override string EntityTypeName => "ScheduledActionDefinition";
     private const int Ord_EntityId = BaseFieldCount + 0;

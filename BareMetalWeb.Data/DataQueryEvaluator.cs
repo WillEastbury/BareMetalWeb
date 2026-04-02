@@ -86,7 +86,7 @@ public sealed class DataQueryEvaluator : IDataQueryEvaluator
         QueryDefinition? query,
         int skip = 0,
         int top  = int.MaxValue)
-        where T : BaseDataObject
+        where T : DataRecord
     {
         if (query == null || (query.Clauses.Count == 0 && query.Groups.Count == 0))
         {
@@ -399,7 +399,7 @@ public sealed class DataQueryEvaluator : IDataQueryEvaluator
 
     private static bool TryGetMemberValue(object obj, string field, out object? value, out Type memberType)
     {
-        if (obj is BaseDataObject dataObject)
+        if (obj is DataRecord dataObject)
         {
             var meta = DataScaffold.GetEntityByName(dataObject.EntityTypeName);
             if (meta != null)
@@ -425,21 +425,21 @@ public sealed class DataQueryEvaluator : IDataQueryEvaluator
                     value = dataObject.GetFieldValue(fieldMap[mid].Ordinal);
                     // Use schema CLR type when available; only fall back to typeof(object) for untyped slots
                     var schema = dataObject.Schema;
-                    if (schema != null && fieldMap[mid].Ordinal >= BaseDataObject.BaseFieldCount)
+                    if (schema != null && fieldMap[mid].Ordinal >= DataRecord.BaseFieldCount)
                     {
-                        int schemaIdx = fieldMap[mid].Ordinal - BaseDataObject.BaseFieldCount;
+                        int schemaIdx = fieldMap[mid].Ordinal - DataRecord.BaseFieldCount;
                         memberType = schemaIdx < schema.ClrTypes.Length ? schema.ClrTypes[schemaIdx] : typeof(object);
                     }
-                    else if (fieldMap[mid].Ordinal < BaseDataObject.BaseFieldCount)
+                    else if (fieldMap[mid].Ordinal < DataRecord.BaseFieldCount)
                     {
                         // Well-known base field types — avoids GetType()
                         memberType = fieldMap[mid].Ordinal switch
                         {
-                            BaseDataObject.Ord_Key => typeof(uint),
-                            BaseDataObject.Ord_Identifier => typeof(string),
-                            BaseDataObject.Ord_CreatedOnUtc or BaseDataObject.Ord_UpdatedOnUtc => typeof(DateTime),
-                            BaseDataObject.Ord_CreatedBy or BaseDataObject.Ord_UpdatedBy or BaseDataObject.Ord_ETag => typeof(string),
-                            BaseDataObject.Ord_Version => typeof(int),
+                            DataRecord.Ord_Key => typeof(uint),
+                            DataRecord.Ord_Identifier => typeof(string),
+                            DataRecord.Ord_CreatedOnUtc or DataRecord.Ord_UpdatedOnUtc => typeof(DateTime),
+                            DataRecord.Ord_CreatedBy or DataRecord.Ord_UpdatedBy or DataRecord.Ord_ETag => typeof(string),
+                            DataRecord.Ord_Version => typeof(int),
                             _ => typeof(object)
                         };
                     }

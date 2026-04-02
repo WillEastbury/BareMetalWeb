@@ -8,7 +8,7 @@ namespace BareMetalWeb.Runtime;
 /// handled by <see cref="ICommandService"/>.
 /// </summary>
 [DataEntity("Action Definitions", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1003)]
-public class ActionDefinition : BaseDataObject
+public class ActionDefinition : DataRecord
 {
     public override string EntityTypeName => "ActionDefinition";
     private const int Ord_EntityId = BaseFieldCount + 0;

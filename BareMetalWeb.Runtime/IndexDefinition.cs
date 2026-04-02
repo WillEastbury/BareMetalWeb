@@ -7,7 +7,7 @@ namespace BareMetalWeb.Runtime;
 /// Describes which fields should be indexed for efficient query filtering and sorting.
 /// </summary>
 [DataEntity("Index Definitions", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1002)]
-public class IndexDefinition : BaseDataObject
+public class IndexDefinition : DataRecord
 {
     public override string EntityTypeName => "IndexDefinition";
     private const int Ord_EntityId = BaseFieldCount + 0;

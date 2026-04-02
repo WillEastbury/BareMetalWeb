@@ -222,7 +222,7 @@ public static class ProductRenderer
 
     private static string Enc(string s) => System.Net.WebUtility.HtmlEncode(s);
 
-    private static string GetField(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
+    private static string GetField(DataRecord obj, DataEntityMetadata meta, string fieldName)
     {
         BareMetalWeb.Core.DataFieldMetadata? field = null;
         foreach (var f in meta.Fields)

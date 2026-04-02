@@ -47,7 +47,7 @@ public class IdGenerationTests
     }
 
     // Test entities
-    private class TestEntity : BaseDataObject
+    private class TestEntity : DataRecord
     {
         internal new const int TotalFieldCount = BaseFieldCount;
 
@@ -68,7 +68,7 @@ public class IdGenerationTests
         public TestEntity(string createdBy) : base(TotalFieldCount, createdBy) { }
     }
 
-    private class AnotherTestEntity : BaseDataObject
+    private class AnotherTestEntity : DataRecord
     {
         internal new const int TotalFieldCount = BaseFieldCount;
 
@@ -90,7 +90,7 @@ public class IdGenerationTests
     }
 
     [DataEntity("TestEntitiesWithAutoId")]
-    private class TestEntityWithAutoId : BaseDataObject
+    private class TestEntityWithAutoId : DataRecord
     {
         public override string EntityTypeName => "TestEntitiesWithAutoId";
         private const int Ord_Name = BaseFieldCount + 0;
@@ -124,7 +124,7 @@ public class IdGenerationTests
     }
 
     [DataEntity("TestEntitiesWithSequentialId")]
-    private class TestEntityWithSequentialId : BaseDataObject
+    private class TestEntityWithSequentialId : DataRecord
     {
         public override string EntityTypeName => "TestEntitiesWithSequentialId";
         private const int Ord_Name = BaseFieldCount + 0;

@@ -13,7 +13,7 @@ namespace BareMetalWeb.Runtime;
 /// <c>ForSet</c>, <c>ForSetSequential</c>, <c>InvokeIf</c>.
 /// </summary>
 [DataEntity("Action Commands", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1004)]
-public class ActionCommandDefinition : BaseDataObject
+public class ActionCommandDefinition : DataRecord
 {
     public override string EntityTypeName => "ActionCommandDefinition";
     private const int Ord_ActionId = BaseFieldCount + 0;

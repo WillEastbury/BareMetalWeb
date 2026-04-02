@@ -13,7 +13,7 @@ namespace BareMetalWeb.Data;
     ShowOnNav = false,
     IdGeneration = AutoIdStrategy.Sequential
 )]
-public sealed class FileAttachment : BaseDataObject
+public sealed class FileAttachment : DataRecord
 {
     public override string EntityTypeName => "FileAttachment";
     private const int Ord_RecordType = BaseFieldCount + 0;

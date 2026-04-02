@@ -54,7 +54,7 @@ public sealed class AuditService
     private DataEntityMetadata? GetAuditMeta()
         => DataScaffold.TryGetEntity("auditentry", out var meta) ? meta : null;
 
-    private BaseDataObject? CreateAuditRecord(DataEntityMetadata meta, string userName)
+    private DataRecord? CreateAuditRecord(DataEntityMetadata meta, string userName)
     {
         var entry = meta.Handlers.Create();
         entry.CreatedBy = userName;
@@ -62,13 +62,13 @@ public sealed class AuditService
         return entry;
     }
 
-    private static void SetField(BaseDataObject record, DataEntityMetadata meta, string fieldName, object? value)
+    private static void SetField(DataRecord record, DataEntityMetadata meta, string fieldName, object? value)
         => meta.FindField(fieldName)?.SetValueFn(record, value);
 
     /// <summary>
     /// Captures an audit record for entity creation
     /// </summary>
-    public async ValueTask AuditCreateAsync(string entityName, BaseDataObject entity, string userName, CancellationToken cancellationToken = default)
+    public async ValueTask AuditCreateAsync(string entityName, DataRecord entity, string userName, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -95,7 +95,7 @@ public sealed class AuditService
     /// <summary>
     /// Captures an audit record for entity update with field-level change tracking
     /// </summary>
-    public async ValueTask AuditUpdateAsync(string entityName, BaseDataObject oldEntity, BaseDataObject newEntity, string userName, CancellationToken cancellationToken = default)
+    public async ValueTask AuditUpdateAsync(string entityName, DataRecord oldEntity, DataRecord newEntity, string userName, CancellationToken cancellationToken = default)
     {
         try
         {
@@ -159,7 +159,7 @@ public sealed class AuditService
     /// </summary>
     public async ValueTask AuditRemoteCommandAsync(
         string entityName,
-        BaseDataObject entity,
+        DataRecord entity,
         string commandName,
         string userName,
         Dictionary<string, object?>? parameters = null,
@@ -194,13 +194,13 @@ public sealed class AuditService
     /// <summary>
     /// Gets audit history for a specific entity
     /// </summary>
-    public async ValueTask<IEnumerable<BaseDataObject>> GetEntityHistoryAsync(
+    public async ValueTask<IEnumerable<DataRecord>> GetEntityHistoryAsync(
         string entityName,
         uint entityKey,
         CancellationToken cancellationToken = default)
     {
         var meta = GetAuditMeta();
-        if (meta == null) return Array.Empty<BaseDataObject>();
+        if (meta == null) return Array.Empty<DataRecord>();
 
         var query = new QueryDefinition
         {
@@ -221,7 +221,7 @@ public sealed class AuditService
     /// <summary>
     /// Gets all audit entries with optional filtering
     /// </summary>
-    public async ValueTask<IEnumerable<BaseDataObject>> QueryAuditLogAsync(
+    public async ValueTask<IEnumerable<DataRecord>> QueryAuditLogAsync(
         string? entityType = null,
         string? userName = null,
         DateTime? fromDate = null,
@@ -231,7 +231,7 @@ public sealed class AuditService
         CancellationToken cancellationToken = default)
     {
         var meta = GetAuditMeta();
-        if (meta == null) return Array.Empty<BaseDataObject>();
+        if (meta == null) return Array.Empty<DataRecord>();
 
         var clauses = new List<QueryClause>();
 
@@ -266,7 +266,7 @@ public sealed class AuditService
     /// <summary>
     /// Detects changes between old and new entity instances using pre-compiled delegates.
     /// </summary>
-    private List<FieldChange> DetectChanges(string entityName, BaseDataObject oldEntity, BaseDataObject newEntity)
+    private List<FieldChange> DetectChanges(string entityName, DataRecord oldEntity, DataRecord newEntity)
     {
         var changes = new List<FieldChange>();
 
@@ -418,7 +418,7 @@ public sealed class AuditService
         }
     }
 
-    private async ValueTask SaveAuditEntryAsync(DataEntityMetadata meta, BaseDataObject entry, string operationName, CancellationToken cancellationToken)
+    private async ValueTask SaveAuditEntryAsync(DataEntityMetadata meta, DataRecord entry, string operationName, CancellationToken cancellationToken)
     {
         // Auto-assign a sequential key if not already set
         if (entry.Key == 0)

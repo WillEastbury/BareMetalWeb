@@ -9,7 +9,7 @@ namespace BareMetalWeb.Data;
 /// </summary>
 [DataEntity("Dashboard Definitions", Slug = "dashboard-definitions", ShowOnNav = false,
     Permissions = "admin", NavGroup = "Admin", NavOrder = 95)]
-public sealed class DashboardDefinition : BaseDataObject
+public sealed class DashboardDefinition : DataRecord
 {
     public override string EntityTypeName => "DashboardDefinition";
     private const int Ord_Name = BaseFieldCount + 0;

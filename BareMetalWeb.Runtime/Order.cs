@@ -7,7 +7,7 @@ namespace BareMetalWeb.Runtime;
 /// payment method, and fulfilment status.
 /// </summary>
 [DataEntity("Orders", ShowOnNav = true, NavGroup = "Sales", NavOrder = 500)]
-public class Order : BaseDataObject
+public class Order : DataRecord
 {
     public override string EntityTypeName => "Order";
     private const int Ord_OrderNumber = BaseFieldCount + 0;

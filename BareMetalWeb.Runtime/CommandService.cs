@@ -162,7 +162,7 @@ public sealed class CommandService : ICommandService
         DataEntityMetadata meta,
         CommandIntent intent,
         RuntimeActionModel action,
-        BaseDataObject obj,
+        DataRecord obj,
         CancellationToken ct)
     {
         // Build evaluation context from current field values
@@ -247,7 +247,7 @@ public sealed class CommandService : ICommandService
     }
 
     /// <summary>Builds an expression evaluation context from an entity's current field values.</summary>
-    private static IReadOnlyDictionary<string, object?> BuildContext(DataEntityMetadata meta, BaseDataObject obj)
+    private static IReadOnlyDictionary<string, object?> BuildContext(DataEntityMetadata meta, DataRecord obj)
     {
         var context = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         var serialized = QueryService.SerializeObject(obj, meta);

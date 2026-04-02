@@ -9,19 +9,19 @@ using BareMetalWeb.Core;
 namespace BareMetalWeb.Data;
 
 /// <summary>
-/// Auth operations on BaseDataObject records using generic field access.
+/// Auth operations on DataRecord records using generic field access.
 /// Replaces typed User.SetPassword/VerifyPassword/etc. for the metadata-only architecture.
 /// Works with both typed User objects and DataRecord instances.
 /// </summary>
 public static class UserAuthHelper
 {
-    private static string? GetString(BaseDataObject record, DataEntityMetadata meta, string fieldName)
+    private static string? GetString(DataRecord record, DataEntityMetadata meta, string fieldName)
     {
         var field = meta.FindField(fieldName);
         return field?.GetValueFn(record)?.ToString();
     }
 
-    private static int GetInt(BaseDataObject record, DataEntityMetadata meta, string fieldName)
+    private static int GetInt(DataRecord record, DataEntityMetadata meta, string fieldName)
     {
         var field = meta.FindField(fieldName);
         if (field == null) return 0;
@@ -31,7 +31,7 @@ public static class UserAuthHelper
         return 0;
     }
 
-    private static DateTime? GetDateTimeNullable(BaseDataObject record, DataEntityMetadata meta, string fieldName)
+    private static DateTime? GetDateTimeNullable(DataRecord record, DataEntityMetadata meta, string fieldName)
     {
         var field = meta.FindField(fieldName);
         if (field == null) return null;
@@ -41,7 +41,7 @@ public static class UserAuthHelper
         return null;
     }
 
-    private static long GetLong(BaseDataObject record, DataEntityMetadata meta, string fieldName)
+    private static long GetLong(DataRecord record, DataEntityMetadata meta, string fieldName)
     {
         var field = meta.FindField(fieldName);
         if (field == null) return 0;
@@ -52,7 +52,7 @@ public static class UserAuthHelper
         return 0;
     }
 
-    private static bool GetBool(BaseDataObject record, DataEntityMetadata meta, string fieldName)
+    private static bool GetBool(DataRecord record, DataEntityMetadata meta, string fieldName)
     {
         var field = meta.FindField(fieldName);
         if (field == null) return false;
@@ -62,14 +62,14 @@ public static class UserAuthHelper
         return false;
     }
 
-    private static void Set(BaseDataObject record, DataEntityMetadata meta, string fieldName, object? value)
+    private static void Set(DataRecord record, DataEntityMetadata meta, string fieldName, object? value)
     {
         meta.FindField(fieldName)?.SetValueFn(record, value);
     }
 
     // ── Password ────────────────────────────────────────────────────
 
-    public static void SetPassword(BaseDataObject record, DataEntityMetadata meta, string password, int? iterations = null)
+    public static void SetPassword(DataRecord record, DataEntityMetadata meta, string password, int? iterations = null)
     {
         if (string.IsNullOrWhiteSpace(password))
             throw new ArgumentException("Password cannot be empty.", nameof(password));
@@ -83,7 +83,7 @@ public static class UserAuthHelper
         Set(record, meta, "PasswordIterations", result.Iterations);
     }
 
-    public static bool VerifyPassword(BaseDataObject record, DataEntityMetadata meta, string password)
+    public static bool VerifyPassword(DataRecord record, DataEntityMetadata meta, string password)
     {
         var hash = GetString(record, meta, "PasswordHash");
         var salt = GetString(record, meta, "PasswordSalt");
@@ -98,13 +98,13 @@ public static class UserAuthHelper
 
     // ── Lockout ─────────────────────────────────────────────────────
 
-    public static bool IsLockedOut(BaseDataObject record, DataEntityMetadata meta)
+    public static bool IsLockedOut(DataRecord record, DataEntityMetadata meta)
     {
         var lockout = GetDateTimeNullable(record, meta, "LockoutUntilUtc");
         return lockout.HasValue && lockout.Value > DateTime.UtcNow;
     }
 
-    public static void RegisterFailedLogin(BaseDataObject record, DataEntityMetadata meta, int maxFailed = 5, TimeSpan? lockoutDuration = null)
+    public static void RegisterFailedLogin(DataRecord record, DataEntityMetadata meta, int maxFailed = 5, TimeSpan? lockoutDuration = null)
     {
         var count = GetInt(record, meta, "FailedLoginCount") + 1;
         Set(record, meta, "FailedLoginCount", count);
@@ -112,14 +112,14 @@ public static class UserAuthHelper
             Set(record, meta, "LockoutUntilUtc", DateTime.UtcNow.Add(lockoutDuration ?? TimeSpan.FromMinutes(15)));
     }
 
-    public static void RegisterSuccessfulLogin(BaseDataObject record, DataEntityMetadata meta)
+    public static void RegisterSuccessfulLogin(DataRecord record, DataEntityMetadata meta)
     {
         Set(record, meta, "FailedLoginCount", 0);
         Set(record, meta, "LockoutUntilUtc", null);
         Set(record, meta, "LastLoginUtc", DateTime.UtcNow);
     }
 
-    public static void ResetLockout(BaseDataObject record, DataEntityMetadata meta)
+    public static void ResetLockout(DataRecord record, DataEntityMetadata meta)
     {
         Set(record, meta, "FailedLoginCount", 0);
         Set(record, meta, "LockoutUntilUtc", null);
@@ -127,55 +127,55 @@ public static class UserAuthHelper
 
     // ── MFA state access ────────────────────────────────────────────
 
-    public static bool IsMfaEnabled(BaseDataObject record, DataEntityMetadata meta)
+    public static bool IsMfaEnabled(DataRecord record, DataEntityMetadata meta)
         => GetBool(record, meta, "MfaEnabled");
 
-    public static string? GetMfaSecret(BaseDataObject record, DataEntityMetadata meta)
+    public static string? GetMfaSecret(DataRecord record, DataEntityMetadata meta)
         => GetString(record, meta, "MfaSecret");
 
-    public static long GetMfaLastVerifiedStep(BaseDataObject record, DataEntityMetadata meta)
+    public static long GetMfaLastVerifiedStep(DataRecord record, DataEntityMetadata meta)
         => GetLong(record, meta, "MfaLastVerifiedStep");
 
-    public static void SetMfaLastVerifiedStep(BaseDataObject record, DataEntityMetadata meta, long step)
+    public static void SetMfaLastVerifiedStep(DataRecord record, DataEntityMetadata meta, long step)
         => Set(record, meta, "MfaLastVerifiedStep", step);
 
-    public static string? GetMfaSecretEncrypted(BaseDataObject record, DataEntityMetadata meta)
+    public static string? GetMfaSecretEncrypted(DataRecord record, DataEntityMetadata meta)
         => GetString(record, meta, "MfaSecretEncrypted");
 
-    public static void SetMfaSecretEncrypted(BaseDataObject record, DataEntityMetadata meta, string? value)
+    public static void SetMfaSecretEncrypted(DataRecord record, DataEntityMetadata meta, string? value)
         => Set(record, meta, "MfaSecretEncrypted", value);
 
-    public static string? GetMfaPendingSecret(BaseDataObject record, DataEntityMetadata meta)
+    public static string? GetMfaPendingSecret(DataRecord record, DataEntityMetadata meta)
         => GetString(record, meta, "MfaPendingSecret");
 
-    public static void SetMfaPendingSecret(BaseDataObject record, DataEntityMetadata meta, string? value)
+    public static void SetMfaPendingSecret(DataRecord record, DataEntityMetadata meta, string? value)
         => Set(record, meta, "MfaPendingSecret", value);
 
-    public static DateTime? GetMfaPendingExpiresUtc(BaseDataObject record, DataEntityMetadata meta)
+    public static DateTime? GetMfaPendingExpiresUtc(DataRecord record, DataEntityMetadata meta)
         => GetDateTimeNullable(record, meta, "MfaPendingExpiresUtc");
 
-    public static void SetMfaPendingExpiresUtc(BaseDataObject record, DataEntityMetadata meta, DateTime? value)
+    public static void SetMfaPendingExpiresUtc(DataRecord record, DataEntityMetadata meta, DateTime? value)
         => Set(record, meta, "MfaPendingExpiresUtc", value);
 
-    public static int GetMfaPendingFailedAttempts(BaseDataObject record, DataEntityMetadata meta)
+    public static int GetMfaPendingFailedAttempts(DataRecord record, DataEntityMetadata meta)
         => GetInt(record, meta, "MfaPendingFailedAttempts");
 
-    public static void SetMfaPendingFailedAttempts(BaseDataObject record, DataEntityMetadata meta, int value)
+    public static void SetMfaPendingFailedAttempts(DataRecord record, DataEntityMetadata meta, int value)
         => Set(record, meta, "MfaPendingFailedAttempts", value);
 
-    public static string? GetMfaPendingSecretEncrypted(BaseDataObject record, DataEntityMetadata meta)
+    public static string? GetMfaPendingSecretEncrypted(DataRecord record, DataEntityMetadata meta)
         => GetString(record, meta, "MfaPendingSecretEncrypted");
 
-    public static void SetMfaPendingSecretEncrypted(BaseDataObject record, DataEntityMetadata meta, string? value)
+    public static void SetMfaPendingSecretEncrypted(DataRecord record, DataEntityMetadata meta, string? value)
         => Set(record, meta, "MfaPendingSecretEncrypted", value);
 
-    public static void SetMfaEnabled(BaseDataObject record, DataEntityMetadata meta, bool value)
+    public static void SetMfaEnabled(DataRecord record, DataEntityMetadata meta, bool value)
         => Set(record, meta, "MfaEnabled", value);
 
-    public static void SetMfaSecret(BaseDataObject record, DataEntityMetadata meta, string? value)
+    public static void SetMfaSecret(DataRecord record, DataEntityMetadata meta, string? value)
         => Set(record, meta, "MfaSecret", value);
 
-    public static string[]? GetMfaBackupCodeHashes(BaseDataObject record, DataEntityMetadata meta)
+    public static string[]? GetMfaBackupCodeHashes(DataRecord record, DataEntityMetadata meta)
     {
         var field = meta.FindField("MfaBackupCodeHashes");
         if (field == null) return null;
@@ -186,30 +186,30 @@ public static class UserAuthHelper
         return Array.Empty<string>();
     }
 
-    public static void SetMfaBackupCodeHashes(BaseDataObject record, DataEntityMetadata meta, string[] value)
+    public static void SetMfaBackupCodeHashes(DataRecord record, DataEntityMetadata meta, string[] value)
         => Set(record, meta, "MfaBackupCodeHashes", value);
 
-    public static DateTime? GetMfaBackupCodesGeneratedUtc(BaseDataObject record, DataEntityMetadata meta)
+    public static DateTime? GetMfaBackupCodesGeneratedUtc(DataRecord record, DataEntityMetadata meta)
         => GetDateTimeNullable(record, meta, "MfaBackupCodesGeneratedUtc");
 
-    public static void SetMfaBackupCodesGeneratedUtc(BaseDataObject record, DataEntityMetadata meta, DateTime? value)
+    public static void SetMfaBackupCodesGeneratedUtc(DataRecord record, DataEntityMetadata meta, DateTime? value)
         => Set(record, meta, "MfaBackupCodesGeneratedUtc", value);
 
     // ── Common user property access ─────────────────────────────────
 
-    public static string GetUserName(BaseDataObject record, DataEntityMetadata meta)
+    public static string GetUserName(DataRecord record, DataEntityMetadata meta)
         => GetString(record, meta, "UserName") ?? string.Empty;
 
-    public static string GetDisplayName(BaseDataObject record, DataEntityMetadata meta)
+    public static string GetDisplayName(DataRecord record, DataEntityMetadata meta)
         => GetString(record, meta, "DisplayName") ?? string.Empty;
 
-    public static string GetEmail(BaseDataObject record, DataEntityMetadata meta)
+    public static string GetEmail(DataRecord record, DataEntityMetadata meta)
         => GetString(record, meta, "Email") ?? string.Empty;
 
-    public static bool GetIsActive(BaseDataObject record, DataEntityMetadata meta)
+    public static bool GetIsActive(DataRecord record, DataEntityMetadata meta)
         => GetBool(record, meta, "IsActive");
 
-    public static string[] GetPermissions(BaseDataObject record, DataEntityMetadata meta)
+    public static string[] GetPermissions(DataRecord record, DataEntityMetadata meta)
     {
         var field = meta.FindField("Permissions");
         if (field == null) return Array.Empty<string>();
@@ -222,7 +222,7 @@ public static class UserAuthHelper
 
     // ── SystemPrincipal API key helpers ─────────────────────────────
 
-    public static List<string> GetApiKeyHashes(BaseDataObject record, DataEntityMetadata meta)
+    public static List<string> GetApiKeyHashes(DataRecord record, DataEntityMetadata meta)
     {
         var field = meta.FindField("ApiKeyHashes");
         if (field == null) return new List<string>();
@@ -233,7 +233,7 @@ public static class UserAuthHelper
         return new List<string>();
     }
 
-    public static void AddApiKey(BaseDataObject record, DataEntityMetadata meta, string apiKey, int iterations = 100_000)
+    public static void AddApiKey(DataRecord record, DataEntityMetadata meta, string apiKey, int iterations = 100_000)
     {
         var hashes = GetApiKeyHashes(record, meta);
         var encoded = EncodeApiKey(record, meta, apiKey);
@@ -242,7 +242,7 @@ public static class UserAuthHelper
         Set(record, meta, "ApiKeyHashes", hashes);
     }
 
-    public static bool HasApiKey(BaseDataObject record, DataEntityMetadata meta, string apiKey)
+    public static bool HasApiKey(DataRecord record, DataEntityMetadata meta, string apiKey)
     {
         var hashes = GetApiKeyHashes(record, meta);
         if (string.IsNullOrWhiteSpace(apiKey) || hashes.Count == 0)
@@ -265,7 +265,7 @@ public static class UserAuthHelper
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
-    public static async ValueTask<BaseDataObject?> FindByApiKeyAsync(string apiKey, CancellationToken cancellationToken = default)
+    public static async ValueTask<DataRecord?> FindByApiKeyAsync(string apiKey, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(apiKey))
             return null;
@@ -284,7 +284,7 @@ public static class UserAuthHelper
         return null;
     }
 
-    private static string EncodeApiKey(BaseDataObject record, DataEntityMetadata meta, string apiKey)
+    private static string EncodeApiKey(DataRecord record, DataEntityMetadata meta, string apiKey)
     {
         // Use HMAC-SHA256 keyed by the user's unique record ID with a domain-separation prefix.
         // This avoids embedding the username in plaintext (the old approach used Base64("{username}:{apikey}"),
@@ -319,7 +319,7 @@ public static class UserAuthHelper
 
     // ── Generic user lookup helpers ─────────────────────────────────
 
-    public static async ValueTask<BaseDataObject?> FindUserByEmailOrUserNameAsync(string value, CancellationToken cancellationToken = default)
+    public static async ValueTask<DataRecord?> FindUserByEmailOrUserNameAsync(string value, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(value))
             return null;
@@ -340,7 +340,7 @@ public static class UserAuthHelper
         return null;
     }
 
-    public static async ValueTask<BaseDataObject?> FindUserByEmailAsync(string email, CancellationToken cancellationToken = default)
+    public static async ValueTask<DataRecord?> FindUserByEmailAsync(string email, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(email))
             return null;
@@ -358,7 +358,7 @@ public static class UserAuthHelper
         return null;
     }
 
-    public static async ValueTask<BaseDataObject?> FindUserByUserNameAsync(string userName, CancellationToken cancellationToken = default)
+    public static async ValueTask<DataRecord?> FindUserByUserNameAsync(string userName, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(userName))
             return null;
@@ -382,7 +382,7 @@ public static class UserAuthHelper
     /// <summary>
     /// Load a user by key using the generic DataScaffold handlers.
     /// </summary>
-    public static async ValueTask<BaseDataObject?> GetUserByIdAsync(uint key, CancellationToken cancellationToken = default)
+    public static async ValueTask<DataRecord?> GetUserByIdAsync(uint key, CancellationToken cancellationToken = default)
     {
         if (!DataScaffold.TryGetEntity("users", out var meta))
             return null;
@@ -392,7 +392,7 @@ public static class UserAuthHelper
     /// <summary>
     /// Save a user record using the generic DataScaffold handlers.
     /// </summary>
-    public static async ValueTask SaveUserAsync(BaseDataObject record, CancellationToken cancellationToken = default)
+    public static async ValueTask SaveUserAsync(DataRecord record, CancellationToken cancellationToken = default)
     {
         if (!DataScaffold.TryGetEntity("users", out var meta))
             return;

@@ -43,10 +43,10 @@ public static class RouteRegistrationExtensions
     private static bool TryGetInboxMessageMeta(out DataEntityMetadata meta)
         => DataScaffold.TryGetEntity("inbox-messages", out meta);
 
-    private static string GetInboxFieldString(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
+    private static string GetInboxFieldString(DataRecord obj, DataEntityMetadata meta, string fieldName)
         => meta.FindField(fieldName)?.GetValueFn?.Invoke(obj)?.ToString() ?? string.Empty;
 
-    private static bool GetInboxFieldBool(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
+    private static bool GetInboxFieldBool(DataRecord obj, DataEntityMetadata meta, string fieldName)
     {
         var value = meta.FindField(fieldName)?.GetValueFn?.Invoke(obj);
         return value switch
@@ -57,7 +57,7 @@ public static class RouteRegistrationExtensions
         };
     }
 
-    private static DateTime GetInboxCreatedAtUtc(BaseDataObject obj, DataEntityMetadata meta)
+    private static DateTime GetInboxCreatedAtUtc(DataRecord obj, DataEntityMetadata meta)
     {
         var value = meta.FindField("CreatedAtUtc")?.GetValueFn?.Invoke(obj);
         return value is DateTime dateTime ? dateTime : obj.CreatedOnUtc;
@@ -848,7 +848,7 @@ public static class RouteRegistrationExtensions
 
                         foreach (var child in children)
                         {
-                            var childId = (child as BaseDataObject)?.Key.ToString() ?? string.Empty;
+                            var childId = (child as DataRecord)?.Key.ToString() ?? string.Empty;
                             var childLabel = labelField?.GetValueFn(child)?.ToString() ?? childId;
                             downstream.Add(new Dictionary<string, object?>
                             {
@@ -1384,7 +1384,7 @@ public static class RouteRegistrationExtensions
 
     // ─── Private helpers ────────────────────────────────────────────────────────
 
-    private static async ValueTask<bool> IsEntityAccessibleAsync(DataEntityMetadata entity, BaseDataObject? user, string[] userPermissions)
+    private static async ValueTask<bool> IsEntityAccessibleAsync(DataEntityMetadata entity, DataRecord? user, string[] userPermissions)
     {
         var perms = entity.Permissions ?? string.Empty;
         if (string.IsNullOrWhiteSpace(perms) || string.Equals(perms, "Public", StringComparison.OrdinalIgnoreCase))
@@ -1483,7 +1483,7 @@ public static class RouteRegistrationExtensions
                 // When the lookup's ValueField is the C# key property ("Key"), map it to
                 // "id" so the VNext SPA's loadLookupSelect correctly matches options.
                 var clientValueField = string.Equals(f.Lookup.ValueField,
-                    nameof(BaseDataObject.Key),
+                    nameof(DataRecord.Key),
                     StringComparison.OrdinalIgnoreCase) ? "id" : f.Lookup.ValueField;
                 fd["lookup"] = new Dictionary<string, object?>
                 {
@@ -2034,7 +2034,7 @@ public static class RouteRegistrationExtensions
     /// list of entities accessible to the current user.
     /// Returns <c>null</c> on any error so the client falls back to normal API calls.
     /// </summary>
-    private static async Task<string?> TryBuildMetaObjectsScriptAsync(BaseDataObject? user, string[] userPermissions, string safeNonce)
+    private static async Task<string?> TryBuildMetaObjectsScriptAsync(DataRecord? user, string[] userPermissions, string safeNonce)
     {
         try
         {
@@ -2113,7 +2113,7 @@ public static class RouteRegistrationExtensions
     /// (the client will fall back to the normal API call).
     /// </summary>
     private static async ValueTask<string?> TryBuildInitialDataScriptAsync(
-        BmwContext context, string slug, string safeNonce, BaseDataObject? user, CancellationToken cancellationToken)
+        BmwContext context, string slug, string safeNonce, DataRecord? user, CancellationToken cancellationToken)
     {
         try
         {
@@ -2750,7 +2750,7 @@ public static class RouteRegistrationExtensions
 
                 // Find the existing module record
                 var items = await meta.Handlers.QueryAsync(null, context.RequestAborted).ConfigureAwait(false);
-                BaseDataObject? existing = null;
+                DataRecord? existing = null;
                 foreach (var item in items)
                 {
                     if (meta.FieldsByName.TryGetValue("ModuleId", out var idField))
@@ -3429,7 +3429,7 @@ public static class RouteRegistrationExtensions
                 Top = 50
             };
             var rawMessages = await DataScaffold.QueryAsync(inboxMeta, query, context.RequestAborted).ConfigureAwait(false);
-            var messages = rawMessages.OfType<BaseDataObject>().ToList();
+            var messages = rawMessages.OfType<DataRecord>().ToList();
 
             context.Response.ContentType = "application/json";
             var payload = new Dictionary<string, object?>[messages.Count];
@@ -3505,7 +3505,7 @@ public static class RouteRegistrationExtensions
             { context.Response.StatusCode = 400; await context.Response.WriteAsync("{\"error\":\"Invalid id\"}"); return; }
 
             var msgRaw = await DataScaffold.LoadAsync(inboxMeta, msgKey, context.RequestAborted).ConfigureAwait(false);
-            if (msgRaw is not BaseDataObject msg || !string.Equals(GetInboxFieldString(msg, inboxMeta, "RecipientUserName"), (UserAuth.GetUserName(user) ?? user.Key.ToString()), StringComparison.OrdinalIgnoreCase))
+            if (msgRaw is not DataRecord msg || !string.Equals(GetInboxFieldString(msg, inboxMeta, "RecipientUserName"), (UserAuth.GetUserName(user) ?? user.Key.ToString()), StringComparison.OrdinalIgnoreCase))
             { context.Response.StatusCode = 404; await context.Response.WriteAsync("{\"error\":\"Not found\"}"); return; }
 
             if (!GetInboxFieldBool(msg, inboxMeta, "IsRead"))
@@ -3541,7 +3541,7 @@ public static class RouteRegistrationExtensions
             var marked = 0;
             foreach (var item in unreadRaw)
             {
-                if (item is not BaseDataObject msg)
+                if (item is not DataRecord msg)
                     continue;
 
                 inboxMeta.FindField("IsRead")?.SetValueFn(msg, true);

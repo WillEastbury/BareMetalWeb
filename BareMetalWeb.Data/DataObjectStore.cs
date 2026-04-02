@@ -49,7 +49,7 @@ public sealed class DataObjectStore : IDataObjectStore
         return ResolveSchema(ordinal);
     }
 
-    public void Save(int entityOrdinal, BaseDataObject obj)
+    public void Save(int entityOrdinal, DataRecord obj)
     {
         if (obj is null) throw new ArgumentNullException(nameof(obj));
         var schema = ResolveSchema(entityOrdinal);
@@ -59,14 +59,14 @@ public sealed class DataObjectStore : IDataObjectStore
         provider.Save(schema.EntityName, obj);
     }
 
-    public BaseDataObject? Load(int entityOrdinal, uint key)
+    public DataRecord? Load(int entityOrdinal, uint key)
     {
         if (key == 0) throw new ArgumentException("Key cannot be zero.", nameof(key));
         var schema = ResolveSchema(entityOrdinal);
         return ResolveProviderByName(schema.EntityName).Load(schema.EntityName, key);
     }
 
-    public IEnumerable<BaseDataObject> Query(int entityOrdinal, QueryDefinition? query = null)
+    public IEnumerable<DataRecord> Query(int entityOrdinal, QueryDefinition? query = null)
     {
         var schema = ResolveSchema(entityOrdinal);
         return ResolveProviderByName(schema.EntityName).Query(schema.EntityName, query);
@@ -79,13 +79,13 @@ public sealed class DataObjectStore : IDataObjectStore
         ResolveProviderByName(schema.EntityName).Delete(schema.EntityName, key);
     }
 
-    public ValueTask SaveAsync(int entityOrdinal, BaseDataObject obj, CancellationToken cancellationToken = default)
+    public ValueTask SaveAsync(int entityOrdinal, DataRecord obj, CancellationToken cancellationToken = default)
     { Save(entityOrdinal, obj); return ValueTask.CompletedTask; }
 
-    public ValueTask<BaseDataObject?> LoadAsync(int entityOrdinal, uint key, CancellationToken cancellationToken = default)
+    public ValueTask<DataRecord?> LoadAsync(int entityOrdinal, uint key, CancellationToken cancellationToken = default)
         => new(Load(entityOrdinal, key));
 
-    public ValueTask<IEnumerable<BaseDataObject>> QueryAsync(int entityOrdinal, QueryDefinition? query = null, CancellationToken cancellationToken = default)
+    public ValueTask<IEnumerable<DataRecord>> QueryAsync(int entityOrdinal, QueryDefinition? query = null, CancellationToken cancellationToken = default)
         => new(Query(entityOrdinal, query));
 
     public ValueTask<int> CountAsync(int entityOrdinal, QueryDefinition? query = null, CancellationToken cancellationToken = default)
@@ -99,7 +99,7 @@ public sealed class DataObjectStore : IDataObjectStore
 
     // ── String-based overloads (resolve name → ordinal → hot path) ──────
 
-    public void Save(string entityTypeName, BaseDataObject obj)
+    public void Save(string entityTypeName, DataRecord obj)
     {
         if (obj is null) throw new ArgumentNullException(nameof(obj));
         var provider = ResolveProviderByName(entityTypeName);
@@ -108,13 +108,13 @@ public sealed class DataObjectStore : IDataObjectStore
         provider.Save(entityTypeName, obj);
     }
 
-    public BaseDataObject? Load(string entityTypeName, uint key)
+    public DataRecord? Load(string entityTypeName, uint key)
     {
         if (key == 0) throw new ArgumentException("Key cannot be zero.", nameof(key));
         return ResolveProviderByName(entityTypeName).Load(entityTypeName, key);
     }
 
-    public IEnumerable<BaseDataObject> Query(string entityTypeName, QueryDefinition? query = null)
+    public IEnumerable<DataRecord> Query(string entityTypeName, QueryDefinition? query = null)
         => ResolveProviderByName(entityTypeName).Query(entityTypeName, query);
 
     public void Delete(string entityTypeName, uint key)
@@ -123,13 +123,13 @@ public sealed class DataObjectStore : IDataObjectStore
         ResolveProviderByName(entityTypeName).Delete(entityTypeName, key);
     }
 
-    public ValueTask SaveAsync(string entityTypeName, BaseDataObject obj, CancellationToken cancellationToken = default)
+    public ValueTask SaveAsync(string entityTypeName, DataRecord obj, CancellationToken cancellationToken = default)
     { Save(entityTypeName, obj); return ValueTask.CompletedTask; }
 
-    public ValueTask<BaseDataObject?> LoadAsync(string entityTypeName, uint key, CancellationToken cancellationToken = default)
+    public ValueTask<DataRecord?> LoadAsync(string entityTypeName, uint key, CancellationToken cancellationToken = default)
         => new(Load(entityTypeName, key));
 
-    public ValueTask<IEnumerable<BaseDataObject>> QueryAsync(string entityTypeName, QueryDefinition? query = null, CancellationToken cancellationToken = default)
+    public ValueTask<IEnumerable<DataRecord>> QueryAsync(string entityTypeName, QueryDefinition? query = null, CancellationToken cancellationToken = default)
         => new(Query(entityTypeName, query));
 
     public ValueTask<int> CountAsync(string entityTypeName, QueryDefinition? query = null, CancellationToken cancellationToken = default)

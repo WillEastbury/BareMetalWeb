@@ -21,7 +21,7 @@ public class DataRecordTests
         var record = new DataRecord(schema);
 
         Assert.Equal("TestEntity", record.EntityTypeName);
-        Assert.Equal(BaseDataObject.BaseFieldCount + 3, record.FieldCount);
+        Assert.Equal(DataRecord.BaseFieldCount + 3, record.FieldCount);
     }
 
     // ── Ordinal access (hot path) ──────────────────────────────────────────
@@ -45,8 +45,8 @@ public class DataRecordTests
         var schema = BuildTestSchema();
         var record = new DataRecord(schema);
         // Schema fields are unset by default
-        Assert.Null(record.GetValue(BaseDataObject.BaseFieldCount + 0));
-        Assert.Null(record.GetValue(BaseDataObject.BaseFieldCount + 2));
+        Assert.Null(record.GetValue(DataRecord.BaseFieldCount + 0));
+        Assert.Null(record.GetValue(DataRecord.BaseFieldCount + 2));
     }
 
     [Fact]
@@ -163,10 +163,10 @@ public class DataRecordTests
         Assert.Equal(10, record.FieldCount);
     }
 
-    // ── BaseDataObject ─────────────────────────────────────────────────────
+    // ── DataRecord ─────────────────────────────────────────────────────
 
     [Fact]
-    public void InheritsBaseDataObjectProperties()
+    public void InheritsDataRecordProperties()
     {
         var record = new DataRecord(1);
         record.Key = 42;

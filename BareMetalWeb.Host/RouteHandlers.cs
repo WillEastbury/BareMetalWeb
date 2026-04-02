@@ -289,7 +289,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        BaseDataObject? user = await UserAuthHelper.FindUserByEmailOrUserNameAsync(identifier, context.RequestAborted).ConfigureAwait(false);
+        DataRecord? user = await UserAuthHelper.FindUserByEmailOrUserNameAsync(identifier, context.RequestAborted).ConfigureAwait(false);
         if (user == null || !UserAuth.IsActive(user))
         {
             // SECURITY: Perform dummy hash to equalize timing regardless of user existence (see #1219)
@@ -427,7 +427,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        BaseDataObject? user = await UserAuth.LoadUserAsync(parsedUserId, context.RequestAborted).ConfigureAwait(false);
+        DataRecord? user = await UserAuth.LoadUserAsync(parsedUserId, context.RequestAborted).ConfigureAwait(false);
         if (user == null || !UserAuth.IsActive(user) || !UserAuth.IsMfaEnabled(user) || !TryGetActiveSecret(user, out var activeSecret, out var upgraded))
         {
             RenderMfaChallengeForm(context, "MFA is not available for this account.");
@@ -738,7 +738,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         // Provision or update user
-        BaseDataObject? user = await EntraIdService.ProvisionUserAsync(options, userInfo, context.RequestAborted)
+        DataRecord? user = await EntraIdService.ProvisionUserAsync(options, userInfo, context.RequestAborted)
             .ConfigureAwait(false);
 
         if (user == null)
@@ -1426,7 +1426,7 @@ public sealed class RouteHandlers : IRouteHandlers
         return trimmed[..maxLength] + "...";
     }
 
-    private static async ValueTask<BaseDataObject?> LoadSystemPrincipalByUserNameAsync(string userName, CancellationToken cancellationToken)
+    private static async ValueTask<DataRecord?> LoadSystemPrincipalByUserNameAsync(string userName, CancellationToken cancellationToken)
     {
         var query = new QueryDefinition
         {
@@ -1467,10 +1467,10 @@ public sealed class RouteHandlers : IRouteHandlers
         };
 
         var settings = await DataScaffold.QueryAsync(settingMeta, query, cancellationToken).ConfigureAwait(false);
-        BaseDataObject? setting = null;
+        DataRecord? setting = null;
         foreach (var existing in settings)
         {
-            if (existing is BaseDataObject obj
+            if (existing is DataRecord obj
                 && string.Equals(GetMetaString(obj, settingMeta, "SettingId"), settingId, StringComparison.OrdinalIgnoreCase))
             {
                 setting = obj;
@@ -1753,7 +1753,7 @@ public sealed class RouteHandlers : IRouteHandlers
         ));
     }
 
-    private bool RegeneratePendingMfaSecret(BaseDataObject user, bool forceNew)
+    private bool RegeneratePendingMfaSecret(DataRecord user, bool forceNew)
     {
         var changed = false;
         var pendingSecretEncrypted = UserAuth.GetMfaPendingSecretEncrypted(user);
@@ -1771,7 +1771,7 @@ public sealed class RouteHandlers : IRouteHandlers
         return changed;
     }
 
-    private string? GetPendingSecret(BaseDataObject user, out bool upgraded)
+    private string? GetPendingSecret(DataRecord user, out bool upgraded)
     {
         upgraded = false;
         var pendingSecretEncrypted = UserAuth.GetMfaPendingSecretEncrypted(user);
@@ -1802,7 +1802,7 @@ public sealed class RouteHandlers : IRouteHandlers
         return null;
     }
 
-    private bool TryGetActiveSecret(BaseDataObject user, out string secret, out bool upgraded)
+    private bool TryGetActiveSecret(DataRecord user, out string secret, out bool upgraded)
     {
         secret = string.Empty;
         upgraded = false;
@@ -1931,7 +1931,7 @@ public sealed class RouteHandlers : IRouteHandlers
         return "Too many attempts. Please try again shortly.";
     }
 
-    private static BackupCodeResult GenerateBackupCodes(BaseDataObject user, int count)
+    private static BackupCodeResult GenerateBackupCodes(DataRecord user, int count)
     {
         if (count <= 0)
             return new BackupCodeResult(Array.Empty<string>(), Array.Empty<string>());
@@ -1955,7 +1955,7 @@ public sealed class RouteHandlers : IRouteHandlers
         return Convert.ToHexString(bytes);
     }
 
-    private static string HashBackupCode(BaseDataObject user, string code)
+    private static string HashBackupCode(DataRecord user, string code)
     {
         var payload = Encoding.UTF8.GetBytes($"{user.Key}:{code}");
         return Convert.ToHexString(SHA256.HashData(payload));
@@ -2256,7 +2256,7 @@ public sealed class RouteHandlers : IRouteHandlers
             var rowNumber = i + 1;
             var idValue = idIndex >= 0 && idIndex < row.Length ? row[idIndex]?.Trim() : string.Empty;
             var isCreate = true;
-            BaseDataObject instance;
+            DataRecord instance;
             var upsertWithExplicitId = false;
             if (upsert && !string.IsNullOrWhiteSpace(idValue))
             {
@@ -2267,7 +2267,7 @@ public sealed class RouteHandlers : IRouteHandlers
                     continue;
                 }
                 var existing = await DataScaffold.LoadAsync(meta, parsedIdValue);
-                if (existing is BaseDataObject existingObject)
+                if (existing is DataRecord existingObject)
                 {
                     instance = existingObject;
                     isCreate = false;
@@ -2369,7 +2369,7 @@ public sealed class RouteHandlers : IRouteHandlers
         // TenantCallback principals can only read their own records
         var getUser = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
         var getRestricted = PrincipalAuthorizationPolicy.AsRestrictedPrincipal(getUser);
-        if (getRestricted != null && string.Equals(UserAuth.GetPrincipalRole(getRestricted), nameof(PrincipalRole.TenantCallback), StringComparison.OrdinalIgnoreCase) && instance is BaseDataObject getBdo &&
+        if (getRestricted != null && string.Equals(UserAuth.GetPrincipalRole(getRestricted), nameof(PrincipalRole.TenantCallback), StringComparison.OrdinalIgnoreCase) && instance is DataRecord getBdo &&
             !PrincipalAuthorizationPolicy.IsRecordOwner(getRestricted, getBdo))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -2424,7 +2424,7 @@ public sealed class RouteHandlers : IRouteHandlers
             foreach (var kvp in form)
                 values[kvp.Key] = (string?)kvp.Value.ToString();
             errors = DataScaffold.ApplyValuesFromForm(meta, instance, values, forCreate: true);
-            await ApplyUploadFieldsFromFormAsync(context, meta, (BaseDataObject)instance, form, errors).ConfigureAwait(false);
+            await ApplyUploadFieldsFromFormAsync(context, meta, (DataRecord)instance, form, errors).ConfigureAwait(false);
             ReturnFormDictionary(values);
         }
         else
@@ -2522,7 +2522,7 @@ public sealed class RouteHandlers : IRouteHandlers
         // TenantCallback principals can only update their own records
         var putUser = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
         var putRestricted = PrincipalAuthorizationPolicy.AsRestrictedPrincipal(putUser);
-        if (putRestricted != null && string.Equals(UserAuth.GetPrincipalRole(putRestricted), nameof(PrincipalRole.TenantCallback), StringComparison.OrdinalIgnoreCase) && instance is BaseDataObject putBdo &&
+        if (putRestricted != null && string.Equals(UserAuth.GetPrincipalRole(putRestricted), nameof(PrincipalRole.TenantCallback), StringComparison.OrdinalIgnoreCase) && instance is DataRecord putBdo &&
             !PrincipalAuthorizationPolicy.IsRecordOwner(putRestricted, putBdo))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -2542,7 +2542,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 values[kvp.Key] = (string?)kvp.Value.ToString();
             errors = DataScaffold.ApplyValuesFromForm(meta, instance, values, forCreate: false);
             errors = FilterMissingRequiredErrorsForPatchForm(meta, values, errors);
-            await ApplyUploadFieldsFromFormAsync(context, meta, (BaseDataObject)instance, form, errors).ConfigureAwait(false);
+            await ApplyUploadFieldsFromFormAsync(context, meta, (DataRecord)instance, form, errors).ConfigureAwait(false);
             ReturnFormDictionary(values);
         }
         else
@@ -2585,8 +2585,8 @@ public sealed class RouteHandlers : IRouteHandlers
         ReturnStringList(apiPutErrors);
 
         ApplyAuditInfo(instance, UserAuth.GetUserName(await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false)) ?? "system", isCreate: false);
-        await DataScaffold.ApplyComputedFieldsAsync(meta, (BaseDataObject)instance, ComputedTrigger.OnUpdate, context.RequestAborted).ConfigureAwait(false);
-        DataScaffold.ApplyCalculatedFields(meta, (BaseDataObject)instance);
+        await DataScaffold.ApplyComputedFieldsAsync(meta, (DataRecord)instance, ComputedTrigger.OnUpdate, context.RequestAborted).ConfigureAwait(false);
+        DataScaffold.ApplyCalculatedFields(meta, (DataRecord)instance);
         await DataScaffold.SaveAsync(meta, instance);
         await WriteJsonResponseAsync(context, BuildApiModel(meta, instance));
     }
@@ -2638,7 +2638,7 @@ public sealed class RouteHandlers : IRouteHandlers
         // TenantCallback principals can only update their own records
         var patchUser = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
         var patchRestricted = PrincipalAuthorizationPolicy.AsRestrictedPrincipal(patchUser);
-        if (patchRestricted != null && string.Equals(UserAuth.GetPrincipalRole(patchRestricted), nameof(PrincipalRole.TenantCallback), StringComparison.OrdinalIgnoreCase) && instance is BaseDataObject patchBdo &&
+        if (patchRestricted != null && string.Equals(UserAuth.GetPrincipalRole(patchRestricted), nameof(PrincipalRole.TenantCallback), StringComparison.OrdinalIgnoreCase) && instance is DataRecord patchBdo &&
             !PrincipalAuthorizationPolicy.IsRecordOwner(patchRestricted, patchBdo))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -2657,7 +2657,7 @@ public sealed class RouteHandlers : IRouteHandlers
             foreach (var kvp in form)
                 values[kvp.Key] = (string?)kvp.Value.ToString();
             errors = DataScaffold.ApplyValuesFromForm(meta, instance, values, forCreate: false);
-            await ApplyUploadFieldsFromFormAsync(context, meta, (BaseDataObject)instance, form, errors).ConfigureAwait(false);
+            await ApplyUploadFieldsFromFormAsync(context, meta, (DataRecord)instance, form, errors).ConfigureAwait(false);
             ReturnFormDictionary(values);
         }
         else
@@ -2689,8 +2689,8 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         ApplyAuditInfo(instance, UserAuth.GetUserName(await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false)) ?? "system", isCreate: false);
-        await DataScaffold.ApplyComputedFieldsAsync(meta, (BaseDataObject)instance, ComputedTrigger.OnUpdate, context.RequestAborted).ConfigureAwait(false);
-        DataScaffold.ApplyCalculatedFields(meta, (BaseDataObject)instance);
+        await DataScaffold.ApplyComputedFieldsAsync(meta, (DataRecord)instance, ComputedTrigger.OnUpdate, context.RequestAborted).ConfigureAwait(false);
+        DataScaffold.ApplyCalculatedFields(meta, (DataRecord)instance);
         await DataScaffold.SaveAsync(meta, instance);
         await WriteJsonResponseAsync(context, BuildApiModel(meta, instance));
     }
@@ -2762,7 +2762,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var instance = await DataScaffold.LoadAsync(meta, parsedId);
-        if (instance is not BaseDataObject)
+        if (instance is not DataRecord)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             await context.Response.WriteAsync("Item not found.");
@@ -2812,19 +2812,19 @@ public sealed class RouteHandlers : IRouteHandlers
         => DataScaffold.TryGetEntity("record-comments", out commentMeta)
             || DataScaffold.TryGetEntity("recordcomment", out commentMeta);
 
-    private static string GetMetaString(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
+    private static string GetMetaString(DataRecord obj, DataEntityMetadata meta, string fieldName)
         => meta.FindField(fieldName)?.GetValueFn(obj)?.ToString() ?? string.Empty;
 
-    private static uint GetMetaUInt(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
+    private static uint GetMetaUInt(DataRecord obj, DataEntityMetadata meta, string fieldName)
         => Convert.ToUInt32(meta.FindField(fieldName)?.GetValueFn(obj) ?? 0);
 
-    private static long GetMetaLong(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
+    private static long GetMetaLong(DataRecord obj, DataEntityMetadata meta, string fieldName)
         => Convert.ToInt64(meta.FindField(fieldName)?.GetValueFn(obj) ?? 0L);
 
-    private static int GetMetaInt(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
+    private static int GetMetaInt(DataRecord obj, DataEntityMetadata meta, string fieldName)
         => Convert.ToInt32(meta.FindField(fieldName)?.GetValueFn(obj) ?? 0);
 
-    private static bool GetMetaBool(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
+    private static bool GetMetaBool(DataRecord obj, DataEntityMetadata meta, string fieldName)
     {
         var value = meta.FindField(fieldName)?.GetValueFn(obj);
         return value switch
@@ -2835,7 +2835,7 @@ public sealed class RouteHandlers : IRouteHandlers
         };
     }
 
-    private static Dictionary<string, object?> BuildAttachmentApiModel(BaseDataObject a, DataEntityMetadata meta) =>
+    private static Dictionary<string, object?> BuildAttachmentApiModel(DataRecord a, DataEntityMetadata meta) =>
         new()
         {
             ["id"] = a.Key,
@@ -2891,7 +2891,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var result = RentDictList();
         foreach (var item in rawItems)
         {
-            if (item is BaseDataObject a)
+            if (item is DataRecord a)
                 result.Add(BuildAttachmentApiModel(a, attachMeta));
         }
 
@@ -2972,7 +2972,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (replacesKey > 0)
         {
             var previousRaw = await DataScaffold.LoadAsync(attachMeta, replacesKey, context.RequestAborted).ConfigureAwait(false);
-            if (previousRaw is BaseDataObject previous)
+            if (previousRaw is DataRecord previous)
             {
                 groupId = GetMetaUInt(previous, attachMeta, "AttachmentGroupId");
                 if (groupId == 0)
@@ -2988,7 +2988,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 var groupRaw = await DataScaffold.QueryAsync(attachMeta, groupQuery, context.RequestAborted).ConfigureAwait(false);
                 foreach (var raw in groupRaw)
                 {
-                    if (raw is not BaseDataObject gi) continue;
+                    if (raw is not DataRecord gi) continue;
                     var versionNumber = GetMetaInt(gi, attachMeta, "VersionNumber");
                     if (versionNumber >= nextVersion) nextVersion = versionNumber + 1;
                     if (GetMetaBool(gi, attachMeta, "IsCurrentVersion"))
@@ -3044,7 +3044,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var raw = await DataScaffold.LoadAsync(attachMeta, attachmentKey, context.RequestAborted).ConfigureAwait(false);
-        if (raw is not BaseDataObject attachment)
+        if (raw is not DataRecord attachment)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             await context.Response.WriteAsync("Attachment not found.").ConfigureAwait(false);
@@ -3110,7 +3110,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var raw = await DataScaffold.LoadAsync(attachMeta, attachmentKey, context.RequestAborted).ConfigureAwait(false);
-        if (raw is not BaseDataObject attachment)
+        if (raw is not DataRecord attachment)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             await context.Response.WriteAsync("Attachment not found.").ConfigureAwait(false);
@@ -3157,7 +3157,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var rootRaw = await DataScaffold.LoadAsync(attachMeta, attachmentKey, context.RequestAborted).ConfigureAwait(false);
-        if (rootRaw is not BaseDataObject root)
+        if (rootRaw is not DataRecord root)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             await context.Response.WriteAsync("Attachment not found.").ConfigureAwait(false);
@@ -3189,10 +3189,10 @@ public sealed class RouteHandlers : IRouteHandlers
         var rawVersions = await DataScaffold.QueryAsync(attachMeta, groupQuery, context.RequestAborted).ConfigureAwait(false);
 
         // Collect and sort by VersionNumber ascending
-        var versionList = new List<BaseDataObject>();
+        var versionList = new List<DataRecord>();
         foreach (var rv in rawVersions)
         {
-            if (rv is BaseDataObject fa) versionList.Add(fa);
+            if (rv is DataRecord fa) versionList.Add(fa);
         }
         versionList.Sort((a, b) => GetMetaInt(a, attachMeta, "VersionNumber").CompareTo(GetMetaInt(b, attachMeta, "VersionNumber")));
 
@@ -3205,7 +3205,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     // ── Record comment endpoints ────────────────────────────────────────────────
 
-    private static Dictionary<string, object?> BuildCommentApiModel(BaseDataObject c, DataEntityMetadata meta) =>
+    private static Dictionary<string, object?> BuildCommentApiModel(DataRecord c, DataEntityMetadata meta) =>
         new()
         {
             ["id"] = c.Key,
@@ -3253,7 +3253,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var result = RentDictList();
         foreach (var item in rawItems)
         {
-            if (item is BaseDataObject c)
+            if (item is DataRecord c)
                 result.Add(BuildCommentApiModel(c, commentMeta));
         }
         // Sort by creation time ascending (oldest first, chat-style)
@@ -3348,7 +3348,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var existing = await DataScaffold.LoadAsync(commentMeta, commentId, context.RequestAborted).ConfigureAwait(false);
-        if (existing is not BaseDataObject comment)
+        if (existing is not DataRecord comment)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             await context.Response.WriteAsync("Comment not found.").ConfigureAwait(false);
@@ -3411,7 +3411,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var existing = await DataScaffold.LoadAsync(commentMeta, commentId, context.RequestAborted).ConfigureAwait(false);
-        if (existing is not BaseDataObject comment)
+        if (existing is not DataRecord comment)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             await context.Response.WriteAsync("Comment not found.").ConfigureAwait(false);
@@ -3480,7 +3480,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 Groups = new List<QueryGroup> { orGroup }
             };
 
-            IEnumerable<BaseDataObject> results;
+            IEnumerable<DataRecord> results;
             try
             {
                 results = await entityMeta.Handlers.QueryAsync(query, context.RequestAborted).ConfigureAwait(false);
@@ -4648,7 +4648,7 @@ public sealed class RouteHandlers : IRouteHandlers
         context.Response.Redirect("/admin/webstore");
     }
 
-    private async ValueTask ApplyUploadFieldsFromFormAsync(BmwContext context, DataEntityMetadata meta, BaseDataObject instance, IFormCollection form, List<string> errors)
+    private async ValueTask ApplyUploadFieldsFromFormAsync(BmwContext context, DataEntityMetadata meta, DataRecord instance, IFormCollection form, List<string> errors)
     {
         foreach (var field in meta.Fields)
         {
@@ -4789,14 +4789,14 @@ public sealed class RouteHandlers : IRouteHandlers
     internal static Dictionary<string, object?> BuildApiModel(DataEntityMetadata meta, object instance)
     {
         var data = new Dictionary<string, object?>(meta.ViewFields.Length + 1, StringComparer.OrdinalIgnoreCase);
-        var id = instance is BaseDataObject dataObject ? DataScaffold.GetIdValue(dataObject) : null;
+        var id = instance is DataRecord dataObject ? DataScaffold.GetIdValue(dataObject) : null;
         if (!string.IsNullOrWhiteSpace(id))
             data["id"] = id;
 
         foreach (var field in meta.ViewFields)
         {
             var value = field.GetValueFn(instance);
-            if (value is StoredFileData fileData && instance is BaseDataObject obj)
+            if (value is StoredFileData fileData && instance is DataRecord obj)
             {
                 data[field.Name] = new Dictionary<string, object?>
                 {
@@ -5518,7 +5518,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var output = new string[baseRows.Length][];
         for (int i = 0; i < baseRows.Length; i++)
         {
-            var id = filteredItems[i] is BaseDataObject dataObject
+            var id = filteredItems[i] is DataRecord dataObject
                 ? DataScaffold.GetIdValue(dataObject) ?? string.Empty
                 : string.Empty;
             var concatRow = new string[1 + baseRows[i].Length];
@@ -5866,7 +5866,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private static void ApplyAuditInfo(object instance, string userName, bool isCreate)
     {
-        if (instance is not BaseDataObject dataObject)
+        if (instance is not DataRecord dataObject)
             return;
 
         if (isCreate)
@@ -6029,7 +6029,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (string.Equals(meta.Slug, "app-settings", StringComparison.OrdinalIgnoreCase)
             || string.Equals(meta.Slug, "settings", StringComparison.OrdinalIgnoreCase))
         {
-            if (instance is BaseDataObject setting)
+            if (instance is DataRecord setting)
             {
                 var settingId = meta.FindField("SettingId")?.GetValueFn(setting)?.ToString();
                 if (!string.IsNullOrWhiteSpace(settingId))
@@ -6043,10 +6043,10 @@ public sealed class RouteHandlers : IRouteHandlers
                         Top = 1
                     };
                     var existingResults = await DataScaffold.QueryAsync(meta, query, cancellationToken).ConfigureAwait(false);
-                    BaseDataObject? existing = null;
+                    DataRecord? existing = null;
                     foreach (var e in existingResults)
                     {
-                        if (e is BaseDataObject existingSetting)
+                        if (e is DataRecord existingSetting)
                         {
                             existing = existingSetting;
                             break;
@@ -6063,7 +6063,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (userMeta == null || !string.Equals(meta.Slug, userMeta.Slug, StringComparison.OrdinalIgnoreCase))
             return;
 
-        if (instance is not BaseDataObject user)
+        if (instance is not DataRecord user)
             return;
 
         var userName = UserAuth.GetUserName(user);
@@ -6182,7 +6182,7 @@ public sealed class RouteHandlers : IRouteHandlers
         return hasUsers;
     }
 
-    private static string GetDisplayValue(DataEntityMetadata meta, BaseDataObject item)
+    private static string GetDisplayValue(DataEntityMetadata meta, DataRecord item)
     {
         // Try common name fields first (same heuristic as DataScaffold.GetDisplayValue)
         DataFieldMetadata? nameField = null;
@@ -6328,7 +6328,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
                 var msg = cmdResult.Success ? "Command executed." : cmdResult.Error;
 
-                if (instance is BaseDataObject bdoRuntime)
+                if (instance is DataRecord bdoRuntime)
                     await _auditService.AuditRemoteCommandAsync(meta.Name, bdoRuntime, commandName, userName, null,
                         new RemoteCommandResult(cmdResult.Success, msg ?? string.Empty),
                         context.RequestAborted).ConfigureAwait(false);
@@ -6347,12 +6347,12 @@ public sealed class RouteHandlers : IRouteHandlers
             result = await cmd.Invoker(instance).ConfigureAwait(false);
 
             // Save the entity in case the command modified it
-            await DataScaffold.ApplyComputedFieldsAsync(meta, (BaseDataObject)instance, ComputedTrigger.OnUpdate, context.RequestAborted).ConfigureAwait(false);
-            DataScaffold.ApplyCalculatedFields(meta, (BaseDataObject)instance);
+            await DataScaffold.ApplyComputedFieldsAsync(meta, (DataRecord)instance, ComputedTrigger.OnUpdate, context.RequestAborted).ConfigureAwait(false);
+            DataScaffold.ApplyCalculatedFields(meta, (DataRecord)instance);
             await DataScaffold.SaveAsync(meta, instance);
 
             // Audit the remote command execution
-            if (instance is BaseDataObject baseDataObject)
+            if (instance is DataRecord baseDataObject)
             {
                 await _auditService.AuditRemoteCommandAsync(meta.Name, baseDataObject, commandName, userName, null, result, context.RequestAborted).ConfigureAwait(false);
             }

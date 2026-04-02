@@ -1,7 +1,7 @@
 namespace BareMetalWeb.Data;
 
 [DataEntity("Settings", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1, Permissions = "admin")]
-public class AppSetting : BaseDataObject
+public class AppSetting : DataRecord
 {
     public override string EntityTypeName => "AppSetting";
     private const int Ord_SettingId = BaseFieldCount + 0;

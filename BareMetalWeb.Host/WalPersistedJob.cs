@@ -11,7 +11,7 @@ namespace BareMetalWeb.Host;
 /// </summary>
 [DataEntity("Background Jobs", Slug = "background-jobs", ShowOnNav = false,
     NavGroup = "Admin", NavOrder = 99, Permissions = "admin")]
-public sealed class WalPersistedJob : BaseDataObject
+public sealed class WalPersistedJob : DataRecord
 {
     public override string EntityTypeName => "WalPersistedJob";
     private const int Ord_JobId = BaseFieldCount + 0;
@@ -153,14 +153,14 @@ public sealed class WalPersistedJob : BaseDataObject
 /// <summary>Ordinal constants for <see cref="WalPersistedJob"/> fields.</summary>
 public static class WalPersistedJobFields
 {
-    public const int JobId          = BaseDataObject.BaseFieldCount + 0;
-    public const int OperationName  = BaseDataObject.BaseFieldCount + 1;
-    public const int Status         = BaseDataObject.BaseFieldCount + 2;
-    public const int PercentComplete = BaseDataObject.BaseFieldCount + 3;
-    public const int Description    = BaseDataObject.BaseFieldCount + 4;
-    public const int StartedAtUtc   = BaseDataObject.BaseFieldCount + 5;
-    public const int CompletedAtUtc = BaseDataObject.BaseFieldCount + 6;
-    public const int Error          = BaseDataObject.BaseFieldCount + 7;
-    public const int ResultUrl      = BaseDataObject.BaseFieldCount + 8;
-    public const int InstanceId     = BaseDataObject.BaseFieldCount + 9;
+    public const int JobId          = DataRecord.BaseFieldCount + 0;
+    public const int OperationName  = DataRecord.BaseFieldCount + 1;
+    public const int Status         = DataRecord.BaseFieldCount + 2;
+    public const int PercentComplete = DataRecord.BaseFieldCount + 3;
+    public const int Description    = DataRecord.BaseFieldCount + 4;
+    public const int StartedAtUtc   = DataRecord.BaseFieldCount + 5;
+    public const int CompletedAtUtc = DataRecord.BaseFieldCount + 6;
+    public const int Error          = DataRecord.BaseFieldCount + 7;
+    public const int ResultUrl      = DataRecord.BaseFieldCount + 8;
+    public const int InstanceId     = DataRecord.BaseFieldCount + 9;
 }

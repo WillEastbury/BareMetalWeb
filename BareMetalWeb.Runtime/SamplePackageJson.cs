@@ -71,14 +71,14 @@ public static class SamplePackageJson
     /// setter delegates to populate DataRecord properties from JSON without reflection.
     /// The entity must be registered with DataScaffold (by slug) before calling this method.
     /// </summary>
-    private static List<BaseDataObject> ReadEntityListBySlug(string slug, JsonElement arr)
+    private static List<DataRecord> ReadEntityListBySlug(string slug, JsonElement arr)
     {
-        if (arr.ValueKind != JsonValueKind.Array) return new List<BaseDataObject>();
+        if (arr.ValueKind != JsonValueKind.Array) return new List<DataRecord>();
 
         if (!DataScaffold.TryGetEntity(slug, out var meta))
-            return new List<BaseDataObject>(); // Entity not yet registered; skip gracefully
+            return new List<DataRecord>(); // Entity not yet registered; skip gracefully
 
-        var list = new List<BaseDataObject>(arr.GetArrayLength());
+        var list = new List<DataRecord>(arr.GetArrayLength());
 
         foreach (var el in arr.EnumerateArray())
         {
@@ -104,7 +104,7 @@ public static class SamplePackageJson
     /// setter delegates to populate entity properties from JSON without reflection.
     /// The entity type must be registered with DataScaffold before calling this method.
     /// </summary>
-    private static List<T> ReadEntityList<T>(string entityName, JsonElement arr) where T : BaseDataObject, new()
+    private static List<T> ReadEntityList<T>(string entityName, JsonElement arr) where T : DataRecord, new()
     {
         if (arr.ValueKind != JsonValueKind.Array) return new List<T>();
 

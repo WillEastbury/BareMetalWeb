@@ -558,7 +558,7 @@ public static class LookupApiHandlers
         return string.Equals(targetMeta?.Slug, targetSlug, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static Dictionary<string, object?> EntityToJson(BaseDataObject entity, DataEntityMetadata meta)
+    private static Dictionary<string, object?> EntityToJson(DataRecord entity, DataEntityMetadata meta)
     {
         var result = new Dictionary<string, object?>
         {
@@ -585,7 +585,7 @@ public static class LookupApiHandlers
     /// Expansion is one level deep only to prevent circular traversal.
     /// </summary>
     private static async ValueTask<Dictionary<string, object?>> EntityToJsonAsync(
-        BaseDataObject entity,
+        DataRecord entity,
         DataEntityMetadata meta,
         bool traverseRelationships,
         CancellationToken cancellationToken)

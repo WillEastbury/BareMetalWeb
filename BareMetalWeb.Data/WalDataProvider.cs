@@ -405,7 +405,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             for (int i = 0; i < schema.FieldCount; i++)
             {
                 if (!schema.IsIndexed[i]) continue;
-                var ord = BaseDataObject.BaseFieldCount + i;
+                var ord = DataRecord.BaseFieldCount + i;
                 var newValue = record.GetValue(ord)?.ToString() ?? string.Empty;
                 if (oldRecord != null)
                 {
@@ -598,7 +598,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             for (int i = 0; i < schema.FieldCount; i++)
             {
                 if (!schema.IsIndexed[i]) continue;
-                var value = oldRecord.GetValue(BaseDataObject.BaseFieldCount + i)?.ToString() ?? string.Empty;
+                var value = oldRecord.GetValue(DataRecord.BaseFieldCount + i)?.ToString() ?? string.Empty;
                 _indexStore.AppendEntry(entityName, schema.Names[i], value, keyStr, 'D');
             }
         }
@@ -634,13 +634,17 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
     /// </summary>
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _typedFactoryCache = new(StringComparer.OrdinalIgnoreCase);
 
-    private static BaseDataObject? HydrateTyped(DataRecord? record, string entityTypeName)
+    private static DataRecord? HydrateTyped(DataRecord? record, string entityTypeName)
     {
         if (record is null) return null;
         var meta = BareMetalWeb.Core.DataScaffold.GetEntityByName(entityTypeName);
         if (meta is null) return record;
-        // Check (and cache) whether the factory produces a typed entity or raw DataRecord
-        bool isTyped = _typedFactoryCache.GetOrAdd(entityTypeName, _ => meta.Handlers.Create() is not DataRecord);
+        // Check (and cache) whether the factory produces a derived entity type (not plain DataRecord)
+        bool isTyped = _typedFactoryCache.GetOrAdd(entityTypeName, _ =>
+        {
+            var instance = meta.Handlers.Create();
+            return instance.GetType() != typeof(DataRecord);
+        });
         if (!isTyped) return record;
         var typed = meta.Handlers.Create();
         typed.EnsureCapacity(record.FieldCount);
@@ -653,7 +657,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
     /// <paramref name="schema"/>.  If it already is one, returns it directly; otherwise
     /// copies base + entity field values into a new record.
     /// </summary>
-    private static DataRecord AsDataRecord(BaseDataObject obj, EntitySchema schema)
+    private static DataRecord AsDataRecord(DataRecord obj, EntitySchema schema)
     {
         if (obj is DataRecord dr)
         {
@@ -672,16 +676,22 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
         record.ETag = obj.ETag;
         record.Version = obj.Version;
 
-        int total = BaseDataObject.BaseFieldCount + schema.FieldCount;
+        int total = DataRecord.BaseFieldCount + schema.FieldCount;
         int copyEnd = Math.Min(total, obj.FieldCount);
-        for (int i = BaseDataObject.BaseFieldCount; i < copyEnd; i++)
-            record.SetValue(i, obj.GetFieldValue(i));
+        for (int i = DataRecord.BaseFieldCount; i < copyEnd; i++)
+        {
+            var val = obj.GetFieldValue(i);
+            // Flatten string arrays to comma-separated strings for StringUtf8 schema fields
+            if (val is string[] arr)
+                val = string.Join(",", arr);
+            record.SetValue(i, val);
+        }
 
         return record;
     }
 
     /// <inheritdoc />
-    public void Save(string entityTypeName, BaseDataObject obj)
+    public void Save(string entityTypeName, DataRecord obj)
     {
         if (obj is null) throw new ArgumentNullException(nameof(obj));
         var schema = ResolveSchemaByName(entityTypeName);
@@ -696,43 +706,47 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
     }
 
     /// <inheritdoc />
-    public ValueTask SaveAsync(string entityTypeName, BaseDataObject obj, CancellationToken cancellationToken = default)
+    public ValueTask SaveAsync(string entityTypeName, DataRecord obj, CancellationToken cancellationToken = default)
     {
         Save(entityTypeName, obj);
         return ValueTask.CompletedTask;
     }
 
     /// <inheritdoc />
-    public BaseDataObject? Load(string entityTypeName, uint key)
+    public DataRecord? Load(string entityTypeName, uint key)
     {
         var schema = ResolveSchemaByName(entityTypeName);
         return HydrateTyped(LoadRecord(key, schema), entityTypeName);
     }
 
     /// <inheritdoc />
-    public ValueTask<BaseDataObject?> LoadAsync(string entityTypeName, uint key, CancellationToken cancellationToken = default)
+    public ValueTask<DataRecord?> LoadAsync(string entityTypeName, uint key, CancellationToken cancellationToken = default)
         => new(Load(entityTypeName, key));
 
     /// <inheritdoc />
-    public IEnumerable<BaseDataObject> Query(string entityTypeName, QueryDefinition? query = null)
+    public IEnumerable<DataRecord> Query(string entityTypeName, QueryDefinition? query = null)
     {
         var schema = ResolveSchemaByName(entityTypeName);
         var records = QueryRecords(schema, query);
         var meta = BareMetalWeb.Core.DataScaffold.GetEntityByName(entityTypeName);
         if (meta is null) return records;
-        bool isTyped = _typedFactoryCache.GetOrAdd(entityTypeName, _ => meta.Handlers.Create() is not DataRecord);
+        bool isTyped = _typedFactoryCache.GetOrAdd(entityTypeName, _ =>
+        {
+            var instance = meta.Handlers.Create();
+            return instance.GetType() != typeof(DataRecord);
+        });
         if (!isTyped) return records;
         return HydrateAll(records, entityTypeName);
     }
 
-    private static IEnumerable<BaseDataObject> HydrateAll(IEnumerable<DataRecord> records, string entityTypeName)
+    private static IEnumerable<DataRecord> HydrateAll(IEnumerable<DataRecord> records, string entityTypeName)
     {
         foreach (var r in records)
             yield return HydrateTyped(r, entityTypeName)!;
     }
 
     /// <inheritdoc />
-    public ValueTask<IEnumerable<BaseDataObject>> QueryAsync(string entityTypeName, QueryDefinition? query = null, CancellationToken cancellationToken = default)
+    public ValueTask<IEnumerable<DataRecord>> QueryAsync(string entityTypeName, QueryDefinition? query = null, CancellationToken cancellationToken = default)
         => new(Query(entityTypeName, query));
 
     /// <inheritdoc />
@@ -765,8 +779,23 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
         foreach (var clause in query.Clauses)
         {
             if (!schema.TryGetOrdinal(clause.Field, out var ord)) continue;
-            var valueStr = record.GetValue(ord)?.ToString() ?? string.Empty;
+            var rawValue = record.GetValue(ord);
             var clauseVal = clause.Value?.ToString() ?? string.Empty;
+
+            // For Contains on array/collection fields, check if any element matches
+            if (clause.Operator == QueryOperator.Contains && rawValue is System.Collections.IEnumerable enumerable && rawValue is not string)
+            {
+                bool found = false;
+                foreach (var item in enumerable)
+                {
+                    if (item != null && string.Equals(item.ToString(), clauseVal, StringComparison.OrdinalIgnoreCase))
+                    { found = true; break; }
+                }
+                if (!found) return false;
+                continue;
+            }
+
+            var valueStr = rawValue?.ToString() ?? string.Empty;
 
             bool match = clause.Operator switch
             {

@@ -51,14 +51,14 @@ public static class EntityLayoutCompiler
         var entries = new List<(string Name, Type ClrType, Func<object, object?> Getter, Action<object, object?> Setter, DataFieldMetadata? Meta)>();
 
         // Base properties
-        AddBaseEntry(entries, "CreatedBy", typeof(string), BaseDataObject.Ord_CreatedBy);
-        AddBaseEntry(entries, "CreatedOnUtc", typeof(DateTime), BaseDataObject.Ord_CreatedOnUtc);
-        AddBaseEntry(entries, "ETag", typeof(string), BaseDataObject.Ord_ETag);
-        AddBaseEntry(entries, "Identifier", typeof(IdentifierValue), BaseDataObject.Ord_Identifier);
-        AddBaseEntry(entries, "Key", typeof(uint), BaseDataObject.Ord_Key);
-        AddBaseEntry(entries, "UpdatedBy", typeof(string), BaseDataObject.Ord_UpdatedBy);
-        AddBaseEntry(entries, "UpdatedOnUtc", typeof(DateTime), BaseDataObject.Ord_UpdatedOnUtc);
-        AddBaseEntry(entries, "Version", typeof(uint), BaseDataObject.Ord_Version);
+        AddBaseEntry(entries, "CreatedBy", typeof(string), DataRecord.Ord_CreatedBy);
+        AddBaseEntry(entries, "CreatedOnUtc", typeof(DateTime), DataRecord.Ord_CreatedOnUtc);
+        AddBaseEntry(entries, "ETag", typeof(string), DataRecord.Ord_ETag);
+        AddBaseEntry(entries, "Identifier", typeof(IdentifierValue), DataRecord.Ord_Identifier);
+        AddBaseEntry(entries, "Key", typeof(uint), DataRecord.Ord_Key);
+        AddBaseEntry(entries, "UpdatedBy", typeof(string), DataRecord.Ord_UpdatedBy);
+        AddBaseEntry(entries, "UpdatedOnUtc", typeof(DateTime), DataRecord.Ord_UpdatedOnUtc);
+        AddBaseEntry(entries, "Version", typeof(uint), DataRecord.Ord_Version);
 
         // Entity-specific fields from metadata
         foreach (var fieldMeta in meta.Fields)
@@ -211,8 +211,8 @@ public static class EntityLayoutCompiler
     {
         var ord = ordinal;
         entries.Add((name, clrType,
-            obj => ((BaseDataObject)obj).GetFieldValue(ord),
-            (obj, val) => ((BaseDataObject)obj).SetFieldValue(ord, val),
+            obj => ((DataRecord)obj).GetFieldValue(ord),
+            (obj, val) => ((DataRecord)obj).SetFieldValue(ord, val),
             null));
     }
 }

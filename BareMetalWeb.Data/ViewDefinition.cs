@@ -10,7 +10,7 @@ namespace BareMetalWeb.Data;
 /// </summary>
 [DataEntity("View Definitions", Slug = "view-definitions", ShowOnNav = false,
     Permissions = "admin", NavGroup = "Admin", NavOrder = 95)]
-public sealed class ViewDefinition : BaseDataObject
+public sealed class ViewDefinition : DataRecord
 {
     public override string EntityTypeName => "ViewDefinition";
     private const int Ord_ViewName = BaseFieldCount + 0;

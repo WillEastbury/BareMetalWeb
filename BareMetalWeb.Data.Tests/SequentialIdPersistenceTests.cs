@@ -148,7 +148,7 @@ public class SequentialIdPersistenceTests : IDisposable
         }
     }
 
-    private class FakeEntity : BaseDataObject
+    private class FakeEntity : DataRecord
     {
         internal new const int TotalFieldCount = BaseFieldCount;
 

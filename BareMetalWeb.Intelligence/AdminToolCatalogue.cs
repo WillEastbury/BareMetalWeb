@@ -601,12 +601,12 @@ public static class AdminToolCatalogue
     /// <summary>
     /// Searches records by text, matching against all string-type fields.
     /// </summary>
-    private static async Task<List<BaseDataObject>> SearchByText(
+    private static async Task<List<DataRecord>> SearchByText(
         DataEntityMetadata entity, string searchText, CancellationToken ct)
     {
         var items = await entity.Handlers.QueryAsync(null, ct).ConfigureAwait(false);
         var layout = EntityLayoutCompiler.GetOrCompile(entity);
-        var matches = new List<BaseDataObject>();
+        var matches = new List<DataRecord>();
 
         // Find string-type fields to search against
         var stringFields = new List<FieldRuntime>();
@@ -641,7 +641,7 @@ public static class AdminToolCatalogue
     /// <summary>
     /// Formats a single record with all field values for detailed display.
     /// </summary>
-    private static string FormatRecord(DataEntityMetadata entity, BaseDataObject item)
+    private static string FormatRecord(DataEntityMetadata entity, DataRecord item)
     {
         var layout = EntityLayoutCompiler.GetOrCompile(entity);
         var sb = new System.Text.StringBuilder(512);
@@ -664,7 +664,7 @@ public static class AdminToolCatalogue
     /// <summary>
     /// Formats a record as a one-line summary showing key identifying fields.
     /// </summary>
-    private static string FormatRecordSummary(DataEntityMetadata entity, BaseDataObject item)
+    private static string FormatRecordSummary(DataEntityMetadata entity, DataRecord item)
     {
         var layout = EntityLayoutCompiler.GetOrCompile(entity);
         var parts = new List<string>(6);

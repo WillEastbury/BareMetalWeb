@@ -9,7 +9,7 @@ namespace BareMetalWeb.Runtime;
 /// and policy-evaluation state (fingerprint, network location, telemetry).
 /// </summary>
 [DataEntity("Deployment Nodes", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1021)]
-public class DeploymentNode : BaseDataObject
+public class DeploymentNode : DataRecord
 {
     public override string EntityTypeName => "DeploymentNode";
     private const int Ord_NodeId = BaseFieldCount + 0;

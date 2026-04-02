@@ -13,7 +13,7 @@ public class RelatedDocumentTests
 {
     // ── Dummy entity types used in tests ──────────────────────────────────────
 
-    private class SourceDoc : BaseDataObject
+    private class SourceDoc : DataRecord
     {
         private const int Ord_Number = BaseFieldCount + 0;
         internal new const int TotalFieldCount = BaseFieldCount + 1;
@@ -42,7 +42,7 @@ public class RelatedDocumentTests
         }
     }
 
-    private class DerivedDoc : BaseDataObject
+    private class DerivedDoc : DataRecord
     {
         private const int Ord_SourceDocId = BaseFieldCount + 0;
         internal new const int TotalFieldCount = BaseFieldCount + 1;
@@ -73,7 +73,7 @@ public class RelatedDocumentTests
         }
     }
 
-    private class PlainDoc : BaseDataObject
+    private class PlainDoc : DataRecord
     {
         private const int Ord_Title = BaseFieldCount + 0;
         internal new const int TotalFieldCount = BaseFieldCount + 1;

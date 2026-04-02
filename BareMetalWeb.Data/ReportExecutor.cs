@@ -87,18 +87,18 @@ public sealed class ReportExecutor
         // Load root entity rows with pushed-down filters
         plan.PushedFilters.TryGetValue(rootSlug, out var rootPushedFilter);
         var rootRowsRaw = await rootMeta.Handlers.QueryAsync(rootPushedFilter, cancellationToken);
-        using var rootRows = new BmwValueList<BaseDataObject>(64);
+        using var rootRows = new BmwValueList<DataRecord>(64);
         foreach (var r in rootRowsRaw)
         {
             if (rootRows.Count >= MaxEntityLoadSize) break;
             rootRows.Add(r);
         }
 
-        // Start: each combined row is a dict of entitySlug -> BaseDataObject
-        var combined = new List<Dictionary<string, BaseDataObject>>(rootRows.Count);
+        // Start: each combined row is a dict of entitySlug -> DataRecord
+        var combined = new List<Dictionary<string, DataRecord>>(rootRows.Count);
         foreach (var r in rootRows)
         {
-            combined.Add(new Dictionary<string, BaseDataObject>(StringComparer.OrdinalIgnoreCase)
+            combined.Add(new Dictionary<string, DataRecord>(StringComparer.OrdinalIgnoreCase)
             {
                 [rootSlug] = r
             });
@@ -116,7 +116,7 @@ public sealed class ReportExecutor
             // Load join entity rows with pushed-down filters
             plan.PushedFilters.TryGetValue(join.ToEntity, out var joinPushedFilter);
             var joinRowsRaw = await joinMeta.Handlers.QueryAsync(joinPushedFilter, cancellationToken);
-            using var joinRows = new BmwValueList<BaseDataObject>(64);
+            using var joinRows = new BmwValueList<DataRecord>(64);
             foreach (var r in joinRowsRaw)
             {
                 if (joinRows.Count >= MaxEntityLoadSize) break;
@@ -128,12 +128,12 @@ public sealed class ReportExecutor
             if (toAccessor == null)
                 continue;
 
-            var hashMap = new Dictionary<string, List<BaseDataObject>>(joinRows.Count, StringComparer.OrdinalIgnoreCase);
+            var hashMap = new Dictionary<string, List<DataRecord>>(joinRows.Count, StringComparer.OrdinalIgnoreCase);
             foreach (var jr in joinRows)
             {
                 var key = GetStringValue(toAccessor, jr);
                 if (!hashMap.TryGetValue(key, out var list))
-                    hashMap[key] = list = new List<BaseDataObject>();
+                    hashMap[key] = list = new List<DataRecord>();
                 list.Add(jr);
             }
 
@@ -142,7 +142,7 @@ public sealed class ReportExecutor
             if (fromAccessor == null)
                 continue;
 
-            var newCombined = new List<Dictionary<string, BaseDataObject>>(combined.Count);
+            var newCombined = new List<Dictionary<string, DataRecord>>(combined.Count);
             var matchedRightKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             bool intermediateOverflow = false;
 
@@ -165,7 +165,7 @@ public sealed class ReportExecutor
                     matchedRightKeys.Add(fromValue);
                     foreach (var match in matches)
                     {
-                        var newRow = new Dictionary<string, BaseDataObject>(row, StringComparer.OrdinalIgnoreCase)
+                        var newRow = new Dictionary<string, DataRecord>(row, StringComparer.OrdinalIgnoreCase)
                         {
                             [join.ToEntity] = match
                         };
@@ -202,7 +202,7 @@ public sealed class ReportExecutor
                         continue;
                     foreach (var rightObj in kvp.Value)
                     {
-                        var newRow = new Dictionary<string, BaseDataObject>(StringComparer.OrdinalIgnoreCase)
+                        var newRow = new Dictionary<string, DataRecord>(StringComparer.OrdinalIgnoreCase)
                         {
                             [join.ToEntity] = rightObj
                         };
@@ -218,7 +218,7 @@ public sealed class ReportExecutor
         var filters = query.Filters;
         if (filters.Count > 0)
         {
-            var filtered = new List<Dictionary<string, BaseDataObject>>(combined.Count);
+            var filtered = new List<Dictionary<string, DataRecord>>(combined.Count);
             foreach (var row in combined)
             {
                 if (PassesFilters(row, filters))
@@ -357,7 +357,7 @@ public sealed class ReportExecutor
         return ReferenceEquals(cached, _missingFieldSentinel) ? null : cached;
     }
 
-    private static string?[] ProjectRow(Dictionary<string, BaseDataObject> row, IReadOnlyList<ReportColumn> columns)
+    private static string?[] ProjectRow(Dictionary<string, DataRecord> row, IReadOnlyList<ReportColumn> columns)
     {
         var cells = new string?[columns.Count];
         for (int i = 0; i < columns.Count; i++)
@@ -398,7 +398,7 @@ public sealed class ReportExecutor
     // ── Filter evaluation ────────────────────────────────────────────────────
 
     private static bool PassesFilters(
-        Dictionary<string, BaseDataObject> row,
+        Dictionary<string, DataRecord> row,
         IReadOnlyList<ReportFilter> filters)
     {
         foreach (var filter in filters)

@@ -8,7 +8,7 @@ namespace BareMetalWeb.Runtime;
 /// delivered to a specific user's in-app inbox.
 /// </summary>
 [DataEntity("Inbox Messages", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1008)]
-public class InboxMessage : BaseDataObject
+public class InboxMessage : DataRecord
 {
     public override string EntityTypeName => "InboxMessage";
     private const int Ord_RecipientUserName = BaseFieldCount + 0;

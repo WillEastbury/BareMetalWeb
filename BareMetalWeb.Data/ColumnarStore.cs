@@ -114,7 +114,7 @@ internal sealed class ColumnarStore
     /// Ordinals are assigned densely 0, 1, 2, … in input order, matching the
     /// previous row-index semantics so callers need no changes.
     /// </summary>
-    public void Build<T>(IReadOnlyList<T> objects, DataEntityMetadata meta) where T : BaseDataObject
+    public void Build<T>(IReadOnlyList<T> objects, DataEntityMetadata meta) where T : DataRecord
     {
         _rwLock.EnterWriteLock();
         try
@@ -193,7 +193,7 @@ internal sealed class ColumnarStore
     /// </list>
     /// Returns <c>false</c> when the store has not yet been built (schema is unknown).
     /// </summary>
-    public bool UpsertRow<T>(T obj, DataEntityMetadata meta) where T : BaseDataObject
+    public bool UpsertRow<T>(T obj, DataEntityMetadata meta) where T : DataRecord
     {
         if (obj is null) return false;
 

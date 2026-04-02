@@ -349,7 +349,7 @@ public static class GraphQLHandler
         }
         if (selectedFields.Count == 0 || hasIdField)
         {
-            if (item is BaseDataObject bdo) row["id"] = bdo.Key;
+            if (item is DataRecord bdo) row["id"] = bdo.Key;
         }
 
         foreach (var f in meta.Fields)

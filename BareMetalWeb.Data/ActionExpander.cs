@@ -243,7 +243,7 @@ public sealed class ActionExpander
 
     private static uint GetEntityKey(object entity)
     {
-        if (entity is BaseDataObject bdo) return bdo.Key;
+        if (entity is DataRecord bdo) return bdo.Key;
         return 0;
     }
 }

@@ -2,7 +2,7 @@ using System;
 
 namespace BareMetalWeb.Data;
 
-public sealed class UserSession : BaseDataObject
+public sealed class UserSession : DataRecord
 {
     public override string EntityTypeName => "UserSession";
     private const int Ord_UserId = BaseFieldCount + 0;

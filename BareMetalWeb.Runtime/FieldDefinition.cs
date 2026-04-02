@@ -7,7 +7,7 @@ namespace BareMetalWeb.Runtime;
 /// Persisted schema definition for a single field on a runtime-managed entity.
 /// </summary>
 [DataEntity("Field Definitions", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1001)]
-public class FieldDefinition : BaseDataObject
+public class FieldDefinition : DataRecord
 {
     public override string EntityTypeName => "FieldDefinition";
     private const int Ord_FieldId = BaseFieldCount + 0;

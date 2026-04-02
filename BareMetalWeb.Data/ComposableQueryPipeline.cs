@@ -139,12 +139,12 @@ public sealed class ComposableQueryPipeline
         return candidates ?? (IReadOnlyCollection<uint>)Array.Empty<uint>();
     }
 
-    private static IEnumerable<BaseDataObject> LoadAll(DataEntityMetadata meta, CancellationToken ct)
+    private static IEnumerable<DataRecord> LoadAll(DataEntityMetadata meta, CancellationToken ct)
     {
         var task = meta.Handlers.QueryAsync(null, ct);
         // TODO: convert to async
         var result = task.IsCompleted ? task.Result : task.AsTask().GetAwaiter().GetResult();
-        return result.Cast<BaseDataObject>();
+        return result.Cast<DataRecord>();
     }
 
     private static async ValueTask<HashSet<uint>> LoadAllIds(DataEntityMetadata meta, CancellationToken ct)
@@ -153,7 +153,7 @@ public sealed class ComposableQueryPipeline
         var ids = new HashSet<uint>();
         foreach (var obj in all)
         {
-            if (obj is BaseDataObject bdo) ids.Add(bdo.Key);
+            if (obj is DataRecord bdo) ids.Add(bdo.Key);
         }
         return ids;
     }

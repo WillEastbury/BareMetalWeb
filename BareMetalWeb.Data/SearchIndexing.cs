@@ -70,7 +70,7 @@ public enum IndexKind
 /// 
 /// <para><b>Usage Example:</b></para>
 /// <code>
-/// public class Product : BaseDataObject
+/// public class Product : DataRecord
 /// {
 ///     [DataIndex(IndexKind.Inverted)]  // Full-text search
 ///     public string Name { get; set; }
@@ -418,7 +418,7 @@ public sealed class SearchIndexManager
         return metadata;
     }
 
-    public void EnsureBuilt(Type type, Func<IEnumerable<BaseDataObject>> loadAll)
+    public void EnsureBuilt(Type type, Func<IEnumerable<DataRecord>> loadAll)
     {
         var entityName = EntityNameFromType(type);
         var index = _indexes.GetOrAdd(entityName, LoadIndex);
@@ -441,7 +441,7 @@ public sealed class SearchIndexManager
         }
     }
 
-    public void IndexObject(BaseDataObject obj)
+    public void IndexObject(DataRecord obj)
     {
         if (obj == null || obj.Key == 0)
             return;
@@ -547,7 +547,7 @@ public sealed class SearchIndexManager
         return new string(arr);
     }
 
-    public void RemoveObject(BaseDataObject obj)
+    public void RemoveObject(DataRecord obj)
     {
         if (obj == null || obj.Key == 0)
             return;
@@ -588,7 +588,7 @@ public sealed class SearchIndexManager
         }
     }
 
-    public IReadOnlyCollection<uint> Search(Type type, string queryText, Func<IEnumerable<BaseDataObject>> loadAll)
+    public IReadOnlyCollection<uint> Search(Type type, string queryText, Func<IEnumerable<DataRecord>> loadAll)
     {
         return Search(type, queryText, loadAll, null);
     }
@@ -597,7 +597,7 @@ public sealed class SearchIndexManager
     /// Search using only the suffix tree layer. Finds tokens that end with the query text.
     /// Useful for searching by file extension, domain suffix, or word endings.
     /// </summary>
-    public IReadOnlyCollection<uint> SearchSuffix(Type type, string suffixText, Func<IEnumerable<BaseDataObject>> loadAll)
+    public IReadOnlyCollection<uint> SearchSuffix(Type type, string suffixText, Func<IEnumerable<DataRecord>> loadAll)
     {
         if (string.IsNullOrWhiteSpace(suffixText) || suffixText.Length < 3)
             return Array.Empty<uint>();
@@ -629,7 +629,7 @@ public sealed class SearchIndexManager
         return results;
     }
 
-    public IReadOnlyCollection<uint> Search(Type type, string queryText, Func<IEnumerable<BaseDataObject>> loadAll, IndexKind? preferredKind)
+    public IReadOnlyCollection<uint> Search(Type type, string queryText, Func<IEnumerable<DataRecord>> loadAll, IndexKind? preferredKind)
     {
         if (string.IsNullOrWhiteSpace(queryText))
             return Array.Empty<uint>();
@@ -931,14 +931,14 @@ public sealed class SearchIndexManager
         }
     }
 
-    private void BuildFrom(IndexData index, Func<IEnumerable<BaseDataObject>> loadAll)
+    private void BuildFrom(IndexData index, Func<IEnumerable<DataRecord>> loadAll)
     {
         index.Tokens.Clear();
         index.IdToTokens.Clear();
         index.PrefixTree.Clear();
         
         // Load all objects once to avoid calling loadAll multiple times
-        var allObjects = new List<BaseDataObject>();
+        var allObjects = new List<DataRecord>();
         foreach (var obj in loadAll())
             allObjects.Add(obj);
         if (allObjects.Count == 0)
@@ -1001,7 +1001,7 @@ public sealed class SearchIndexManager
         }
     }
 
-    private HashSet<string> BuildTokens(BaseDataObject obj, IndexData index)
+    private HashSet<string> BuildTokens(DataRecord obj, IndexData index)
     {
         var tokens = new HashSet<string>(8, StringComparer.OrdinalIgnoreCase);
         var metadata = GetOrCreateTypeMetadata(obj.EntityTypeName);
@@ -1608,7 +1608,7 @@ public sealed class SearchIndexManager
     /// Traverse the graph index starting from a node, returning all reachable nodes
     /// within the specified number of hops. Use for org-chart ancestry, document chains, etc.
     /// </summary>
-    public IReadOnlyCollection<uint> TraverseGraph(Type type, uint startId, int maxHops, Func<IEnumerable<BaseDataObject>> loadAll, string? edgeType = null)
+    public IReadOnlyCollection<uint> TraverseGraph(Type type, uint startId, int maxHops, Func<IEnumerable<DataRecord>> loadAll, string? edgeType = null)
     {
         EnsureBuilt(type, loadAll);
         var entityName = EntityNameFromType(type);
@@ -1628,7 +1628,7 @@ public sealed class SearchIndexManager
     /// <summary>
     /// Get direct neighbours (1-hop) from the graph index.
     /// </summary>
-    public IReadOnlyCollection<uint> GetNeighbours(Type type, uint nodeId, Func<IEnumerable<BaseDataObject>> loadAll)
+    public IReadOnlyCollection<uint> GetNeighbours(Type type, uint nodeId, Func<IEnumerable<DataRecord>> loadAll)
     {
         EnsureBuilt(type, loadAll);
         var entityName = EntityNameFromType(type);
@@ -1653,7 +1653,7 @@ public sealed class SearchIndexManager
     /// <summary>
     /// Get reverse neighbours (who points to this node).
     /// </summary>
-    public IReadOnlyCollection<uint> GetReverseNeighbours(Type type, uint nodeId, Func<IEnumerable<BaseDataObject>> loadAll)
+    public IReadOnlyCollection<uint> GetReverseNeighbours(Type type, uint nodeId, Func<IEnumerable<DataRecord>> loadAll)
     {
         EnsureBuilt(type, loadAll);
         var entityName = EntityNameFromType(type);
@@ -1748,7 +1748,7 @@ public sealed class SearchIndexManager
     /// <summary>
     /// Search for points within a radius of a center coordinate.
     /// </summary>
-    public IReadOnlyCollection<uint> SearchRadius(Type type, double centerLat, double centerLng, double radiusKm, Func<IEnumerable<BaseDataObject>> loadAll)
+    public IReadOnlyCollection<uint> SearchRadius(Type type, double centerLat, double centerLng, double radiusKm, Func<IEnumerable<DataRecord>> loadAll)
     {
         EnsureBuilt(type, loadAll);
         var entityName = EntityNameFromType(type);
@@ -1768,7 +1768,7 @@ public sealed class SearchIndexManager
     /// <summary>
     /// Search for points within a bounding box.
     /// </summary>
-    public IReadOnlyCollection<uint> SearchBoundingBox(Type type, double minLat, double maxLat, double minLng, double maxLng, Func<IEnumerable<BaseDataObject>> loadAll)
+    public IReadOnlyCollection<uint> SearchBoundingBox(Type type, double minLat, double maxLat, double minLng, double maxLng, Func<IEnumerable<DataRecord>> loadAll)
     {
         EnsureBuilt(type, loadAll);
         var entityName = EntityNameFromType(type);
@@ -1788,7 +1788,7 @@ public sealed class SearchIndexManager
     /// <summary>
     /// Find the nearest N points to a center coordinate.
     /// </summary>
-    public IReadOnlyList<(uint Id, double DistanceKm)> SearchNearest(Type type, double centerLat, double centerLng, int count, Func<IEnumerable<BaseDataObject>> loadAll)
+    public IReadOnlyList<(uint Id, double DistanceKm)> SearchNearest(Type type, double centerLat, double centerLng, int count, Func<IEnumerable<DataRecord>> loadAll)
     {
         EnsureBuilt(type, loadAll);
         var entityName = EntityNameFromType(type);

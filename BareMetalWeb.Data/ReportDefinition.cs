@@ -7,7 +7,7 @@ namespace BareMetalWeb.Data;
 /// filters, parameters and sort for the reporting layer.
 /// </summary>
 [DataEntity("Report Definitions", Slug = "report-definitions", ShowOnNav = false, Permissions = "admin", NavGroup = "Admin", NavOrder = 90)]
-public sealed class ReportDefinition : BaseDataObject
+public sealed class ReportDefinition : DataRecord
 {
     public override string EntityTypeName => "ReportDefinition";
     private const int Ord_Name = BaseFieldCount + 0;

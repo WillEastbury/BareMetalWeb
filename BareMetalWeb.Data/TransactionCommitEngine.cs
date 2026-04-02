@@ -44,7 +44,7 @@ public sealed class TransactionCommitEngine
         try
         {
             // 2. Load canonical state for all touched aggregates
-            var loadedEntities = new Dictionary<string, (DataEntityMetadata Meta, BaseDataObject Entity, EntityLayout Layout)>();
+            var loadedEntities = new Dictionary<string, (DataEntityMetadata Meta, DataRecord Entity, EntityLayout Layout)>();
 
             foreach (var mutation in envelope.Mutations)
             {
@@ -57,15 +57,15 @@ public sealed class TransactionCommitEngine
                 var loaded = await DataScaffold.LoadAsync(meta, mutation.AggregateId, cancellationToken);
                 if (loaded is null)
                     return Fail("ENTITY_NOT_FOUND", $"Entity {mutation.AggregateType}:{mutation.AggregateId} not found.");
-                if (loaded is not BaseDataObject entity)
-                    return Fail("TYPE_MISMATCH", $"Expected BaseDataObject for {mutation.AggregateType}:{mutation.AggregateId}, got non-entity object.");
+                if (loaded is not DataRecord entity)
+                    return Fail("TYPE_MISMATCH", $"Expected DataRecord for {mutation.AggregateType}:{mutation.AggregateId}, got non-entity object.");
 
                 var layout = EntityLayoutCompiler.GetOrCompile(meta);
                 loadedEntities[key] = (meta, entity, layout);
             }
 
             // Snapshot before-state for domain event detection
-            var beforeSnapshots = new Dictionary<string, BaseDataObject>();
+            var beforeSnapshots = new Dictionary<string, DataRecord>();
             foreach (var (key, (meta, entity, _)) in loadedEntities)
             {
                 beforeSnapshots[key] = CloneEntity(entity, meta);
@@ -147,7 +147,7 @@ public sealed class TransactionCommitEngine
             // 6. Dispatch domain event subscriptions (flat only — no nested events)
             if (allowEventDispatch && _actionResolver != null)
             {
-                var entityStates = new Dictionary<string, (DataEntityMetadata, BaseDataObject, BaseDataObject, EntityLayout)>();
+                var entityStates = new Dictionary<string, (DataEntityMetadata, DataRecord, DataRecord, EntityLayout)>();
                 foreach (var (key, (meta, entity, layout)) in loadedEntities)
                 {
                     if (beforeSnapshots.TryGetValue(key, out var before))
@@ -201,8 +201,8 @@ public sealed class TransactionCommitEngine
         var loaded = await DataScaffold.LoadAsync(meta, aggregateId, cancellationToken);
         if (loaded is null)
             return Fail("ENTITY_NOT_FOUND", $"Entity {action.AggregateType}:{aggregateId} not found.");
-        if (loaded is not BaseDataObject entity)
-            return Fail("TYPE_MISMATCH", $"Expected BaseDataObject for {action.AggregateType}:{aggregateId}, got non-entity object.");
+        if (loaded is not DataRecord entity)
+            return Fail("TYPE_MISMATCH", $"Expected DataRecord for {action.AggregateType}:{aggregateId}, got non-entity object.");
 
         var layout = EntityLayoutCompiler.GetOrCompile(meta);
 
@@ -220,11 +220,11 @@ public sealed class TransactionCommitEngine
     /// Shallow clone an entity to capture before-state for event comparison.
     /// Copies all field values via the layout getter/setter pairs.
     /// </summary>
-    private static BaseDataObject CloneEntity(BaseDataObject source, DataEntityMetadata meta)
+    private static DataRecord CloneEntity(DataRecord source, DataEntityMetadata meta)
     {
         // AOT-safe: DataRecord clones via schema-aware constructor; compiled entities
         // use the registered factory delegate from metadata — no GetType() or reflection.
-        BaseDataObject clone;
+        DataRecord clone;
         if (source is DataRecord dr && dr.Schema is { } schema)
         {
             clone = new DataRecord(schema);

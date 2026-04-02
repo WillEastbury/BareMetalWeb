@@ -28,7 +28,7 @@ public static class ComputedFieldService
     /// </summary>
     public static async ValueTask ApplyComputedValuesAsync(
         DataEntityMetadata metadata,
-        BaseDataObject instance,
+        DataRecord instance,
         ComputedTrigger trigger,
         CancellationToken cancellationToken = default)
     {
@@ -64,7 +64,7 @@ public static class ComputedFieldService
     /// </summary>
     public static async ValueTask<object?> GetComputedValueAsync(
         DataEntityMetadata metadata,
-        BaseDataObject instance,
+        DataRecord instance,
         DataFieldMetadata field,
         CancellationToken cancellationToken = default)
     {
@@ -138,7 +138,7 @@ public static class ComputedFieldService
 
     private static async ValueTask<object?> ComputeValueAsync(
         DataEntityMetadata metadata,
-        BaseDataObject instance,
+        DataRecord instance,
         DataFieldMetadata field,
         ComputedFieldConfig config,
         CancellationToken cancellationToken)
@@ -179,7 +179,7 @@ public static class ComputedFieldService
 
     private static async ValueTask<object?> ComputeLookupAsync(
         DataEntityMetadata metadata,
-        BaseDataObject instance,
+        DataRecord instance,
         DataFieldMetadata field,
         ComputedFieldConfig config,
         CancellationToken cancellationToken)
@@ -212,7 +212,7 @@ public static class ComputedFieldService
 
     private static async ValueTask<object?> ComputeAggregationAsync(
         DataEntityMetadata metadata,
-        BaseDataObject instance,
+        DataRecord instance,
         DataFieldMetadata field,
         ComputedFieldConfig config,
         CancellationToken cancellationToken)
@@ -252,7 +252,7 @@ public static class ComputedFieldService
         string? cachedItemEntityName = null;
         foreach (var item in items)
         {
-            var itemEntityName = item is BaseDataObject bdoItem ? bdoItem.EntityTypeName : string.Empty;
+            var itemEntityName = item is DataRecord bdoItem ? bdoItem.EntityTypeName : string.Empty;
             if (itemEntityName != cachedItemEntityName)
             {
                 cachedItemEntityName = itemEntityName;
