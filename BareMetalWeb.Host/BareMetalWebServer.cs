@@ -1076,6 +1076,13 @@ public class BareMetalWebServer : IBareWebHost
         var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
         var userName = user != null ? UserAuth.GetUserName(user) : null;
 
+        // Clear stale session cookie on 401 to prevent redirect loops
+        if (isUnauth)
+        {
+            context.DeleteCookie(UserAuth.SessionCookieName);
+            context.DeleteCookie("csrf_token");
+        }
+
         if (IsAjaxRequest(context))
         {
             var error = isUnauth
