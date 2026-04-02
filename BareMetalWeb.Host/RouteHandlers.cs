@@ -1501,10 +1501,16 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private async ValueTask EnsureDefaultReports(string createdBy)
     {
-        var existing = (await DataStoreProvider.Current.QueryAsync("ReportDefinition", null).ConfigureAwait(false)).Cast<ReportDefinition>();
         var existingNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var reportMeta = DataScaffold.GetEntityByName("ReportDefinition");
+        var nameField = reportMeta?.FindField("Name");
+        var existing = await DataStoreProvider.Current.QueryAsync("ReportDefinition", null).ConfigureAwait(false);
         foreach (var r in existing)
-            existingNames.Add(r.Name);
+        {
+            var name = nameField?.GetValueFn(r)?.ToString();
+            if (!string.IsNullOrEmpty(name))
+                existingNames.Add(name);
+        }
 
         var reports = new List<ReportDefinition>
         {
