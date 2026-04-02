@@ -58,7 +58,7 @@ public static class UserSessionHelper
     }
 
     public static void SetPermissions(DataRecord record, string[] value)
-        => record.SetFieldValue(UserSessionFields.Permissions, value);
+        => record.SetFieldValue(UserSessionFields.Permissions, string.Join(",", value ?? Array.Empty<string>()));
 
     public static DateTime GetIssuedUtc(DataRecord record)
         => record.GetFieldValue(UserSessionFields.IssuedUtc) is DateTime dt ? dt : default;
