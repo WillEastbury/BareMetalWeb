@@ -157,7 +157,7 @@ public class BareMetalWebServer : IBareWebHost
         var user = context != null ? await UserAuth.GetUserAsync(context, cancellationToken).ConfigureAwait(false) : null;
         bool isAnonymous = user == null;
         var userPermissions = new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase);
-
+        bool isAdmin = userPermissions.Contains("admin");
         if (context != null)
         {
             var cacheKey = BuildMenuCacheKey(user, _routesVersion);
@@ -213,17 +213,20 @@ public class BareMetalWebServer : IBareWebHost
                 if (isAnonymous)
                     continue;
 
-                bool hasPermission = true;
-                for (int i = 0; i < requiredPermissions.Length; i++)
+                if (!isAdmin)
                 {
-                    if (!userPermissions.Contains(requiredPermissions[i]))
+                    bool hasPermission = true;
+                    for (int i = 0; i < requiredPermissions.Length; i++)
                     {
-                        hasPermission = false;
-                        break;
+                        if (!userPermissions.Contains(requiredPermissions[i]))
+                        {
+                            hasPermission = false;
+                            break;
+                        }
                     }
+                    if (!hasPermission)
+                        continue;
                 }
-                if (!hasPermission)
-                    continue;
             }
 
             string? group = pageInfo.PageContext.NavGroup;
@@ -270,17 +273,20 @@ public class BareMetalWebServer : IBareWebHost
                 if (isAnonymous)
                     continue;
 
-                bool allPermissionsMatch = true;
-                for (int i = 0; i < requiredPermissions.Length; i++)
+                if (!isAdmin)
                 {
-                    if (!userPermissions.Contains(requiredPermissions[i]))
+                    bool allPermissionsMatch = true;
+                    for (int i = 0; i < requiredPermissions.Length; i++)
                     {
-                        allPermissionsMatch = false;
-                        break;
+                        if (!userPermissions.Contains(requiredPermissions[i]))
+                        {
+                            allPermissionsMatch = false;
+                            break;
+                        }
                     }
+                    if (!allPermissionsMatch)
+                        continue;
                 }
-                if (!allPermissionsMatch)
-                    continue;
             }
 
             bool requiresLoggedIn = requiresAuthenticated || (!requiresAnonymous && requiredPermissions.Length > 0);
@@ -1157,6 +1163,10 @@ public class BareMetalWebServer : IBareWebHost
 
         var userPermissions = new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase);
         var altLookup = userPermissions.GetAlternateLookup<ReadOnlySpan<char>>();
+
+        // "admin" is a superuser permission — bypasses all permission checks
+        if (userPermissions.Contains("admin"))
+            return AuthResult.Allowed;
 
         var remaining = permissionsNeeded.AsSpan();
         bool foundAny = false;
