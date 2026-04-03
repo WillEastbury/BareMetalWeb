@@ -68,6 +68,12 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
+            - name: BMW_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ${TENANT_NAME}-encryption
+                  key: BMW_ENCRYPTION_KEY
+                  optional: true
           resources:
             requests:
               cpu: ${CPU_REQUEST}

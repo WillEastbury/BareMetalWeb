@@ -65,6 +65,7 @@ public static class BareMetalWebExtensions
 
         var dataRoot = config.GetValue("Data.Root", Path.Combine(contentRoot, "Data"));
         ProgramSetup.ResetDataIfRequested(config, contentRoot, dataRoot, logger);
+        SynchronousEncryption.ConfigureKeyRoot(dataRoot);
         CookieProtection.ConfigureKeyRoot(dataRoot);
         Console.WriteLine($"[BMW Startup] Data root: {dataRoot}");
 

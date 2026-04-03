@@ -66,6 +66,12 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
+            - name: BMW_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: baremetalweb-encryption
+                  key: BMW_ENCRYPTION_KEY
+                  optional: true
           resources:
             requests:
               cpu: 100m
