@@ -2,6 +2,14 @@
  * Static file server - serves files from a root directory with path confinement
  */
 #include "bmw_http.h"
+#ifdef _WIN32
+#include <windows.h>
+#include <io.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#endif
 
 static const char *get_mime_type(const char *path) {
     const char *ext = strrchr(path, '.');
@@ -49,56 +57,72 @@ int bmw_static_serve(const char *root_dir, const char *path, bmw_response_t *res
     }
 #endif
 
-    /* Canonicalize and verify the resolved path stays under root_dir */
+    /* Open file FIRST to obtain a handle, then verify the resolved path of the open
+     * handle is under root_dir. This closes the TOCTOU window between canonicalize
+     * and fopen (symlink swap). */
+    FILE *f = NULL;
     {
 #ifdef _WIN32
-        char resolved[1024];
-        if (!_fullpath(resolved, fullpath, sizeof(resolved))) {
+        f = fopen(fullpath, "rb");
+        if (!f) {
             bmw_response_set_status(resp, 404);
             bmw_response_set_body(resp, "Not Found", 9);
             return -1;
         }
+        HANDLE h = (HANDLE)_get_osfhandle(_fileno(f));
+        char resolved[1024];
+        DWORD rn = GetFinalPathNameByHandleA(h, resolved, sizeof(resolved), FILE_NAME_NORMALIZED);
+        if (rn == 0 || rn >= sizeof(resolved)) { fclose(f); bmw_response_set_status(resp, 500); return -1; }
         char resolved_root[1024];
         if (!_fullpath(resolved_root, root_dir, sizeof(resolved_root))) {
-            bmw_response_set_status(resp, 500);
-            return -1;
+            fclose(f); bmw_response_set_status(resp, 500); return -1;
         }
+        /* Strip \\?\ prefix if present */
+        const char *rcmp = resolved;
+        if (strncmp(rcmp, "\\\\?\\", 4) == 0) rcmp += 4;
         size_t rlen = strlen(resolved_root);
-        if (strncmp(resolved, resolved_root, rlen) != 0 ||
-            (resolved[rlen] != '\0' && resolved[rlen] != '\\')) {
+        if (_strnicmp(rcmp, resolved_root, rlen) != 0 ||
+            (rcmp[rlen] != '\0' && rcmp[rlen] != '\\')) {
+            fclose(f);
             bmw_response_set_status(resp, 403);
             bmw_response_set_body(resp, "Forbidden", 9);
             return -1;
         }
-        snprintf(fullpath, sizeof(fullpath), "%s", resolved);
 #else
-        char *resolved = realpath(fullpath, NULL);
-        if (!resolved) {
+        int fd = open(fullpath, O_RDONLY | O_NOFOLLOW
+#ifdef O_CLOEXEC
+                                | O_CLOEXEC
+#endif
+                     );
+        if (fd < 0) {
             bmw_response_set_status(resp, 404);
             bmw_response_set_body(resp, "Not Found", 9);
             return -1;
         }
+        struct stat st;
+        if (fstat(fd, &st) < 0 || !S_ISREG(st.st_mode)) {
+            close(fd); bmw_response_set_status(resp, 403);
+            bmw_response_set_body(resp, "Forbidden", 9); return -1;
+        }
+        /* Verify the path still resolves under root (defence-in-depth; O_NOFOLLOW
+         * already prevents the final-component symlink swap). */
+        char *resolved = realpath(fullpath, NULL);
         char *resolved_root = realpath(root_dir, NULL);
-        if (!resolved_root) { free(resolved); bmw_response_set_status(resp, 500); return -1; }
+        if (!resolved || !resolved_root) {
+            free(resolved); free(resolved_root); close(fd);
+            bmw_response_set_status(resp, 500); return -1;
+        }
         size_t rlen = strlen(resolved_root);
         if (strncmp(resolved, resolved_root, rlen) != 0 ||
             (resolved[rlen] != '\0' && resolved[rlen] != '/')) {
-            free(resolved); free(resolved_root);
+            free(resolved); free(resolved_root); close(fd);
             bmw_response_set_status(resp, 403);
-            bmw_response_set_body(resp, "Forbidden", 9);
-            return -1;
+            bmw_response_set_body(resp, "Forbidden", 9); return -1;
         }
-        snprintf(fullpath, sizeof(fullpath), "%s", resolved);
         free(resolved); free(resolved_root);
+        f = fdopen(fd, "rb");
+        if (!f) { close(fd); bmw_response_set_status(resp, 500); return -1; }
 #endif
-    }
-
-    /* Open and read file */
-    FILE *f = fopen(fullpath, "rb");
-    if (!f) {
-        bmw_response_set_status(resp, 404);
-        bmw_response_set_body(resp, "Not Found", 9);
-        return -1;
     }
 
     fseek(f, 0, SEEK_END);

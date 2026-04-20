@@ -134,6 +134,74 @@ void bmw_hmac_sha256(const uint8_t *key, size_t key_len,
     sha256(outer_msg, 96, out_mac);
 }
 
+/* HMAC-SHA256 over two concatenated buffers (a || b) without an intermediate copy.
+ * Useful for signing (header || payload) without allocations. */
+void bmw_hmac_sha256_2(const uint8_t *key, size_t key_len,
+                       const uint8_t *a, size_t a_len,
+                       const uint8_t *b, size_t b_len,
+                       uint8_t *out_mac) {
+    uint8_t k_pad[64], inner[32];
+    uint8_t k[32];
+    if (key_len > 64) { sha256(key, key_len, k); key = k; key_len = 32; }
+    memset(k_pad, 0x36, 64);
+    for (size_t i = 0; i < key_len; i++) k_pad[i] ^= key[i];
+
+    uint8_t block[64];
+    uint32_t state[8] = {
+        0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+        0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19
+    };
+    sha256_transform(state, k_pad);
+
+    /* Stream a then b through a 64-byte rolling block */
+    size_t buf_pos = 0;
+    const uint8_t *parts[2] = { a, b };
+    size_t plens[2] = { a_len, b_len };
+    for (int p = 0; p < 2; p++) {
+        const uint8_t *src = parts[p]; size_t left = plens[p];
+        if (!src) continue;
+        if (buf_pos > 0) {
+            size_t fill = 64 - buf_pos;
+            if (left < fill) { memcpy(block + buf_pos, src, left); buf_pos += left; left = 0; }
+            else {
+                memcpy(block + buf_pos, src, fill);
+                sha256_transform(state, block);
+                src += fill; left -= fill; buf_pos = 0;
+            }
+        }
+        while (left >= 64) { sha256_transform(state, src); src += 64; left -= 64; }
+        if (left) { memcpy(block, src, left); buf_pos = left; }
+    }
+
+    /* Final pad */
+    size_t total_data = a_len + b_len;
+    if (buf_pos < 56) {
+        memset(block + buf_pos, 0, 64 - buf_pos);
+        block[buf_pos] = 0x80;
+    } else {
+        memset(block + buf_pos, 0, 64 - buf_pos);
+        block[buf_pos] = 0x80;
+        sha256_transform(state, block);
+        memset(block, 0, 64);
+    }
+    uint64_t total_bits = (uint64_t)(64 + total_data) * 8;
+    for (int j = 0; j < 8; j++) block[63-j] = (uint8_t)(total_bits >> (j*8));
+    sha256_transform(state, block);
+    for (int j = 0; j < 8; j++) {
+        inner[j*4]   = (uint8_t)(state[j]>>24);
+        inner[j*4+1] = (uint8_t)(state[j]>>16);
+        inner[j*4+2] = (uint8_t)(state[j]>>8);
+        inner[j*4+3] = (uint8_t)(state[j]);
+    }
+
+    memset(k_pad, 0x5c, 64);
+    for (size_t i = 0; i < key_len; i++) k_pad[i] ^= key[i];
+    uint8_t outer_msg[96];
+    memcpy(outer_msg, k_pad, 64);
+    memcpy(outer_msg + 64, inner, 32);
+    sha256(outer_msg, 96, out_mac);
+}
+
 /* Cryptographic random bytes (OS CSPRNG). Returns 0 on success, -1 on failure. */
 static int csprng_bytes(uint8_t *out, size_t len) {
 #ifdef _WIN32
@@ -151,6 +219,16 @@ static int csprng_bytes(uint8_t *out, size_t len) {
 }
 
 /* Cryptographically random session ID generator. Returns 0 on success, -1 on failure. */
+/* Constant-time string compare to prevent timing oracles on session/state tokens */
+static int ct_streq(const char *a, const char *b) {
+    if (!a || !b) return 0;
+    size_t la = strlen(a), lb = strlen(b);
+    volatile unsigned char diff = (unsigned char)(la ^ lb);
+    size_t n = la < lb ? la : lb;
+    for (size_t i = 0; i < n; i++) diff |= (unsigned char)(a[i] ^ b[i]);
+    return diff == 0;
+}
+
 static int gen_session_id(char *out, size_t len) {
     uint8_t raw[64];
     size_t need = (len - 1) / 2 + 1;
@@ -176,7 +254,7 @@ bmw_auth_session_t *bmw_auth_validate(bmw_auth_ctx_t *ctx, const char *cookie) {
     sid[i] = '\0';
 
     for (int s = 0; s < ctx->session_count; s++) {
-        if (ctx->sessions[s].active && strcmp(ctx->sessions[s].session_id, sid) == 0) {
+        if (ctx->sessions[s].active && ct_streq(ctx->sessions[s].session_id, sid)) {
             /* Check session expiry */
             if (ctx->sessions[s].expires_at > 0 &&
                 (uint32_t)time(NULL) > ctx->sessions[s].expires_at) {
@@ -273,7 +351,7 @@ static bmw_result_t auth_callback(bmw_request_t *req, bmw_response_t *resp, void
     /* Validate state against stored pending nonces */
     bool state_valid = false;
     for (int s = 0; s < ctx->pending_state_count && s < BMW_AUTH_MAX_SESSIONS; s++) {
-        if (strcmp(ctx->pending_states[s], state_val) == 0) {
+        if (ctx->pending_states[s][0] && ct_streq(ctx->pending_states[s], state_val)) {
             /* Consume the nonce (one-time use) */
             ctx->pending_states[s][0] = '\0';
             state_valid = true;
@@ -291,6 +369,22 @@ static bmw_result_t auth_callback(bmw_request_t *req, bmw_response_t *resp, void
      * ID token validation) requires outbound HTTP which is not yet implemented.
      * State nonce is validated above for CSRF protection.
      */
+
+    /*
+     * OWASP-A07: Without a real IdP token exchange (POST to token_endpoint with
+     * the code, PKCE verifier, then ID-token signature + claims validation),
+     * minting a session here would be an authentication bypass. Refuse unless
+     * the operator has explicitly enabled the exchange path.
+     */
+    if (!ctx->exchange_enabled) {
+        bmw_response_set_status(resp, 501);
+        bmw_response_add_header(resp, "Content-Type", "application/json");
+        bmw_response_set_body(resp,
+            "{\"error\":\"oidc_exchange_disabled\","
+            "\"detail\":\"set auth.exchange_enabled=true after wiring real token endpoint\"}",
+            96);
+        return BMW_HANDLED;
+    }
 
     /* Find a free session slot (reuse inactive slots first) */
     bmw_auth_session_t *sess = NULL;
@@ -318,8 +412,11 @@ static bmw_result_t auth_callback(bmw_request_t *req, bmw_response_t *resp, void
     sess->expires_at = (uint32_t)time(NULL) + 3600;
 
     /* Set session cookie and redirect to app */
-    char cookie[256];
-    snprintf(cookie, sizeof(cookie), "bm_session=%s; Path=/; HttpOnly; SameSite=Lax", sess->session_id);
+    char cookie[320];
+    snprintf(cookie, sizeof(cookie),
+             "bm_session=%s; Path=/; HttpOnly; SameSite=Strict%s",
+             sess->session_id,
+             ctx->cookie_secure ? "; Secure" : "");
     bmw_response_set_status(resp, 302);
     bmw_response_add_header(resp, "Set-Cookie", cookie);
     bmw_response_add_header(resp, "Location", "/");
@@ -417,6 +514,10 @@ static int auth_init(bmw_module_t *self, bmw_config_t *config, bmw_service_regis
                 snprintf(ctx->redirect_uri, sizeof(ctx->redirect_uri), "%s", config->entries[i].value);
             else if (strcmp(config->entries[i].key, "scopes") == 0)
                 snprintf(ctx->scopes, sizeof(ctx->scopes), "%s", config->entries[i].value);
+            else if (strcmp(config->entries[i].key, "exchange_enabled") == 0)
+                ctx->exchange_enabled = (strcmp(config->entries[i].value, "true") == 0);
+            else if (strcmp(config->entries[i].key, "cookie_secure") == 0)
+                ctx->cookie_secure = (strcmp(config->entries[i].value, "true") == 0);
         }
     }
 

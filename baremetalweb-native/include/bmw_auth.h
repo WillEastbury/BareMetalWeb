@@ -50,6 +50,11 @@ typedef struct {
     /* Pending auth state nonces (CSRF protection) */
     char pending_states[BMW_AUTH_MAX_SESSIONS][BMW_AUTH_COOKIE_SIZE];
     int pending_state_count;
+    /* Security: enable real OIDC code-exchange path; if false, /auth/callback returns 501.
+     * Defaults false until token-endpoint POST + ID-token validation are implemented. */
+    bool exchange_enabled;
+    /* Set Secure flag on session cookie (when serving over HTTPS / behind TLS proxy) */
+    bool cookie_secure;
 } bmw_auth_ctx_t;
 
 bmw_module_t *bmw_auth_module_create(void);
@@ -61,5 +66,10 @@ bmw_auth_session_t *bmw_auth_validate(bmw_auth_ctx_t *ctx, const char *cookie);
 void bmw_hmac_sha256(const uint8_t *key, size_t key_len,
                      const uint8_t *data, size_t data_len,
                      uint8_t *out_mac);
+/* Streaming variant: HMAC over (a || b) without intermediate copy. */
+void bmw_hmac_sha256_2(const uint8_t *key, size_t key_len,
+                       const uint8_t *a, size_t a_len,
+                       const uint8_t *b, size_t b_len,
+                       uint8_t *out_mac);
 
 #endif /* BMW_AUTH_H */

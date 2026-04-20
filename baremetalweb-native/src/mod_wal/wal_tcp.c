@@ -248,7 +248,16 @@ int wal_tcp_start(wal_tcp_ctx_t *ctx, bmw_event_loop_t *loop) {
 
     struct sockaddr_in addr = {0};
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
+    /* Default to loopback only — WAL TCP has no auth; opt-in INADDR_ANY via env */
+    {
+        const char *bind_any = getenv("BMW_WAL_TCP_BIND_ANY");
+        if (bind_any && bind_any[0] == '1') {
+            addr.sin_addr.s_addr = INADDR_ANY;
+            fprintf(stderr, "[WAL-TCP] WARNING: binding 0.0.0.0 (BMW_WAL_TCP_BIND_ANY=1) — no auth!\n");
+        } else {
+            addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        }
+    }
     addr.sin_port = htons(ctx->port);
 
     if (bind(ctx->listen_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {

@@ -140,9 +140,13 @@ static int http_send_response(http_conn_t *conn, bmw_response_t *resp) {
 
     int n = snprintf(conn->write_buf, BMW_WRITE_BUF_SIZE,
         "HTTP/1.1 %d %s\r\n"
-        "Server: BareMetalWeb-Native/1.0\r\n"
+        "Server: BareMetalWeb\r\n"
         "Connection: %s\r\n"
-        "Content-Length: %zu\r\n",
+        "Content-Length: %zu\r\n"
+        "X-Content-Type-Options: nosniff\r\n"
+        "X-Frame-Options: DENY\r\n"
+        "Referrer-Policy: no-referrer\r\n"
+        "Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'\r\n",
         resp->status, status_text(resp->status),
         conn->keep_alive ? "keep-alive" : "close",
         actual_body);

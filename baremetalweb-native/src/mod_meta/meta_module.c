@@ -12,6 +12,42 @@
 #define strncasecmp _strnicmp
 #endif
 
+/* JSON-escape a string into out (NUL-terminated). Returns chars written (excluding NUL),
+ * or -1 if it would overflow. */
+static int json_escape(const char *in, char *out, size_t out_cap) {
+    size_t o = 0;
+    for (const unsigned char *p = (const unsigned char *)in; *p; p++) {
+        const char *esc = NULL;
+        char ubuf[8];
+        switch (*p) {
+            case '"':  esc = "\\\""; break;
+            case '\\': esc = "\\\\"; break;
+            case '\b': esc = "\\b";  break;
+            case '\f': esc = "\\f";  break;
+            case '\n': esc = "\\n";  break;
+            case '\r': esc = "\\r";  break;
+            case '\t': esc = "\\t";  break;
+            default:
+                if (*p < 0x20) {
+                    snprintf(ubuf, sizeof(ubuf), "\\u%04x", *p);
+                    esc = ubuf;
+                }
+                break;
+        }
+        if (esc) {
+            size_t el = strlen(esc);
+            if (o + el + 1 > out_cap) return -1;
+            memcpy(out + o, esc, el); o += el;
+        } else {
+            if (o + 2 > out_cap) return -1;
+            out[o++] = (char)*p;
+        }
+    }
+    if (o + 1 > out_cap) return -1;
+    out[o] = '\0';
+    return (int)o;
+}
+
 /* --- BSO1 Encoding --- */
 
 int bmw_bso1_encode_record(bmw_meta_ctx_t *ctx, int entity_idx, int record_idx,
@@ -52,9 +88,10 @@ int bmw_bso1_encode_record(bmw_meta_ctx_t *ctx, int entity_idx, int record_idx,
     out[hdr_pos++] = 1; /* schema version */
     out[hdr_pos++] = 0; /* reserved */
     out[hdr_pos++] = 0;
-    /* HMAC placeholder - computed over payload */
+    /* HMAC-SHA256 over (header_prefix[8] || payload). The 32-byte HMAC field
+     * itself is excluded; this binds magic/version/schema to the payload. */
     if (hmac_key) {
-        bmw_hmac_sha256(hmac_key, 32, payload, pos, out + hdr_pos);
+        bmw_hmac_sha256_2(hmac_key, 32, out, 8, payload, pos, out + hdr_pos);
     } else {
         memset(out + hdr_pos, 0, 32);
     }
@@ -124,7 +161,8 @@ done_records:
     memcpy(payload + 4, items_buf, items_pos);
 
     if (hmac_key) {
-        bmw_hmac_sha256(hmac_key, 32, payload, payload_len, out + hdr_pos);
+        /* Bind header (magic/version/schema) into the MAC */
+        bmw_hmac_sha256_2(hmac_key, 32, out, 8, payload, payload_len, out + hdr_pos);
     } else {
         memset(out + hdr_pos, 0, 32);
     }
@@ -138,6 +176,30 @@ done_records:
 
 static bmw_meta_ctx_t *g_meta_ctx = NULL;
 static uint8_t *g_hmac_key = NULL;
+static bmw_auth_ctx_t *g_auth_ctx = NULL;
+
+/* Helper: extract Cookie header from request */
+static const char *get_cookie(bmw_request_t *req) {
+    for (int i = 0; i < req->header_count; i++) {
+        if (strncasecmp(req->headers[i].name, "Cookie", 6) == 0)
+            return req->headers[i].value;
+    }
+    return NULL;
+}
+
+/* Helper: require authenticated session for mutating operations */
+static bool require_auth(bmw_request_t *req, bmw_response_t *resp) {
+    if (!g_auth_ctx) return true; /* auth disabled */
+    bmw_auth_session_t *sess = bmw_auth_validate(g_auth_ctx, get_cookie(req));
+    if (!sess) {
+        bmw_response_set_status(resp, 401);
+        bmw_response_add_header(resp, "Content-Type", "application/json");
+        bmw_response_add_header(resp, "WWW-Authenticate", "Bearer realm=\"api\"");
+        bmw_response_set_body(resp, "{\"error\":\"unauthorized\"}", 24);
+        return false;
+    }
+    return true;
+}
 
 /* GET /api/_meta - list all entities */
 static bmw_result_t meta_list_all(bmw_request_t *req, bmw_response_t *resp, void *ud) {
@@ -204,9 +266,12 @@ static bmw_result_t meta_api_handler(bmw_request_t *req, bmw_response_t *resp, v
                 n += snprintf(json+n, sizeof(json)-n, "{\"id\":%u", ctx->records[eidx][r].id);
                 for (int f = 0; f < ent->field_count; f++) {
                     if (n >= (int)sizeof(json) - 2) break;
-                    if (ctx->records[eidx][r].values[f][0])
-                        n += snprintf(json+n, sizeof(json)-n, ",\"%s\":\"%s\"",
-                                      ent->fields[f].name, ctx->records[eidx][r].values[f]);
+                    if (ctx->records[eidx][r].values[f][0]) {
+                        char esc_name[80], esc_val[BMW_META_VALUE_SIZE * 6 + 4];
+                        if (json_escape(ent->fields[f].name, esc_name, sizeof(esc_name)) < 0) continue;
+                        if (json_escape(ctx->records[eidx][r].values[f], esc_val, sizeof(esc_val)) < 0) continue;
+                        n += snprintf(json+n, sizeof(json)-n, ",\"%s\":\"%s\"", esc_name, esc_val);
+                    }
                 }
                 n += snprintf(json+n, sizeof(json)-n, "}");
             }
@@ -223,9 +288,12 @@ static bmw_result_t meta_api_handler(bmw_request_t *req, bmw_response_t *resp, v
                     int n = snprintf(json, sizeof(json), "{\"id\":%u", ctx->records[eidx][r].id);
                     for (int f = 0; f < ent->field_count; f++) {
                         if (n >= (int)sizeof(json) - 2) break;
-                        if (ctx->records[eidx][r].values[f][0])
-                            n += snprintf(json+n, sizeof(json)-n, ",\"%s\":\"%s\"",
-                                          ent->fields[f].name, ctx->records[eidx][r].values[f]);
+                        if (ctx->records[eidx][r].values[f][0]) {
+                            char esc_name[80], esc_val[BMW_META_VALUE_SIZE * 6 + 4];
+                            if (json_escape(ent->fields[f].name, esc_name, sizeof(esc_name)) < 0) continue;
+                            if (json_escape(ctx->records[eidx][r].values[f], esc_val, sizeof(esc_val)) < 0) continue;
+                            n += snprintf(json+n, sizeof(json)-n, ",\"%s\":\"%s\"", esc_name, esc_val);
+                        }
                     }
                     if (n < (int)sizeof(json)) n += snprintf(json+n, sizeof(json)-n, "}");
                     if (n >= (int)sizeof(json)) n = (int)sizeof(json) - 1;
@@ -239,6 +307,7 @@ static bmw_result_t meta_api_handler(bmw_request_t *req, bmw_response_t *resp, v
             bmw_response_set_body(resp, "{\"error\":\"not found\"}", 21);
         }
     } else if (req->method == BMW_HTTP_POST) {
+        if (!require_auth(req, resp)) return BMW_HANDLED;
         /* Create record - simple JSON field extraction */
         if (ctx->record_counts[eidx] >= BMW_META_MAX_RECORDS) {
             bmw_response_set_status(resp, 503);
@@ -277,6 +346,7 @@ static bmw_result_t meta_api_handler(bmw_request_t *req, bmw_response_t *resp, v
         bmw_response_add_header(resp, "Content-Type", "application/json");
         bmw_response_set_body(resp, json, (size_t)n);
     } else if (req->method == BMW_HTTP_DELETE) {
+        if (!require_auth(req, resp)) return BMW_HANDLED;
         int id = extract_id(req->path, "/api/");
         if (id >= 0) {
             for (int r = 0; r < ctx->record_counts[eidx]; r++) {
@@ -401,7 +471,7 @@ static int meta_init(bmw_module_t *self, bmw_config_t *config, bmw_service_regis
 
     /* Get HMAC key from auth service if available */
     bmw_auth_ctx_t *auth = (bmw_auth_ctx_t *)bmw_registry_get(services, "auth.ctx");
-    if (auth) g_hmac_key = auth->hmac_key;
+    if (auth) { g_hmac_key = auth->hmac_key; g_auth_ctx = auth; }
 
     /* Register routes */
     bmw_router_t *router = (bmw_router_t *)bmw_registry_get(services, "http.router");

@@ -5,6 +5,31 @@
 #include "bmw_wal.h"
 #include "bmw_http.h"
 #include "bmw_event_loop.h"
+#include "bmw_auth.h"
+
+static bmw_auth_ctx_t *g_wal_auth = NULL;
+
+static const char *wal_get_cookie(bmw_request_t *req) {
+    for (int i = 0; i < req->header_count; i++) {
+#ifdef _WIN32
+        if (_strnicmp(req->headers[i].name, "Cookie", 6) == 0)
+#else
+        if (strncasecmp(req->headers[i].name, "Cookie", 6) == 0)
+#endif
+            return req->headers[i].value;
+    }
+    return NULL;
+}
+
+static bool wal_require_auth(bmw_request_t *req, bmw_response_t *resp) {
+    if (!g_wal_auth) return true;
+    if (bmw_auth_validate(g_wal_auth, wal_get_cookie(req))) return true;
+    bmw_response_set_status(resp, 401);
+    bmw_response_add_header(resp, "Content-Type", "application/json");
+    bmw_response_add_header(resp, "WWW-Authenticate", "Bearer realm=\"wal\"");
+    bmw_response_set_body(resp, "{\"error\":\"unauthorized\"}", 24);
+    return false;
+}
 
 /* Forward declarations from wal_tcp.c — must match actual definition */
 #define WAL_TCP_MAX_CLIENTS 4
@@ -41,6 +66,7 @@ typedef struct {
 
 /* HTTP route handler: POST /wal/append  body: key=<key>&value=<value>&op=<op> */
 static bmw_result_t wal_http_append(bmw_request_t *req, bmw_response_t *resp, void *userdata) {
+    if (!wal_require_auth(req, resp)) return BMW_HANDLED;
     wal_engine_t *engine = (wal_engine_t *)userdata;
 
     /* Simple key/value extraction from body (url-encoded) */
@@ -70,6 +96,7 @@ static bmw_result_t wal_http_append(bmw_request_t *req, bmw_response_t *resp, vo
 
 /* HTTP route handler: GET /wal/read?key=<key> */
 static bmw_result_t wal_http_read(bmw_request_t *req, bmw_response_t *resp, void *userdata) {
+    if (!wal_require_auth(req, resp)) return BMW_HANDLED;
     wal_engine_t *engine = (wal_engine_t *)userdata;
 
     /* Extract key from query string */
@@ -119,6 +146,9 @@ static int wal_init(bmw_module_t *self, bmw_config_t *config, bmw_service_regist
     }
 
     wal_engine_init(&ctx->engine);
+
+    /* Capture auth context for route gating */
+    g_wal_auth = (bmw_auth_ctx_t *)bmw_registry_get(services, "auth.ctx");
 
     /* Register engine as a service */
     bmw_registry_register(services, "wal.engine", &ctx->engine);
