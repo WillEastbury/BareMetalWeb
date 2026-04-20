@@ -58,14 +58,14 @@ int bmw_static_serve(const char *root_dir, const char *path, bmw_response_t *res
             bmw_response_set_body(resp, "Not Found", 9);
             return -1;
         }
-        /* Verify prefix match against root_dir */
         char resolved_root[1024];
         if (!_fullpath(resolved_root, root_dir, sizeof(resolved_root))) {
             bmw_response_set_status(resp, 500);
             return -1;
         }
         size_t rlen = strlen(resolved_root);
-        if (strncmp(resolved, resolved_root, rlen) != 0) {
+        if (strncmp(resolved, resolved_root, rlen) != 0 ||
+            (resolved[rlen] != '\0' && resolved[rlen] != '\\')) {
             bmw_response_set_status(resp, 403);
             bmw_response_set_body(resp, "Forbidden", 9);
             return -1;
@@ -81,7 +81,8 @@ int bmw_static_serve(const char *root_dir, const char *path, bmw_response_t *res
         char *resolved_root = realpath(root_dir, NULL);
         if (!resolved_root) { free(resolved); bmw_response_set_status(resp, 500); return -1; }
         size_t rlen = strlen(resolved_root);
-        if (strncmp(resolved, resolved_root, rlen) != 0) {
+        if (strncmp(resolved, resolved_root, rlen) != 0 ||
+            (resolved[rlen] != '\0' && resolved[rlen] != '/')) {
             free(resolved); free(resolved_root);
             bmw_response_set_status(resp, 403);
             bmw_response_set_body(resp, "Forbidden", 9);

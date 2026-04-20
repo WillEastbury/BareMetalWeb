@@ -68,21 +68,21 @@ int bmw_bso1_encode_record(bmw_meta_ctx_t *ctx, int entity_idx, int record_idx,
 int bmw_bso1_encode_list(bmw_meta_ctx_t *ctx, int entity_idx,
                          uint8_t *out, size_t out_cap, size_t *out_len,
                          const uint8_t *hmac_key) {
-    /* Header + count(4) + per-item [itemLen(4) + item...] */
-    uint8_t items_buf[4096];
+    /* Use static scratch buffers to keep stack frame small (Pico-safe) */
+    static uint8_t items_buf[4096];
+    static uint8_t rec_buf[2048];
     size_t items_pos = 0;
     int count = 0;
 
     for (int r = 0; r < ctx->record_counts[entity_idx]; r++) {
         if (!ctx->records[entity_idx][r].active) continue;
-        uint8_t rec_buf[2048];
         size_t rec_len = 0;
-        /* Encode just the payload part (skip BSO1 header for individual items) */
         bmw_entity_def_t *ent = &ctx->entities[entity_idx];
         bmw_record_t *rec = &ctx->records[entity_idx][r];
 
         size_t pos = 0;
         int pb = (ent->field_count + 7) / 8;
+        if ((size_t)pb > sizeof(rec_buf)) break;
         memset(rec_buf + pos, 0, pb);
         for (int f = 0; f < ent->field_count; f++) {
             if (rec->values[f][0]) rec_buf[pos + f/8] |= (1 << (f%8));
@@ -91,6 +91,7 @@ int bmw_bso1_encode_list(bmw_meta_ctx_t *ctx, int entity_idx,
         for (int f = 0; f < ent->field_count; f++) {
             if (!rec->values[f][0]) continue;
             uint16_t flen = (uint16_t)strlen(rec->values[f]);
+            if (pos + 2 + flen > sizeof(rec_buf)) goto done_records;
             memcpy(rec_buf + pos, &flen, 2); pos += 2;
             memcpy(rec_buf + pos, rec->values[f], flen); pos += flen;
         }
@@ -102,6 +103,7 @@ int bmw_bso1_encode_list(bmw_meta_ctx_t *ctx, int entity_idx,
         memcpy(items_buf + items_pos, rec_buf, rec_len); items_pos += rec_len;
         count++;
     }
+done_records:
 
     /* Build BSO1 frame */
     size_t payload_len = 4 + items_pos; /* count + items */

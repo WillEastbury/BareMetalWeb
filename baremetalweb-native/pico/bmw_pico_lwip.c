@@ -155,7 +155,6 @@ static void pico_send_response(struct tcp_pcb *pcb, bmw_pico_conn_t *conn,
     /* Send body — zero-copy for static (flash) data */
     if (resp->body && resp->body_len > 0) {
         uint8_t flags = resp->body_is_static ? 0 : TCP_WRITE_FLAG_COPY;
-        /* lwIP may not accept full body at once; chunk it */
         size_t sent = 0;
         while (sent < resp->body_len) {
             uint16_t sndbuf = tcp_sndbuf(pcb);
@@ -167,6 +166,14 @@ static void pico_send_response(struct tcp_pcb *pcb, bmw_pico_conn_t *conn,
             if (err != ERR_OK) break;
             sent += chunk;
             conn->bytes_in_flight += (uint16_t)chunk;
+        }
+        /* Track unsent remainder for resume in sent callback */
+        if (sent < resp->body_len) {
+            conn->pending_body = resp->body;
+            conn->pending_body_len = resp->body_len;
+            conn->pending_body_sent = sent;
+            conn->pending_is_static = resp->body_is_static;
+            conn->state = PCONN_WRITING;
         }
     }
     tcp_output(pcb);
@@ -228,9 +235,9 @@ static void dispatch_request(bmw_pico_server_t *srv, struct tcp_pcb *pcb,
 
     pico_send_response(pcb, conn, &resp);
 
-    /* Free dynamic body if any */
+    /* Free dynamic body if any — tcp_write was called with COPY flag */
     if (!resp.body_is_static && resp.body) {
-        /* body was malloc'd by handler — but we already tcp_write'd with COPY */
+        free((void *)resp.body);
     }
 }
 
@@ -257,14 +264,36 @@ static err_t pico_recv_cb(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t 
 
     /* Check for complete HTTP request (\r\n\r\n) */
     const char *hdr_end = NULL;
+    uint16_t hdr_end_offset = 0;
     for (uint16_t i = 0; i + 3 < conn->read_pos; i++) {
         if (conn->read_buf[i] == '\r' && conn->read_buf[i+1] == '\n' &&
             conn->read_buf[i+2] == '\r' && conn->read_buf[i+3] == '\n') {
             hdr_end = (const char *)&conn->read_buf[i+4];
+            hdr_end_offset = i + 4;
             break;
         }
     }
     if (!hdr_end) return ERR_OK; /* wait for more data */
+
+    /* Parse Content-Length from headers to wait for full body */
+    uint32_t content_length = 0;
+    {
+        const char *cl = NULL;
+        for (uint16_t i = 0; i + 15 < hdr_end_offset; i++) {
+            if (strncasecmp((const char *)&conn->read_buf[i], "Content-Length:", 15) == 0) {
+                cl = (const char *)&conn->read_buf[i + 15];
+                while (*cl == ' ') cl++;
+                content_length = (uint32_t)strtoul(cl, NULL, 10);
+                break;
+            }
+        }
+        /* Cap content length to prevent buffer overflow */
+        if (content_length > BMW_PICO_READ_BUF - hdr_end_offset)
+            content_length = BMW_PICO_READ_BUF - hdr_end_offset;
+        /* Wait for full body if not yet received */
+        if (conn->read_pos < hdr_end_offset + content_length)
+            return ERR_OK;
+    }
 
     bmw_pico_request_t req;
     int parsed = pico_parse_request(conn->read_buf, conn->read_pos, &req);
@@ -300,6 +329,34 @@ static err_t pico_sent_cb(void *arg, struct tcp_pcb *pcb, u16_t len) {
     if (!conn) return ERR_OK;
     if (conn->bytes_in_flight > len) conn->bytes_in_flight -= len;
     else conn->bytes_in_flight = 0;
+
+    /* Resume sending pending body data */
+    if (conn->pending_body && conn->pending_body_sent < conn->pending_body_len) {
+        uint8_t flags = conn->pending_is_static ? 0 : TCP_WRITE_FLAG_COPY;
+        while (conn->pending_body_sent < conn->pending_body_len) {
+            uint16_t sndbuf = tcp_sndbuf(pcb);
+            if (sndbuf == 0) break;
+            size_t chunk = conn->pending_body_len - conn->pending_body_sent;
+            if (chunk > sndbuf) chunk = sndbuf;
+            if (chunk > 0xFFFF) chunk = 0xFFFF;
+            err_t err = tcp_write(pcb, conn->pending_body + conn->pending_body_sent,
+                                  (uint16_t)chunk, flags);
+            if (err != ERR_OK) break;
+            conn->pending_body_sent += chunk;
+            conn->bytes_in_flight += (uint16_t)chunk;
+        }
+        if (conn->pending_body_sent >= conn->pending_body_len) {
+            /* Done sending — free dynamic body if needed */
+            if (!conn->pending_is_static && conn->pending_body) {
+                free((void *)conn->pending_body);
+            }
+            conn->pending_body = NULL;
+            conn->pending_body_len = 0;
+            conn->pending_body_sent = 0;
+            conn->state = PCONN_READING;
+        }
+        tcp_output(pcb);
+    }
     return ERR_OK;
 }
 

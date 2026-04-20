@@ -47,6 +47,9 @@ typedef struct {
     uint8_t hmac_key[32];
     bmw_auth_session_t sessions[BMW_AUTH_MAX_SESSIONS];
     int session_count;
+    /* Pending auth state nonces (CSRF protection) */
+    char pending_states[BMW_AUTH_MAX_SESSIONS][BMW_AUTH_COOKIE_SIZE];
+    int pending_state_count;
 } bmw_auth_ctx_t;
 
 bmw_module_t *bmw_auth_module_create(void);

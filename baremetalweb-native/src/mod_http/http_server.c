@@ -5,6 +5,10 @@
 #include "bmw_event_loop.h"
 #include "bmw_wal.h"
 
+#ifndef _WIN32
+#include <errno.h>
+#endif
+
 /* Declare the parse function from http_parser.c */
 int bmw_http_parse_request(const char *buf, size_t len, bmw_request_t *req);
 
@@ -115,6 +119,16 @@ static const char *status_text(int code) {
 }
 
 static int http_send_response(http_conn_t *conn, bmw_response_t *resp) {
+    /* First, compute how much body we can actually fit.
+     * Reserve ~2KB for headers (generous upper bound). */
+    size_t hdr_budget = 2048;
+    size_t body_budget = BMW_WRITE_BUF_SIZE > hdr_budget ? BMW_WRITE_BUF_SIZE - hdr_budget : 0;
+    size_t actual_body = resp->body_len < body_budget ? resp->body_len : body_budget;
+    bool truncated = (actual_body < resp->body_len);
+
+    /* If truncated, force connection close so client doesn't wait for more */
+    if (truncated) conn->keep_alive = false;
+
     int n = snprintf(conn->write_buf, BMW_WRITE_BUF_SIZE,
         "HTTP/1.1 %d %s\r\n"
         "Server: BareMetalWeb-Native/1.0\r\n"
@@ -122,7 +136,7 @@ static int http_send_response(http_conn_t *conn, bmw_response_t *resp) {
         "Content-Length: %zu\r\n",
         resp->status, status_text(resp->status),
         conn->keep_alive ? "keep-alive" : "close",
-        resp->body_len);
+        actual_body);
 
     /* Custom headers */
     for (int i = 0; i < resp->header_count && n < (int)BMW_WRITE_BUF_SIZE - 256; i++) {
@@ -132,10 +146,10 @@ static int http_send_response(http_conn_t *conn, bmw_response_t *resp) {
 
     n += snprintf(conn->write_buf + n, BMW_WRITE_BUF_SIZE - n, "\r\n");
 
-    /* Append body */
-    if (resp->body && resp->body_len > 0) {
+    /* Append body — only the portion we advertised */
+    if (resp->body && actual_body > 0) {
         size_t remaining = BMW_WRITE_BUF_SIZE - (size_t)n;
-        size_t copy = resp->body_len < remaining ? resp->body_len : remaining;
+        size_t copy = actual_body < remaining ? actual_body : remaining;
         memcpy(conn->write_buf + n, resp->body, copy);
         n += (int)copy;
     }
@@ -175,7 +189,16 @@ static void http_on_conn_ready(bmw_socket_t fd, int events, void *userdata) {
     if (conn->state == CONN_READING && (events & BMW_EVENT_READ)) {
         int n = recv(fd, conn->read_buf + conn->read_pos,
                      (int)(BMW_READ_BUF_SIZE - conn->read_pos), 0);
-        if (n <= 0) {
+        if (n < 0) {
+#ifdef _WIN32
+            if (WSAGetLastError() == WSAEWOULDBLOCK) return;
+#else
+            if (errno == EAGAIN || errno == EWOULDBLOCK) return;
+#endif
+            close_conn(ctx, conn);
+            return;
+        }
+        if (n == 0) {
             close_conn(ctx, conn);
             return;
         }
@@ -235,10 +258,16 @@ static void http_on_conn_ready(bmw_socket_t fd, int events, void *userdata) {
     if (conn->state == CONN_WRITING && (events & BMW_EVENT_WRITE)) {
         int n = send(fd, conn->write_buf + conn->write_pos,
                      (int)(conn->write_len - conn->write_pos), 0);
-        if (n <= 0) {
+        if (n < 0) {
+#ifdef _WIN32
+            if (WSAGetLastError() == WSAEWOULDBLOCK) return;
+#else
+            if (errno == EAGAIN || errno == EWOULDBLOCK) return;
+#endif
             close_conn(ctx, conn);
             return;
         }
+        if (n == 0) return; /* nothing sent, try again later */
         conn->write_pos += (size_t)n;
         if (conn->write_pos >= conn->write_len) {
             if (conn->keep_alive) {

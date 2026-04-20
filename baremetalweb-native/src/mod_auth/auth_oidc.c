@@ -92,12 +92,38 @@ void bmw_hmac_sha256(const uint8_t *key, size_t key_len,
     memset(k_pad, 0x36, 64);
     for (size_t i = 0; i < key_len; i++) k_pad[i] ^= key[i];
 
-    /* inner hash: H(k_ipad || data) */
-    uint8_t *inner_msg = malloc(64 + data_len);
-    memcpy(inner_msg, k_pad, 64);
-    memcpy(inner_msg + 64, data, data_len);
-    sha256(inner_msg, 64 + data_len, inner);
-    free(inner_msg);
+    /* inner hash: H(k_ipad || data) — streaming to avoid malloc */
+    {
+        /* Feed k_pad then data through SHA-256 incrementally */
+        uint8_t block[64];
+        uint32_t state[8] = {
+            0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+            0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19
+        };
+        /* Process k_ipad (exactly 64 bytes = 1 block) */
+        sha256_transform(state, k_pad);
+        /* Process data blocks */
+        size_t di = 0;
+        while (di + 64 <= data_len) { sha256_transform(state, data + di); di += 64; }
+        /* Final block: remaining data + padding */
+        size_t rem = data_len - di;
+        memset(block, 0, 64);
+        memcpy(block, data + di, rem);
+        block[rem] = 0x80;
+        uint64_t total_bits = (uint64_t)(64 + data_len) * 8;
+        if (rem >= 56) {
+            sha256_transform(state, block);
+            memset(block, 0, 64);
+        }
+        for (int j = 0; j < 8; j++) block[63-j] = (uint8_t)(total_bits >> (j*8));
+        sha256_transform(state, block);
+        for (int j = 0; j < 8; j++) {
+            inner[j*4]   = (uint8_t)(state[j]>>24);
+            inner[j*4+1] = (uint8_t)(state[j]>>16);
+            inner[j*4+2] = (uint8_t)(state[j]>>8);
+            inner[j*4+3] = (uint8_t)(state[j]);
+        }
+    }
 
     /* outer hash: H(k_opad || inner) */
     memset(k_pad, 0x5c, 64);
@@ -108,29 +134,34 @@ void bmw_hmac_sha256(const uint8_t *key, size_t key_len,
     sha256(outer_msg, 96, out_mac);
 }
 
-/* Cryptographic random bytes (OS CSPRNG) */
-static void csprng_bytes(uint8_t *out, size_t len) {
+/* Cryptographic random bytes (OS CSPRNG). Returns 0 on success, -1 on failure. */
+static int csprng_bytes(uint8_t *out, size_t len) {
 #ifdef _WIN32
-    /* BCryptGenRandom is declared in the platform headers; link with bcrypt.lib */
-    (void)BCryptGenRandom(NULL, out, (ULONG)len, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+    NTSTATUS status = BCryptGenRandom(NULL, out, (ULONG)len, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+    if (status != 0) { memset(out, 0, len); return -1; }
+    return 0;
 #else
     FILE *f = fopen("/dev/urandom", "rb");
-    if (f) { fread(out, 1, len, f); fclose(f); }
-    else { memset(out, 0, len); }
+    if (!f) { memset(out, 0, len); return -1; }
+    size_t got = fread(out, 1, len, f);
+    fclose(f);
+    if (got != len) { memset(out, 0, len); return -1; }
+    return 0;
 #endif
 }
 
-/* Cryptographically random session ID generator */
-static void gen_session_id(char *out, size_t len) {
+/* Cryptographically random session ID generator. Returns 0 on success, -1 on failure. */
+static int gen_session_id(char *out, size_t len) {
     uint8_t raw[64];
     size_t need = (len - 1) / 2 + 1;
     if (need > sizeof(raw)) need = sizeof(raw);
-    csprng_bytes(raw, need);
+    if (csprng_bytes(raw, need) != 0) return -1;
     const char hex[] = "0123456789abcdef";
     for (size_t i = 0; i < len - 1; i++) {
         out[i] = hex[(raw[i/2] >> ((i % 2) ? 0 : 4)) & 0x0F];
     }
     out[len - 1] = '\0';
+    return 0;
 }
 
 bmw_auth_session_t *bmw_auth_validate(bmw_auth_ctx_t *ctx, const char *cookie) {
@@ -184,14 +215,25 @@ static bmw_result_t auth_discovery(bmw_request_t *req, bmw_response_t *resp, voi
 
 /* GET /auth/authorize - redirect to IdP with PKCE params */
 static bmw_result_t auth_authorize(bmw_request_t *req, bmw_response_t *resp, void *ud) {
+    (void)req;
     bmw_auth_ctx_t *ctx = (bmw_auth_ctx_t *)ud;
+
+    /* Generate a cryptographic state nonce and store server-side */
+    char state_nonce[BMW_AUTH_COOKIE_SIZE];
+    gen_session_id(state_nonce, sizeof(state_nonce));
+
+    /* Store in pending states (circular overwrite if full) */
+    int idx = ctx->pending_state_count % BMW_AUTH_MAX_SESSIONS;
+    snprintf(ctx->pending_states[idx], sizeof(ctx->pending_states[idx]), "%s", state_nonce);
+    if (ctx->pending_state_count < BMW_AUTH_MAX_SESSIONS) ctx->pending_state_count++;
+
     /* Build IdP authorization URL with required OIDC params */
     char location[1024];
     snprintf(location, sizeof(location),
         "%s/authorize?client_id=%s&response_type=code&redirect_uri=%s"
         "&scope=%s&state=%s&code_challenge_method=S256",
         ctx->issuer, ctx->client_id, ctx->redirect_uri,
-        ctx->scopes, req->query[0] ? req->query : "random_state");
+        ctx->scopes, state_nonce);
     bmw_response_set_status(resp, 302);
     bmw_response_add_header(resp, "Location", location);
     bmw_response_set_body(resp, "Redirecting...", 14);
@@ -209,16 +251,41 @@ static bmw_result_t auth_callback(bmw_request_t *req, bmw_response_t *resp, void
         return BMW_HANDLED;
     }
     /* Validate state parameter is present (CSRF protection) */
-    if (!strstr(req->query, "state=")) {
+    const char *state_ptr = strstr(req->query, "state=");
+    if (!state_ptr) {
         bmw_response_set_status(resp, 400);
         bmw_response_set_body(resp, "{\"error\":\"missing state parameter\"}", 35);
+        return BMW_HANDLED;
+    }
+
+    /* Extract state value */
+    state_ptr += 6; /* skip "state=" */
+    char state_val[BMW_AUTH_COOKIE_SIZE];
+    int si = 0;
+    while (*state_ptr && *state_ptr != '&' && si < BMW_AUTH_COOKIE_SIZE - 1)
+        state_val[si++] = *state_ptr++;
+    state_val[si] = '\0';
+
+    /* Validate state against stored pending nonces */
+    bool state_valid = false;
+    for (int s = 0; s < ctx->pending_state_count && s < BMW_AUTH_MAX_SESSIONS; s++) {
+        if (strcmp(ctx->pending_states[s], state_val) == 0) {
+            /* Consume the nonce (one-time use) */
+            ctx->pending_states[s][0] = '\0';
+            state_valid = true;
+            break;
+        }
+    }
+    if (!state_valid) {
+        bmw_response_set_status(resp, 403);
+        bmw_response_set_body(resp, "{\"error\":\"invalid state — possible CSRF\"}", 41);
         return BMW_HANDLED;
     }
 
     /*
      * NOTE: Full OIDC code exchange (POST to token_endpoint, PKCE verification,
      * ID token validation) requires outbound HTTP which is not yet implemented.
-     * This validates presence of code+state but does not perform full exchange.
+     * State nonce is validated above for CSRF protection.
      */
 
     /* Find a free session slot (reuse inactive slots first) */
@@ -237,7 +304,12 @@ static bmw_result_t auth_callback(bmw_request_t *req, bmw_response_t *resp, void
 
     memset(sess, 0, sizeof(*sess));
     sess->active = true;
-    gen_session_id(sess->session_id, BMW_AUTH_COOKIE_SIZE);
+    if (gen_session_id(sess->session_id, BMW_AUTH_COOKIE_SIZE) != 0) {
+        sess->active = false;
+        bmw_response_set_status(resp, 500);
+        bmw_response_set_body(resp, "{\"error\":\"CSPRNG failure\"}", 25);
+        return BMW_HANDLED;
+    }
     snprintf(sess->name, sizeof(sess->name), "Authenticated User");
     sess->expires_at = (uint32_t)time(NULL) + 3600;
 
@@ -323,7 +395,11 @@ static int auth_init(bmw_module_t *self, bmw_config_t *config, bmw_service_regis
     strcpy(ctx->scopes, "openid profile email");
 
     /* Generate random HMAC key using OS CSPRNG */
-    csprng_bytes(ctx->hmac_key, 32);
+    if (csprng_bytes(ctx->hmac_key, 32) != 0) {
+        fprintf(stderr, "[AUTH] CSPRNG unavailable — auth module disabled\n");
+        free(ctx); self->ctx = NULL;
+        return -1;
+    }
 
     if (config) {
         for (int i = 0; i < config->count; i++) {

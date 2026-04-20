@@ -8,8 +8,13 @@
 #define BMW_MAX_METHOD      8
 #define BMW_MAX_HEADER_VAL  256
 #define BMW_READ_BUF_SIZE   1024
+#ifdef BMW_PICO_BUILD
+#define BMW_WRITE_BUF_SIZE  4096
+#define BMW_MAX_CONNECTIONS 4
+#else
 #define BMW_WRITE_BUF_SIZE  65536
 #define BMW_MAX_CONNECTIONS 8
+#endif
 #define BMW_MAX_ROUTES      16
 
 /* HTTP methods */

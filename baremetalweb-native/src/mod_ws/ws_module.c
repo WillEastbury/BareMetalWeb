@@ -215,14 +215,45 @@ static void ws_on_data(ws_ctx_t *ctx, ws_client_t *client) {
 
 /* HTTP handler for WebSocket upgrade at /bmw/ws */
 static bmw_result_t ws_upgrade_handler(bmw_request_t *req, bmw_response_t *resp, void *ud) {
-    (void)resp; /* We'll handle this specially via raw socket later */
-    (void)ud; (void)req;
-    /* For now, return upgrade instructions. Full WS upgrade requires raw socket access
-       which we handle through the event loop integration. */
+    ws_ctx_t *ctx = (ws_ctx_t *)ud;
+
+    /* Validate RFC 6455 required headers */
+    const char *ws_key = NULL;
+    bool has_upgrade = false, has_connection = false;
+    for (int i = 0; i < req->header_count; i++) {
+        if (strncasecmp(req->headers[i].name, "Upgrade", 7) == 0 &&
+            strncasecmp(req->headers[i].value, "websocket", 9) == 0)
+            has_upgrade = true;
+        if (strncasecmp(req->headers[i].name, "Connection", 10) == 0 &&
+            strstr(req->headers[i].value, "Upgrade"))
+            has_connection = true;
+        if (strncasecmp(req->headers[i].name, "Sec-WebSocket-Key", 17) == 0)
+            ws_key = req->headers[i].value;
+    }
+
+    if (!has_upgrade || !has_connection || !ws_key) {
+        bmw_response_set_status(resp, 400);
+        bmw_response_set_body(resp, "{\"error\":\"missing WebSocket upgrade headers\"}", 45);
+        return BMW_HANDLED;
+    }
+
+    /* Compute Sec-WebSocket-Accept per RFC 6455 */
+    static const char ws_magic[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+    char concat[128];
+    int clen = snprintf(concat, sizeof(concat), "%s%s", ws_key, ws_magic);
+    uint8_t hash[20];
+    sha1((const uint8_t *)concat, (size_t)clen, hash);
+    char accept_b64[32];
+    base64_encode(hash, 20, accept_b64);
+
     bmw_response_set_status(resp, 101);
     bmw_response_add_header(resp, "Upgrade", "websocket");
     bmw_response_add_header(resp, "Connection", "Upgrade");
-    /* The actual Sec-WebSocket-Accept would be computed from the request key */
+    bmw_response_add_header(resp, "Sec-WebSocket-Accept", accept_b64);
+
+    /* NOTE: Full raw-socket handoff for WS framing still requires event loop integration.
+     * The proper Sec-WebSocket-Accept is now sent so clients can complete the handshake. */
+    (void)ctx;
     return BMW_HANDLED;
 }
 

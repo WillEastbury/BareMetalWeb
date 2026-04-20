@@ -10,12 +10,14 @@
 
 #include "bmw_pico_lwip.h"
 
-/* WiFi credentials — override via build defines or change here */
+/* WiFi credentials — MUST be provided via build defines:
+ *   cmake -DBMW_WIFI_SSID="YourSSID" -DBMW_WIFI_PASS="YourPass" ..
+ * Storing credentials in source control is a security risk. */
 #ifndef BMW_WIFI_SSID
-#define BMW_WIFI_SSID     "Puddles-Mesh"
+#error "BMW_WIFI_SSID must be defined at build time (cmake -DBMW_WIFI_SSID=...)"
 #endif
 #ifndef BMW_WIFI_PASS
-#define BMW_WIFI_PASS     "Whatever1"
+#error "BMW_WIFI_PASS must be defined at build time (cmake -DBMW_WIFI_PASS=...)"
 #endif
 #define BMW_WIFI_TIMEOUT  15000
 

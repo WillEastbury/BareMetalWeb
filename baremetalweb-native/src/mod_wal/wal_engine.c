@@ -1,8 +1,24 @@
 /*
  * WAL Engine - PicoWAL-compatible Write-Ahead Log
  * Implements append, read, and compaction with slot-based storage.
+ *
+ * THREAD SAFETY: This engine is NOT thread-safe. All access must be serialized
+ * to a single thread/core. On Pico 2W, confine WAL operations to Core 0 only.
+ * If multi-core access is needed, add a spinlock or use the FIFO for cross-core RPC.
  */
 #include "bmw_wal.h"
+
+#ifdef BMW_PICO_BUILD
+#include "pico/critical_section.h"
+static critical_section_t wal_lock;
+static bool wal_lock_init_done = false;
+#define WAL_LOCK()   do { if (wal_lock_init_done) critical_section_enter_blocking(&wal_lock); } while(0)
+#define WAL_UNLOCK() do { if (wal_lock_init_done) critical_section_exit(&wal_lock); } while(0)
+#else
+/* Desktop: single-threaded event loop, no lock needed */
+#define WAL_LOCK()   ((void)0)
+#define WAL_UNLOCK() ((void)0)
+#endif
 
 /* FNV-1a hash for key strings */
 uint32_t bmw_wal_hash(const char *key, size_t len) {
@@ -36,15 +52,21 @@ static int wal_append(void *engine_ptr, uint32_t key_hash, const uint8_t *value,
     wal_engine_t *engine = (wal_engine_t *)engine_ptr;
     wal_state_t *state = &engine->state;
 
-    /* Check value fits in a slot (minus delta header) */
-    if (value_len + sizeof(wal_delta_header_t) > WAL_SLOT_SIZE)
-        return -2; /* too big */
+    WAL_LOCK();
 
-    if (state->index_count >= WAL_INDEX_SIZE)
+    /* Check value fits in a slot (minus delta header) */
+    if (value_len + sizeof(wal_delta_header_t) > WAL_SLOT_SIZE) {
+        WAL_UNLOCK();
+        return -2; /* too big */
+    }
+
+    if (state->index_count >= WAL_INDEX_SIZE) {
+        WAL_UNLOCK();
         return -1; /* full, needs compaction */
+    }
 
     int slot = slot_alloc(state);
-    if (slot < 0) return -1;
+    if (slot < 0) { WAL_UNLOCK(); return -1; }
 
     /* Write delta header + value into slot */
     wal_delta_header_t hdr = {
@@ -67,6 +89,7 @@ static int wal_append(void *engine_ptr, uint32_t key_hash, const uint8_t *value,
     entry->flags = 0;
 
     if (out_seq) *out_seq = seq;
+    WAL_UNLOCK();
     return 0;
 }
 
@@ -75,6 +98,8 @@ static int wal_read(void *engine_ptr, uint32_t key_hash, uint8_t *out_buf,
                     size_t buf_cap, uint32_t *out_delta_count, uint16_t *out_total_len) {
     wal_engine_t *engine = (wal_engine_t *)engine_ptr;
     wal_state_t *state = &engine->state;
+
+    WAL_LOCK();
 
     uint32_t count = 0;
     uint16_t total = 0;
@@ -92,6 +117,7 @@ static int wal_read(void *engine_ptr, uint32_t key_hash, uint8_t *out_buf,
 
     if (out_delta_count) *out_delta_count = count;
     if (out_total_len) *out_total_len = total;
+    WAL_UNLOCK();
     return (count > 0) ? 0 : -1; /* -1 = not found */
 }
 
@@ -132,6 +158,12 @@ int wal_engine_init(wal_engine_t *engine) {
     engine->read = wal_read;
     engine->compact = wal_compact;
     engine->state.next_seq = 1;
+#ifdef BMW_PICO_BUILD
+    if (!wal_lock_init_done) {
+        critical_section_init(&wal_lock);
+        wal_lock_init_done = true;
+    }
+#endif
     return 0;
 }
 

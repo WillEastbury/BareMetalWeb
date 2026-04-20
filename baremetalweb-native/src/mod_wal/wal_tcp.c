@@ -12,6 +12,28 @@
 #include "bmw_wal.h"
 #include "bmw_event_loop.h"
 
+#ifndef _WIN32
+#include <errno.h>
+#endif
+
+/* Helper: send all bytes, tolerating EWOULDBLOCK by retrying. Returns 0 on success. */
+static int wal_tcp_send_all(bmw_socket_t fd, const char *buf, int len) {
+    int sent = 0;
+    while (sent < len) {
+        int n = send(fd, buf + sent, len - sent, 0);
+        if (n > 0) { sent += n; continue; }
+        if (n < 0) {
+#ifdef _WIN32
+            if (WSAGetLastError() == WSAEWOULDBLOCK) continue;
+#else
+            if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
+#endif
+        }
+        return -1; /* real error */
+    }
+    return 0;
+}
+
 #define WAL_TCP_MAX_CLIENTS 4
 #define WAL_TCP_BUF_SIZE    512
 
@@ -53,7 +75,7 @@ static void wal_tcp_close_client(wal_tcp_ctx_t *ctx, wal_tcp_client_t *client) {
 
 static void wal_tcp_send_error(bmw_socket_t fd, uint8_t code) {
     uint8_t resp[2] = { WAL_TCP_ACK_ERROR, code };
-    send(fd, (const char *)resp, 2, 0);
+    wal_tcp_send_all(fd, (const char *)resp, 2);
 }
 
 static void wal_tcp_process(wal_tcp_ctx_t *ctx, wal_tcp_client_t *client) {
@@ -62,7 +84,7 @@ static void wal_tcp_process(wal_tcp_ctx_t *ctx, wal_tcp_client_t *client) {
 
         if (opcode == WAL_TCP_OP_NOOP) {
             uint8_t ack = WAL_TCP_ACK_NOOP;
-            send(client->fd, (const char *)&ack, 1, 0);
+            wal_tcp_send_all(client->fd, (const char *)&ack, 1);
             memmove(client->buf, client->buf + 1, --client->buf_pos);
             continue;
         }
@@ -88,7 +110,7 @@ static void wal_tcp_process(wal_tcp_ctx_t *ctx, wal_tcp_client_t *client) {
                 uint8_t ack[5];
                 ack[0] = WAL_TCP_ACK_APPEND;
                 memcpy(ack + 1, &seq, 4);
-                send(client->fd, (const char *)ack, 5, 0);
+                wal_tcp_send_all(client->fd, (const char *)ack, 5);
             } else if (rc == -1) {
                 wal_tcp_send_error(client->fd, WAL_TCP_ERR_FULL);
             } else {
@@ -117,13 +139,13 @@ static void wal_tcp_process(wal_tcp_ctx_t *ctx, wal_tcp_client_t *client) {
                 hdr[0] = WAL_TCP_ACK_READ;
                 memcpy(hdr + 1, &delta_count, 4);
                 memcpy(hdr + 5, &total_len, 2);
-                send(client->fd, (const char *)hdr, 7, 0);
+                wal_tcp_send_all(client->fd, (const char *)hdr, 7);
                 if (total_len > 0)
-                    send(client->fd, (const char *)result_buf, total_len, 0);
+                    wal_tcp_send_all(client->fd, (const char *)result_buf, total_len);
             } else {
                 /* Not found: return 0 deltas */
                 uint8_t hdr[7] = { WAL_TCP_ACK_READ, 0,0,0,0, 0,0 };
-                send(client->fd, (const char *)hdr, 7, 0);
+                wal_tcp_send_all(client->fd, (const char *)hdr, 7);
             }
 
             memmove(client->buf, client->buf + 5, client->buf_pos - 5);
@@ -147,7 +169,16 @@ static void wal_tcp_on_client(bmw_socket_t fd, int events, void *userdata) {
 
     int n = recv(fd, (char *)(client->buf + client->buf_pos),
                  (int)(WAL_TCP_BUF_SIZE - client->buf_pos), 0);
-    if (n <= 0) {
+    if (n < 0) {
+#ifdef _WIN32
+        if (WSAGetLastError() == WSAEWOULDBLOCK) return;
+#else
+        if (errno == EAGAIN || errno == EWOULDBLOCK) return;
+#endif
+        wal_tcp_close_client(ctx, client);
+        return;
+    }
+    if (n == 0) {
         wal_tcp_close_client(ctx, client);
         return;
     }

@@ -74,6 +74,11 @@ typedef struct {
     uint16_t bytes_in_flight;
     /* Dynamic response body (malloc'd, needs free after send) */
     uint8_t *dyn_body;
+    /* Unsent body tracking for chunked resume */
+    const uint8_t *pending_body;
+    size_t pending_body_len;
+    size_t pending_body_sent;
+    bool pending_is_static;
 } bmw_pico_conn_t;
 
 /* ---- Server context ---- */
