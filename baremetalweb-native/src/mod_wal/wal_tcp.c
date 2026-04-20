@@ -1,8 +1,8 @@
 /*
  * WAL TCP protocol adapter - PicoWAL wire protocol on configurable port
  * Protocol:
- *   APPEND: [0x01][key_hash:4 LE][value_len:2 LE][op:1][value...]
- *   READ:   [0x02][key_hash:4 LE]
+ *   APPEND: [0x01][key:4 LE (pack<<22|id)][value_len:2 LE][op:1][value...]
+ *   READ:   [0x02][key:4 LE (pack<<22|id)]
  *   NOOP:   [0x00]
  *   Ack APPEND: [0x81][seq:4 LE]
  *   Ack READ:   [0x82][delta_count:4 LE][total_len:2 LE][data...]
@@ -108,10 +108,10 @@ static void wal_tcp_process(wal_tcp_ctx_t *ctx, wal_tcp_client_t *client) {
             /* Need: 1 + 4 + 2 + 1 = 8 bytes header minimum */
             if (client->buf_pos < 8) return; /* wait for more */
 
-            uint32_t key_hash;
+            uint32_t key;
             uint16_t value_len;
             uint8_t op;
-            memcpy(&key_hash, client->buf + 1, 4);
+            memcpy(&key, client->buf + 1, 4);
             memcpy(&value_len, client->buf + 5, 2);
             op = client->buf[7];
 
@@ -119,7 +119,7 @@ static void wal_tcp_process(wal_tcp_ctx_t *ctx, wal_tcp_client_t *client) {
             if (client->buf_pos < total_needed) return; /* wait for more */
 
             uint32_t seq = 0;
-            int rc = ctx->engine->append(ctx->engine, key_hash,
+            int rc = ctx->engine->append(ctx->engine, key,
                                          client->buf + 8, value_len, (wal_op_t)op, &seq);
             if (rc == 0) {
                 uint8_t ack[5];
@@ -140,14 +140,14 @@ static void wal_tcp_process(wal_tcp_ctx_t *ctx, wal_tcp_client_t *client) {
         if (opcode == WAL_TCP_OP_READ) {
             if (client->buf_pos < 5) return; /* need 1 + 4 */
 
-            uint32_t key_hash;
-            memcpy(&key_hash, client->buf + 1, 4);
+            uint32_t key;
+            memcpy(&key, client->buf + 1, 4);
 
             uint8_t result_buf[WAL_SLOT_SIZE * 4];
             uint32_t delta_count = 0;
             uint16_t total_len = 0;
 
-            int rc = ctx->engine->read(ctx->engine, key_hash, result_buf,
+            int rc = ctx->engine->read(ctx->engine, key, result_buf,
                                        sizeof(result_buf), &delta_count, &total_len);
             if (rc == 0) {
                 uint8_t hdr[7];

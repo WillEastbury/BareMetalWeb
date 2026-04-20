@@ -65,21 +65,58 @@ typedef struct {
 } wal_module_ctx_t;
 
 /* HTTP route handler: POST /wal/append  body: key=<key>&value=<value>&op=<op> */
+/* Helper: parse pack=N&id=N (or just id=N with default pack=0) from a query string.
+ * Also accepts key=0xHEX or key=DEC as an already-packed value (advanced clients).
+ * Returns 0 on success and sets *out_key. */
+static int parse_pack_id(const char *q, uint32_t *out_key) {
+    if (!q || !*q) return -1;
+    const char *p_pack = strstr(q, "pack=");
+    const char *p_id   = strstr(q, "id=");
+    const char *p_key  = strstr(q, "key=");
+    if (p_key) {
+        const char *v = p_key + 4;
+        char *end = NULL;
+        unsigned long k = strtoul(v, &end, 0); /* base 0: 0x.. allowed */
+        if (end == v) return -1;
+        *out_key = (uint32_t)k;
+        return 0;
+    }
+    if (!p_id) return -1;
+    unsigned long pack = 0, id = 0;
+    char *end = NULL;
+    if (p_pack) {
+        pack = strtoul(p_pack + 5, &end, 10);
+        if (end == p_pack + 5) return -1;
+    }
+    end = NULL;
+    id = strtoul(p_id + 3, &end, 10);
+    if (end == p_id + 3) return -1;
+    if (pack > WAL_KEY_PACK_MAX || id > WAL_KEY_ID_MAX) return -1;
+    *out_key = bmw_wal_make_key((uint16_t)pack, (uint32_t)id);
+    return 0;
+}
+
 static bmw_result_t wal_http_append(bmw_request_t *req, bmw_response_t *resp, void *userdata) {
     if (!wal_require_auth(req, resp)) return BMW_HANDLED;
     wal_engine_t *engine = (wal_engine_t *)userdata;
 
-    /* Simple key/value extraction from body (url-encoded) */
     if (!req->body || req->body_len == 0) {
         bmw_response_set_status(resp, 400);
         bmw_response_set_body(resp, "{\"error\":\"empty body\"}", 22);
         return BMW_HANDLED;
     }
 
-    /* Parse: expect JSON-like or simple format: key_hash as hex in query */
-    uint32_t key_hash = bmw_wal_hash(req->body, req->body_len);
+    /* Key is taken from query: ?pack=<0..1023>&id=<0..4194303>  (or ?key=<u32>) */
+    uint32_t key = 0;
+    if (parse_pack_id(req->query, &key) != 0) {
+        bmw_response_set_status(resp, 400);
+        bmw_response_set_body(resp,
+            "{\"error\":\"missing or invalid key — expect ?pack=N&id=N\"}", 56);
+        return BMW_HANDLED;
+    }
+
     uint32_t seq = 0;
-    int rc = engine->append(engine, key_hash, (const uint8_t *)req->body,
+    int rc = engine->append(engine, key, (const uint8_t *)req->body,
                             (uint16_t)req->body_len, WAL_OP_SET, &seq);
     if (rc == 0) {
         char buf[64];
@@ -94,28 +131,24 @@ static bmw_result_t wal_http_append(bmw_request_t *req, bmw_response_t *resp, vo
     return BMW_HANDLED;
 }
 
-/* HTTP route handler: GET /wal/read?key=<key> */
+/* HTTP route handler: GET /wal/read?pack=N&id=N */
 static bmw_result_t wal_http_read(bmw_request_t *req, bmw_response_t *resp, void *userdata) {
     if (!wal_require_auth(req, resp)) return BMW_HANDLED;
     wal_engine_t *engine = (wal_engine_t *)userdata;
 
-    /* Extract key from query string */
-    const char *key = req->query;
-    if (!key || strlen(key) == 0) {
+    uint32_t key = 0;
+    if (parse_pack_id(req->query, &key) != 0) {
         bmw_response_set_status(resp, 400);
-        bmw_response_set_body(resp, "{\"error\":\"missing key\"}", 23);
+        bmw_response_set_body(resp,
+            "{\"error\":\"missing or invalid key — expect ?pack=N&id=N\"}", 56);
         return BMW_HANDLED;
     }
 
-    /* Skip "key=" prefix if present */
-    if (strncmp(key, "key=", 4) == 0) key += 4;
-
-    uint32_t key_hash = bmw_wal_hash(key, strlen(key));
     uint8_t buf[WAL_SLOT_SIZE * 4];
     uint32_t delta_count = 0;
     uint16_t total_len = 0;
 
-    int rc = engine->read(engine, key_hash, buf, sizeof(buf), &delta_count, &total_len);
+    int rc = engine->read(engine, key, buf, sizeof(buf), &delta_count, &total_len);
     if (rc == 0) {
         bmw_response_set_status(resp, 200);
         bmw_response_add_header(resp, "Content-Type", "application/octet-stream");

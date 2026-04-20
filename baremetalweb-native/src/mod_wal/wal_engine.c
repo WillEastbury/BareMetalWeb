@@ -47,7 +47,7 @@ static void slot_free(wal_state_t *state, int slot) {
 }
 
 /* Append a value for a key */
-static int wal_append(void *engine_ptr, uint32_t key_hash, const uint8_t *value,
+static int wal_append(void *engine_ptr, uint32_t key, const uint8_t *value,
                       uint16_t value_len, wal_op_t op, uint32_t *out_seq) {
     wal_engine_t *engine = (wal_engine_t *)engine_ptr;
     wal_state_t *state = &engine->state;
@@ -70,7 +70,7 @@ static int wal_append(void *engine_ptr, uint32_t key_hash, const uint8_t *value,
 
     /* Write delta header + value into slot */
     wal_delta_header_t hdr = {
-        .key_hash = key_hash,
+        .key = key,
         .value_len = value_len,
         .op = (uint8_t)op,
         .reserved = 0
@@ -83,7 +83,7 @@ static int wal_append(void *engine_ptr, uint32_t key_hash, const uint8_t *value,
     uint32_t seq = state->next_seq++;
     wal_entry_t *entry = &state->index[state->index_count++];
     entry->seq = seq;
-    entry->key_hash = key_hash;
+    entry->key = key;
     entry->slot = (uint8_t)slot;
     entry->len = value_len + (uint16_t)sizeof(wal_delta_header_t);
     entry->flags = 0;
@@ -94,7 +94,7 @@ static int wal_append(void *engine_ptr, uint32_t key_hash, const uint8_t *value,
 }
 
 /* Read all deltas for a key, concatenated into output buffer */
-static int wal_read(void *engine_ptr, uint32_t key_hash, uint8_t *out_buf,
+static int wal_read(void *engine_ptr, uint32_t key, uint8_t *out_buf,
                     size_t buf_cap, uint32_t *out_delta_count, uint16_t *out_total_len) {
     wal_engine_t *engine = (wal_engine_t *)engine_ptr;
     wal_state_t *state = &engine->state;
@@ -106,7 +106,7 @@ static int wal_read(void *engine_ptr, uint32_t key_hash, uint8_t *out_buf,
 
     /* Collect matching entries sorted by seq (already in order) */
     for (int i = 0; i < state->index_count; i++) {
-        if (state->index[i].key_hash == key_hash) {
+        if (state->index[i].key == key) {
             uint16_t len = state->index[i].len;
             if (total + len > (uint16_t)buf_cap) break;
             memcpy(out_buf + total, state->slots[state->index[i].slot], len);
@@ -132,7 +132,7 @@ static int wal_compact(void *engine_ptr) {
     for (int i = 0; i < state->index_count; i++) {
         if (state->index[i].flags & 0x01) continue; /* already marked */
         for (int j = i + 1; j < state->index_count; j++) {
-            if (state->index[j].key_hash == state->index[i].key_hash) {
+            if (state->index[j].key == state->index[i].key) {
                 /* j is newer (higher seq), mark i for removal */
                 state->index[i].flags |= 0x01;
                 slot_free(state, state->index[i].slot);
