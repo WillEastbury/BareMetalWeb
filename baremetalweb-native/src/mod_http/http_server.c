@@ -56,8 +56,9 @@ void bmw_response_set_status(bmw_response_t *resp, int status) {
 
 void bmw_response_add_header(bmw_response_t *resp, const char *name, const char *value) {
     if (resp->header_count >= BMW_MAX_HEADERS) return;
-    strncpy(resp->headers[resp->header_count].name, name, 63);
-    strncpy(resp->headers[resp->header_count].value, value, BMW_MAX_HEADER_VAL - 1);
+    bmw_header_t *h = &resp->headers[resp->header_count];
+    snprintf(h->name, sizeof(h->name), "%s", name);
+    snprintf(h->value, sizeof(h->value), "%s", value);
     resp->header_count++;
 }
 
@@ -291,8 +292,9 @@ static int http_init(bmw_module_t *self, bmw_config_t *config, bmw_service_regis
         for (int i = 0; i < config->count; i++) {
             if (strcmp(config->entries[i].key, "port") == 0)
                 ctx->port = (uint16_t)atoi(config->entries[i].value);
-            else if (strcmp(config->entries[i].key, "static_root") == 0)
-                strncpy(ctx->static_root, config->entries[i].value, 255);
+            else if (strcmp(config->entries[i].key, "static_root") == 0) {
+                snprintf(ctx->static_root, sizeof(ctx->static_root), "%s", config->entries[i].value);
+            }
         }
     }
 
@@ -301,10 +303,10 @@ static int http_init(bmw_module_t *self, bmw_config_t *config, bmw_service_regis
 #ifdef _WIN32
         char abs[256];
         if (_fullpath(abs, ctx->static_root, sizeof(abs)))
-            strncpy(ctx->static_root, abs, 255);
+            snprintf(ctx->static_root, sizeof(ctx->static_root), "%s", abs);
 #else
         char *abs = realpath(ctx->static_root, NULL);
-        if (abs) { strncpy(ctx->static_root, abs, 255); free(abs); }
+        if (abs) { snprintf(ctx->static_root, sizeof(ctx->static_root), "%s", abs); free(abs); }
 #endif
     }
 
@@ -358,6 +360,20 @@ static void http_shutdown(bmw_module_t *self) {
     if (self->ctx) { free(self->ctx); self->ctx = NULL; }
 }
 
+/* Slowloris protection: close idle connections (30s timeout) */
+#define HTTP_IDLE_TIMEOUT_S 30
+static void http_on_tick(bmw_module_t *self) {
+    http_ctx_t *ctx = (http_ctx_t *)self->ctx;
+    if (!ctx) return;
+    time_t now = time(NULL);
+    for (int i = ctx->conn_count - 1; i >= 0; i--) {
+        if (ctx->connections[i].state != CONN_CLOSED &&
+            now - ctx->connections[i].last_activity > HTTP_IDLE_TIMEOUT_S) {
+            close_conn(ctx, &ctx->connections[i]);
+        }
+    }
+}
+
 static bmw_module_t http_module = {
     .name = "http",
     .priority = 10,
@@ -367,7 +383,7 @@ static bmw_module_t http_module = {
     .shutdown = http_shutdown,
     .on_fd_ready = NULL,
     .handle_request = NULL,
-    .on_tick = NULL,
+    .on_tick = http_on_tick,
     .ctx = NULL
 };
 

@@ -49,6 +49,49 @@ int bmw_static_serve(const char *root_dir, const char *path, bmw_response_t *res
     }
 #endif
 
+    /* Canonicalize and verify the resolved path stays under root_dir */
+    {
+#ifdef _WIN32
+        char resolved[1024];
+        if (!_fullpath(resolved, fullpath, sizeof(resolved))) {
+            bmw_response_set_status(resp, 404);
+            bmw_response_set_body(resp, "Not Found", 9);
+            return -1;
+        }
+        /* Verify prefix match against root_dir */
+        char resolved_root[1024];
+        if (!_fullpath(resolved_root, root_dir, sizeof(resolved_root))) {
+            bmw_response_set_status(resp, 500);
+            return -1;
+        }
+        size_t rlen = strlen(resolved_root);
+        if (strncmp(resolved, resolved_root, rlen) != 0) {
+            bmw_response_set_status(resp, 403);
+            bmw_response_set_body(resp, "Forbidden", 9);
+            return -1;
+        }
+        snprintf(fullpath, sizeof(fullpath), "%s", resolved);
+#else
+        char *resolved = realpath(fullpath, NULL);
+        if (!resolved) {
+            bmw_response_set_status(resp, 404);
+            bmw_response_set_body(resp, "Not Found", 9);
+            return -1;
+        }
+        char *resolved_root = realpath(root_dir, NULL);
+        if (!resolved_root) { free(resolved); bmw_response_set_status(resp, 500); return -1; }
+        size_t rlen = strlen(resolved_root);
+        if (strncmp(resolved, resolved_root, rlen) != 0) {
+            free(resolved); free(resolved_root);
+            bmw_response_set_status(resp, 403);
+            bmw_response_set_body(resp, "Forbidden", 9);
+            return -1;
+        }
+        snprintf(fullpath, sizeof(fullpath), "%s", resolved);
+        free(resolved); free(resolved_root);
+#endif
+    }
+
     /* Open and read file */
     FILE *f = fopen(fullpath, "rb");
     if (!f) {
@@ -60,6 +103,13 @@ int bmw_static_serve(const char *root_dir, const char *path, bmw_response_t *res
     fseek(f, 0, SEEK_END);
     long fsize = ftell(f);
     fseek(f, 0, SEEK_SET);
+
+    /* Validate ftell result */
+    if (fsize < 0) {
+        fclose(f);
+        bmw_response_set_status(resp, 500);
+        return -1;
+    }
 
     /* Limit file size to 10MB */
     if (fsize > 10 * 1024 * 1024) {
@@ -76,8 +126,14 @@ int bmw_static_serve(const char *root_dir, const char *path, bmw_response_t *res
         return -1;
     }
 
-    fread(content, 1, (size_t)fsize, f);
+    size_t bytes_read = fread(content, 1, (size_t)fsize, f);
     fclose(f);
+
+    if (bytes_read != (size_t)fsize) {
+        free(content);
+        bmw_response_set_status(resp, 500);
+        return -1;
+    }
 
     bmw_response_set_status(resp, 200);
     bmw_response_add_header(resp, "Content-Type", get_mime_type(path));

@@ -20,6 +20,7 @@ typedef struct {
     uint8_t buf[WAL_TCP_BUF_SIZE];
     size_t buf_pos;
     bool active;
+    time_t last_activity;
 } wal_tcp_client_t;
 
 typedef struct {
@@ -151,6 +152,7 @@ static void wal_tcp_on_client(bmw_socket_t fd, int events, void *userdata) {
         return;
     }
     client->buf_pos += (size_t)n;
+    client->last_activity = time(NULL);
     wal_tcp_process(ctx, client);
 }
 
@@ -174,6 +176,7 @@ static void wal_tcp_on_accept(bmw_socket_t fd, int events, void *userdata) {
     memset(client, 0, sizeof(*client));
     client->fd = client_fd;
     client->active = true;
+    client->last_activity = time(NULL);
 
     bmw_loop_add_fd(ctx->loop, client_fd, BMW_EVENT_READ, wal_tcp_on_client, ctx);
 }
@@ -211,6 +214,18 @@ int wal_tcp_start(wal_tcp_ctx_t *ctx, bmw_event_loop_t *loop) {
     bmw_loop_add_fd(loop, ctx->listen_fd, BMW_EVENT_READ, wal_tcp_on_accept, ctx);
     printf("[WAL-TCP] Listening on port %d\n", ctx->port);
     return 0;
+}
+
+/* Evict idle WAL TCP clients (30s timeout) */
+#define WAL_TCP_IDLE_TIMEOUT_S 30
+void wal_tcp_tick(wal_tcp_ctx_t *ctx) {
+    time_t now = time(NULL);
+    for (int i = ctx->client_count - 1; i >= 0; i--) {
+        if (ctx->clients[i].active &&
+            now - ctx->clients[i].last_activity > WAL_TCP_IDLE_TIMEOUT_S) {
+            wal_tcp_close_client(ctx, &ctx->clients[i]);
+        }
+    }
 }
 
 void wal_tcp_stop(wal_tcp_ctx_t *ctx) {

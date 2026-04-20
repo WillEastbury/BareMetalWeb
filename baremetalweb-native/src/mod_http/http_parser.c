@@ -84,7 +84,7 @@ int bmw_http_parse_request(const char *buf, size_t len, bmw_request_t *req) {
 
         if (req->header_count < BMW_MAX_HEADERS) {
             size_t nlen = (size_t)(colon - p);
-            if (nlen >= 64) nlen = 63;
+            if (nlen >= sizeof(req->headers[0].name)) nlen = sizeof(req->headers[0].name) - 1;
             memcpy(req->headers[req->header_count].name, p, nlen);
             req->headers[req->header_count].name[nlen] = '\0';
 
@@ -97,8 +97,11 @@ int bmw_http_parse_request(const char *buf, size_t len, bmw_request_t *req) {
             req->headers[req->header_count].value[vlen] = '\0';
 
             /* Check for content-length and connection */
+            /* Validate Content-Length: reject negative/overflow */
             if (nlen == 14 && strncasecmp(req->headers[req->header_count].name, "Content-Length", 14) == 0) {
-                req->content_length = (size_t)atol(req->headers[req->header_count].value);
+                long cl = atol(req->headers[req->header_count].value);
+                if (cl < 0 || cl > 1048576) return -1; /* reject > 1MB or negative */
+                req->content_length = (size_t)cl;
             }
             if (nlen == 10 && strncasecmp(req->headers[req->header_count].name, "Connection", 10) == 0) {
                 if (strncasecmp(req->headers[req->header_count].value, "close", 5) == 0)

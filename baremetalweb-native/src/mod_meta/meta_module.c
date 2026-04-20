@@ -144,13 +144,15 @@ static bmw_result_t meta_list_all(bmw_request_t *req, bmw_response_t *resp, void
     char json[2048];
     int n = snprintf(json, sizeof(json), "[");
     for (int i = 0; i < ctx->entity_count; i++) {
+        if (n >= (int)sizeof(json) - 1) break; /* truncation guard */
         if (i > 0) n += snprintf(json + n, sizeof(json) - n, ",");
         n += snprintf(json + n, sizeof(json) - n,
             "{\"name\":\"%s\",\"slug\":\"%s\",\"endpoint\":\"/api/%s\",\"fieldCount\":%d}",
             ctx->entities[i].name, ctx->entities[i].slug,
             ctx->entities[i].slug, ctx->entities[i].field_count);
     }
-    n += snprintf(json + n, sizeof(json) - n, "]");
+    if (n < (int)sizeof(json)) n += snprintf(json + n, sizeof(json) - n, "]");
+    if (n >= (int)sizeof(json)) n = (int)sizeof(json) - 1;
     bmw_response_set_status(resp, 200);
     bmw_response_add_header(resp, "Content-Type", "application/json");
     bmw_response_set_body(resp, json, (size_t)n);
@@ -195,16 +197,19 @@ static bmw_result_t meta_api_handler(bmw_request_t *req, bmw_response_t *resp, v
             int n = snprintf(json, sizeof(json), "[");
             for (int r = 0; r < ctx->record_counts[eidx]; r++) {
                 if (!ctx->records[eidx][r].active) continue;
+                if (n >= (int)sizeof(json) - 2) break; /* truncation guard */
                 if (n > 1) n += snprintf(json+n, sizeof(json)-n, ",");
                 n += snprintf(json+n, sizeof(json)-n, "{\"id\":%u", ctx->records[eidx][r].id);
                 for (int f = 0; f < ent->field_count; f++) {
+                    if (n >= (int)sizeof(json) - 2) break;
                     if (ctx->records[eidx][r].values[f][0])
                         n += snprintf(json+n, sizeof(json)-n, ",\"%s\":\"%s\"",
                                       ent->fields[f].name, ctx->records[eidx][r].values[f]);
                 }
                 n += snprintf(json+n, sizeof(json)-n, "}");
             }
-            n += snprintf(json+n, sizeof(json)-n, "]");
+            if (n < (int)sizeof(json)) n += snprintf(json+n, sizeof(json)-n, "]");
+            if (n >= (int)sizeof(json)) n = (int)sizeof(json) - 1;
             bmw_response_set_status(resp, 200);
             bmw_response_add_header(resp, "Content-Type", "application/json");
             bmw_response_set_body(resp, json, (size_t)n);
@@ -215,11 +220,13 @@ static bmw_result_t meta_api_handler(bmw_request_t *req, bmw_response_t *resp, v
                     char json[1024];
                     int n = snprintf(json, sizeof(json), "{\"id\":%u", ctx->records[eidx][r].id);
                     for (int f = 0; f < ent->field_count; f++) {
+                        if (n >= (int)sizeof(json) - 2) break;
                         if (ctx->records[eidx][r].values[f][0])
                             n += snprintf(json+n, sizeof(json)-n, ",\"%s\":\"%s\"",
                                           ent->fields[f].name, ctx->records[eidx][r].values[f]);
                     }
-                    n += snprintf(json+n, sizeof(json)-n, "}");
+                    if (n < (int)sizeof(json)) n += snprintf(json+n, sizeof(json)-n, "}");
+                    if (n >= (int)sizeof(json)) n = (int)sizeof(json) - 1;
                     bmw_response_set_status(resp, 200);
                     bmw_response_add_header(resp, "Content-Type", "application/json");
                     bmw_response_set_body(resp, json, (size_t)n);
@@ -241,11 +248,16 @@ static bmw_result_t meta_api_handler(bmw_request_t *req, bmw_response_t *resp, v
         rec->id = ctx->next_id[eidx]++;
         rec->active = true;
         /* Very basic JSON field parsing: find "field":"value" pairs */
-        if (req->body) {
+        /* NUL-terminate body copy to safely use strstr/strchr */
+        if (req->body && req->body_len > 0) {
+            size_t safe_len = req->body_len < 4095 ? req->body_len : 4095;
+            char body_copy[4096];
+            memcpy(body_copy, req->body, safe_len);
+            body_copy[safe_len] = '\0';
             for (int f = 0; f < ent->field_count; f++) {
                 char pattern[80];
                 snprintf(pattern, sizeof(pattern), "\"%s\":\"", ent->fields[f].name);
-                const char *p = strstr(req->body, pattern);
+                const char *p = strstr(body_copy, pattern);
                 if (p) {
                     p += strlen(pattern);
                     const char *end = strchr(p, '"');
@@ -312,6 +324,7 @@ static bmw_result_t meta_schema_handler(bmw_request_t *req, bmw_response_t *resp
         ent->name, ent->slug, ent->slug);
 
     for (int f = 0; f < ent->field_count; f++) {
+        if (n >= (int)sizeof(json) - 2) break; /* truncation guard */
         if (f > 0) n += snprintf(json+n, sizeof(json)-n, ",");
         n += snprintf(json+n, sizeof(json)-n,
             "\"%s\":{\"type\":\"%s\",\"label\":\"%s\",\"required\":%s}",
@@ -326,7 +339,8 @@ static bmw_result_t meta_schema_handler(bmw_request_t *req, bmw_response_t *resp
             ent->fields[f].label,
             ent->fields[f].required ? "true" : "false");
     }
-    n += snprintf(json+n, sizeof(json)-n, "}},\"layout\":{\"columns\":%d}}", ent->columns);
+    if (n < (int)sizeof(json)) n += snprintf(json+n, sizeof(json)-n, "}},\"layout\":{\"columns\":%d}}", ent->columns);
+    if (n >= (int)sizeof(json)) n = (int)sizeof(json) - 1;
 
     bmw_response_set_status(resp, 200);
     bmw_response_add_header(resp, "Content-Type", "application/json");

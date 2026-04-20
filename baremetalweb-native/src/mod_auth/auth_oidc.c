@@ -7,6 +7,9 @@
 
 #ifdef _WIN32
 #define strncasecmp _strnicmp
+#include <windows.h>
+#include <bcrypt.h>
+#pragma comment(lib, "bcrypt.lib")
 #endif
 
 /* Minimal SHA-256 (single-block for short inputs, full for HMAC) */
@@ -105,14 +108,27 @@ void bmw_hmac_sha256(const uint8_t *key, size_t key_len,
     sha256(outer_msg, 96, out_mac);
 }
 
-/* Simple pseudo-random session ID generator */
+/* Cryptographic random bytes (OS CSPRNG) */
+static void csprng_bytes(uint8_t *out, size_t len) {
+#ifdef _WIN32
+    /* BCryptGenRandom is declared in the platform headers; link with bcrypt.lib */
+    (void)BCryptGenRandom(NULL, out, (ULONG)len, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+#else
+    FILE *f = fopen("/dev/urandom", "rb");
+    if (f) { fread(out, 1, len, f); fclose(f); }
+    else { memset(out, 0, len); }
+#endif
+}
+
+/* Cryptographically random session ID generator */
 static void gen_session_id(char *out, size_t len) {
-    static uint32_t seed = 0;
-    if (seed == 0) seed = (uint32_t)time(NULL);
+    uint8_t raw[64];
+    size_t need = (len - 1) / 2 + 1;
+    if (need > sizeof(raw)) need = sizeof(raw);
+    csprng_bytes(raw, need);
     const char hex[] = "0123456789abcdef";
     for (size_t i = 0; i < len - 1; i++) {
-        seed = seed * 1103515245 + 12345;
-        out[i] = hex[(seed >> 16) & 0x0F];
+        out[i] = hex[(raw[i/2] >> ((i % 2) ? 0 : 4)) & 0x0F];
     }
     out[len - 1] = '\0';
 }
@@ -129,8 +145,15 @@ bmw_auth_session_t *bmw_auth_validate(bmw_auth_ctx_t *ctx, const char *cookie) {
     sid[i] = '\0';
 
     for (int s = 0; s < ctx->session_count; s++) {
-        if (ctx->sessions[s].active && strcmp(ctx->sessions[s].session_id, sid) == 0)
+        if (ctx->sessions[s].active && strcmp(ctx->sessions[s].session_id, sid) == 0) {
+            /* Check session expiry */
+            if (ctx->sessions[s].expires_at > 0 &&
+                (uint32_t)time(NULL) > ctx->sessions[s].expires_at) {
+                ctx->sessions[s].active = false;
+                return NULL;
+            }
             return &ctx->sessions[s];
+        }
     }
     return NULL;
 }
@@ -178,22 +201,44 @@ static bmw_result_t auth_authorize(bmw_request_t *req, bmw_response_t *resp, voi
 /* GET /auth/callback - exchange code for tokens, create session */
 static bmw_result_t auth_callback(bmw_request_t *req, bmw_response_t *resp, void *ud) {
     bmw_auth_ctx_t *ctx = (bmw_auth_ctx_t *)ud;
-    (void)req;
-    /*
-     * In a full implementation, we'd extract ?code= from query, POST to token_endpoint.
-     * For Pico2W, we store the code exchange result. Here we create a session directly.
-     */
-    if (ctx->session_count >= BMW_AUTH_MAX_SESSIONS) {
-        bmw_response_set_status(resp, 503);
-        bmw_response_set_body(resp, "Session limit", 13);
+
+    /* Validate required query params: ?code= and ?state= must be present */
+    if (!req->query[0] || !strstr(req->query, "code=")) {
+        bmw_response_set_status(resp, 400);
+        bmw_response_set_body(resp, "{\"error\":\"missing code parameter\"}", 34);
+        return BMW_HANDLED;
+    }
+    /* Validate state parameter is present (CSRF protection) */
+    if (!strstr(req->query, "state=")) {
+        bmw_response_set_status(resp, 400);
+        bmw_response_set_body(resp, "{\"error\":\"missing state parameter\"}", 35);
         return BMW_HANDLED;
     }
 
-    bmw_auth_session_t *sess = &ctx->sessions[ctx->session_count++];
+    /*
+     * NOTE: Full OIDC code exchange (POST to token_endpoint, PKCE verification,
+     * ID token validation) requires outbound HTTP which is not yet implemented.
+     * This validates presence of code+state but does not perform full exchange.
+     */
+
+    /* Find a free session slot (reuse inactive slots first) */
+    bmw_auth_session_t *sess = NULL;
+    for (int s = 0; s < ctx->session_count; s++) {
+        if (!ctx->sessions[s].active) { sess = &ctx->sessions[s]; break; }
+    }
+    if (!sess) {
+        if (ctx->session_count >= BMW_AUTH_MAX_SESSIONS) {
+            bmw_response_set_status(resp, 503);
+            bmw_response_set_body(resp, "Session limit", 13);
+            return BMW_HANDLED;
+        }
+        sess = &ctx->sessions[ctx->session_count++];
+    }
+
     memset(sess, 0, sizeof(*sess));
     sess->active = true;
     gen_session_id(sess->session_id, BMW_AUTH_COOKIE_SIZE);
-    strncpy(sess->name, "Authenticated User", 127);
+    snprintf(sess->name, sizeof(sess->name), "Authenticated User");
     sess->expires_at = (uint32_t)time(NULL) + 3600;
 
     /* Set session cookie and redirect to app */
@@ -277,25 +322,21 @@ static int auth_init(bmw_module_t *self, bmw_config_t *config, bmw_service_regis
     strcpy(ctx->redirect_uri, "/auth/callback");
     strcpy(ctx->scopes, "openid profile email");
 
-    /* Generate random HMAC key */
-    uint32_t seed = (uint32_t)time(NULL);
-    for (int i = 0; i < 32; i++) {
-        seed = seed * 1103515245 + 12345;
-        ctx->hmac_key[i] = (uint8_t)(seed >> 16);
-    }
+    /* Generate random HMAC key using OS CSPRNG */
+    csprng_bytes(ctx->hmac_key, 32);
 
     if (config) {
         for (int i = 0; i < config->count; i++) {
             if (strcmp(config->entries[i].key, "issuer") == 0)
-                strncpy(ctx->issuer, config->entries[i].value, 255);
+                snprintf(ctx->issuer, sizeof(ctx->issuer), "%s", config->entries[i].value);
             else if (strcmp(config->entries[i].key, "client_id") == 0)
-                strncpy(ctx->client_id, config->entries[i].value, 127);
+                snprintf(ctx->client_id, sizeof(ctx->client_id), "%s", config->entries[i].value);
             else if (strcmp(config->entries[i].key, "client_secret") == 0)
-                strncpy(ctx->client_secret, config->entries[i].value, 127);
+                snprintf(ctx->client_secret, sizeof(ctx->client_secret), "%s", config->entries[i].value);
             else if (strcmp(config->entries[i].key, "redirect_uri") == 0)
-                strncpy(ctx->redirect_uri, config->entries[i].value, 255);
+                snprintf(ctx->redirect_uri, sizeof(ctx->redirect_uri), "%s", config->entries[i].value);
             else if (strcmp(config->entries[i].key, "scopes") == 0)
-                strncpy(ctx->scopes, config->entries[i].value, 255);
+                snprintf(ctx->scopes, sizeof(ctx->scopes), "%s", config->entries[i].value);
         }
     }
 

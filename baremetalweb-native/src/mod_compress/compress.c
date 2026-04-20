@@ -161,6 +161,10 @@ int bmw_decompress(const uint8_t *input, size_t input_len,
         memcpy(&raw_len, input + in_pos, 2); in_pos += 2;
         memcpy(&comp_len, input + in_pos, 2); in_pos += 2;
 
+        /* Reject zero-length blocks to prevent infinite loop */
+        if (raw_len == 0 && comp_len == 0) return -1;
+        if (comp_len == 0) return -1; /* can't have zero compressed with nonzero raw */
+
         if (in_pos + comp_len > input_len) return -1;
         if (out_pos + raw_len > output_cap) return -1;
 

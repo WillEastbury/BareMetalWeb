@@ -35,9 +35,14 @@ void *bmw_pool_alloc(void) {
 
 void bmw_pool_free(void *ptr) {
     if (!ptr) return;
-    ptrdiff_t offset = (uint8_t *)ptr - (uint8_t *)g_pool.blocks;
-    if (offset < 0 || offset >= (ptrdiff_t)sizeof(g_pool.blocks)) return;
+    uintptr_t base = (uintptr_t)g_pool.blocks;
+    uintptr_t addr = (uintptr_t)ptr;
+    if (addr < base || addr >= base + sizeof(g_pool.blocks)) return;
+    ptrdiff_t offset = (ptrdiff_t)(addr - base);
+    /* Reject interior pointers: must be exactly block-aligned */
+    if (offset % BMW_POOL_BLOCK_SIZE != 0) return;
     int idx = (int)(offset / BMW_POOL_BLOCK_SIZE);
+    if (idx < 0 || idx >= BMW_POOL_BLOCK_COUNT) return;
     g_pool.bitmap[idx / 32] &= ~(1u << (idx % 32));
 }
 
