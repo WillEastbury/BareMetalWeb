@@ -16,22 +16,37 @@
 #include <errno.h>
 #endif
 
-/* Helper: send all bytes, tolerating EWOULDBLOCK by retrying. Returns 0 on success. */
+/* Helper: best-effort send. Returns bytes actually sent, or -1 on real error.
+ * Does NOT spin on EWOULDBLOCK — caller must handle partial sends. */
+static int wal_tcp_try_send(bmw_socket_t fd, const char *buf, int len) {
+    int n = send(fd, buf, len,
+#ifdef _WIN32
+                 0
+#else
+                 MSG_NOSIGNAL
+#endif
+    );
+    if (n >= 0) return n;
+#ifdef _WIN32
+    if (WSAGetLastError() == WSAEWOULDBLOCK) return 0;
+#else
+    if (errno == EAGAIN || errno == EWOULDBLOCK) return 0;
+#endif
+    return -1; /* real error */
+}
+
+/* Helper: send all bytes with limited retries. Returns 0 on success. */
 static int wal_tcp_send_all(bmw_socket_t fd, const char *buf, int len) {
     int sent = 0;
-    while (sent < len) {
-        int n = send(fd, buf + sent, len - sent, 0);
-        if (n > 0) { sent += n; continue; }
-        if (n < 0) {
-#ifdef _WIN32
-            if (WSAGetLastError() == WSAEWOULDBLOCK) continue;
-#else
-            if (errno == EAGAIN || errno == EWOULDBLOCK) continue;
-#endif
-        }
-        return -1; /* real error */
+    int retries = 0;
+    while (sent < len && retries < 8) {
+        int n = wal_tcp_try_send(fd, buf + sent, len - sent);
+        if (n < 0) return -1;
+        if (n == 0) { retries++; continue; }
+        sent += n;
+        retries = 0;
     }
-    return 0;
+    return (sent == len) ? 0 : -1;
 }
 
 #define WAL_TCP_MAX_CLIENTS 4

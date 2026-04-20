@@ -7,6 +7,15 @@
 
 #ifndef _WIN32
 #include <errno.h>
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
+#endif
+
+#ifdef _WIN32
+#define BMW_SEND_FLAGS 0
+#else
+#define BMW_SEND_FLAGS MSG_NOSIGNAL
 #endif
 
 /* Declare the parse function from http_parser.c */
@@ -257,7 +266,7 @@ static void http_on_conn_ready(bmw_socket_t fd, int events, void *userdata) {
 
     if (conn->state == CONN_WRITING && (events & BMW_EVENT_WRITE)) {
         int n = send(fd, conn->write_buf + conn->write_pos,
-                     (int)(conn->write_len - conn->write_pos), 0);
+                     (int)(conn->write_len - conn->write_pos), BMW_SEND_FLAGS);
         if (n < 0) {
 #ifdef _WIN32
             if (WSAGetLastError() == WSAEWOULDBLOCK) return;

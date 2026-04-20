@@ -6,12 +6,23 @@
 #include "bmw_http.h"
 #include "bmw_event_loop.h"
 
-/* Forward declarations from wal_tcp.c */
+/* Forward declarations from wal_tcp.c — must match actual definition */
+#define WAL_TCP_MAX_CLIENTS 4
+#define WAL_TCP_BUF_SIZE    512
+
+typedef struct {
+    bmw_socket_t fd;
+    uint8_t buf[WAL_TCP_BUF_SIZE];
+    size_t buf_pos;
+    bool active;
+    time_t last_activity;
+} wal_tcp_client_t;
+
 typedef struct {
     bmw_socket_t listen_fd;
     bmw_event_loop_t *loop;
     wal_engine_t *engine;
-    void *clients; /* opaque */
+    wal_tcp_client_t clients[WAL_TCP_MAX_CLIENTS];
     int client_count;
     uint16_t port;
 } wal_tcp_ctx_t;

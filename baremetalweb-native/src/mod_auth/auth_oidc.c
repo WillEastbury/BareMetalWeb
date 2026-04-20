@@ -220,7 +220,11 @@ static bmw_result_t auth_authorize(bmw_request_t *req, bmw_response_t *resp, voi
 
     /* Generate a cryptographic state nonce and store server-side */
     char state_nonce[BMW_AUTH_COOKIE_SIZE];
-    gen_session_id(state_nonce, sizeof(state_nonce));
+    if (gen_session_id(state_nonce, sizeof(state_nonce)) != 0) {
+        bmw_response_set_status(resp, 500);
+        bmw_response_set_body(resp, "{\"error\":\"CSPRNG failure\"}", 25);
+        return BMW_HANDLED;
+    }
 
     /* Store in pending states (circular overwrite if full) */
     int idx = ctx->pending_state_count % BMW_AUTH_MAX_SESSIONS;

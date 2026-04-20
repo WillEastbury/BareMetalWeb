@@ -126,6 +126,8 @@ static int wal_compact(void *engine_ptr) {
     wal_engine_t *engine = (wal_engine_t *)engine_ptr;
     wal_state_t *state = &engine->state;
 
+    WAL_LOCK();
+
     /* Mark older duplicates for removal */
     for (int i = 0; i < state->index_count; i++) {
         if (state->index[i].flags & 0x01) continue; /* already marked */
@@ -149,6 +151,7 @@ static int wal_compact(void *engine_ptr) {
         }
     }
     state->index_count = write_idx;
+    WAL_UNLOCK();
     return 0;
 }
 

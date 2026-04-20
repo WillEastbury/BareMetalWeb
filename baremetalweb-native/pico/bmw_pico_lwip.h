@@ -79,6 +79,7 @@ typedef struct {
     size_t pending_body_len;
     size_t pending_body_sent;
     bool pending_is_static;
+    uint16_t poll_count; /* idle poll counter for timeout */
 } bmw_pico_conn_t;
 
 /* ---- Server context ---- */

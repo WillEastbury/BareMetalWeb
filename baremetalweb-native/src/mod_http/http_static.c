@@ -138,7 +138,10 @@ int bmw_static_serve(const char *root_dir, const char *path, bmw_response_t *res
 
     bmw_response_set_status(resp, 200);
     bmw_response_add_header(resp, "Content-Type", get_mime_type(path));
-    bmw_response_set_body(resp, content, (size_t)fsize);
-    free(content);
+    /* Transfer ownership of content buffer directly — avoid second malloc+copy */
+    if (resp->body) free(resp->body);
+    resp->body = content;
+    resp->body_len = (size_t)fsize;
+    resp->body_cap = (size_t)fsize;
     return 0;
 }

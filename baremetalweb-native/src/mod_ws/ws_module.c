@@ -101,7 +101,13 @@ static void ws_send_frame(bmw_socket_t fd, uint8_t opcode, const uint8_t *data, 
     }
     if (pos + len <= sizeof(frame)) {
         memcpy(frame + pos, data, len);
-        send(fd, (const char *)frame, (int)(pos + len), 0);
+        send(fd, (const char *)frame, (int)(pos + len),
+#ifdef _WIN32
+             0
+#else
+             MSG_NOSIGNAL
+#endif
+        );
     }
 }
 
@@ -239,8 +245,19 @@ static bmw_result_t ws_upgrade_handler(bmw_request_t *req, bmw_response_t *resp,
 
     /* Compute Sec-WebSocket-Accept per RFC 6455 */
     static const char ws_magic[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+    /* RFC 6455 key must be 24 chars base64; reject oversized keys */
+    if (strlen(ws_key) > 64) {
+        bmw_response_set_status(resp, 400);
+        bmw_response_set_body(resp, "{\"error\":\"invalid WebSocket key\"}", 32);
+        return BMW_HANDLED;
+    }
     char concat[128];
     int clen = snprintf(concat, sizeof(concat), "%s%s", ws_key, ws_magic);
+    if (clen < 0 || (size_t)clen >= sizeof(concat)) {
+        bmw_response_set_status(resp, 400);
+        bmw_response_set_body(resp, "{\"error\":\"WebSocket key too long\"}", 33);
+        return BMW_HANDLED;
+    }
     uint8_t hash[20];
     sha1((const uint8_t *)concat, (size_t)clen, hash);
     char accept_b64[32];

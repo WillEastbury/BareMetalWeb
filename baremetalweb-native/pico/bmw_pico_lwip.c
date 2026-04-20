@@ -203,6 +203,10 @@ static void conn_close(struct tcp_pcb *pcb, bmw_pico_conn_t *conn) {
     }
     if (conn) {
         if (conn->dyn_body) { free(conn->dyn_body); conn->dyn_body = NULL; }
+        if (conn->pending_body && !conn->pending_is_static) {
+            free((void *)conn->pending_body);
+            conn->pending_body = NULL;
+        }
         conn->in_use = false;
         conn->pcb = NULL;
     }
@@ -235,9 +239,14 @@ static void dispatch_request(bmw_pico_server_t *srv, struct tcp_pcb *pcb,
 
     pico_send_response(pcb, conn, &resp);
 
-    /* Free dynamic body if any — tcp_write was called with COPY flag */
+    /* Free dynamic body only if send completed fully (not pending).
+     * If pending, ownership transfers to conn — freed in sent_cb or conn_close. */
     if (!resp.body_is_static && resp.body) {
-        free((void *)resp.body);
+        if (conn->pending_body == resp.body) {
+            /* Ownership transferred to connection for resumed send */
+        } else {
+            free((void *)resp.body);
+        }
     }
 }
 
@@ -245,6 +254,7 @@ static void dispatch_request(bmw_pico_server_t *srv, struct tcp_pcb *pcb,
 static err_t pico_recv_cb(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err) {
     bmw_pico_conn_t *conn = (bmw_pico_conn_t *)arg;
     if (!conn) { if (p) pbuf_free(p); return ERR_OK; }
+    conn->poll_count = 0; /* reset idle counter on activity */
 
     bmw_pico_server_t *srv = (bmw_pico_server_t *)conn->dyn_body; /* stashed in accept */
     /* Actually we need a better way to get srv — use a global */
@@ -362,7 +372,13 @@ static err_t pico_sent_cb(void *arg, struct tcp_pcb *pcb, u16_t len) {
 
 static err_t pico_poll_cb(void *arg, struct tcp_pcb *pcb) {
     bmw_pico_conn_t *conn = (bmw_pico_conn_t *)arg;
-    if (!conn || !conn->in_use) { conn_close(pcb, conn); }
+    if (!conn || !conn->in_use) { conn_close(pcb, conn); return ERR_OK; }
+    /* Increment idle counter (~0.5s per poll tick with interval=1).
+     * Close if idle too long (20 polls ≈ 10s) without a complete request. */
+    conn->poll_count++;
+    if (conn->poll_count > 20 && conn->state == PCONN_READING) {
+        conn_close(pcb, conn);
+    }
     return ERR_OK;
 }
 
