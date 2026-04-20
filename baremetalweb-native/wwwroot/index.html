@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>BareMetalWeb Native</title>
+    <link rel="stylesheet" href="/BareMetalStyles.min.css">
+</head>
+<body>
+    <header class="bar bg-primary txt-white p-md">
+        <h1 class="h4 m-0">BareMetalWeb Native</h1>
+        <nav class="ml-auto">
+            <a href="/auth/authorize" class="btn btn-sm btn-outline-light">Login</a>
+        </nav>
+    </header>
+
+    <main class="container p-lg">
+        <div m-entity="contact" m-mode="form"></div>
+        <div id="list" class="mt-lg"></div>
+    </main>
+
+    <script src="/BareMetal.Bind.min.js"></script>
+    <script src="/BareMetal.Components.min.js"></script>
+    <script src="/BareMetal.Communications.min.js"></script>
+    <script src="/BareMetal.Metadata.min.js"></script>
+    <script src="/BareMetal.Template.min.js"></script>
+    <script src="/BareMetal.Rendering.min.js"></script>
+    <script src="/BareMetal.Routing.min.js"></script>
+    <script src="/BareMetal.Compress.min.js"></script>
+    <script src="/BareMetal.Auth.js"></script>
+    <script>
+        BareMetal.Communications.setRoot('/api/');
+        BareMetal.Metadata.scanInline();
+    </script>
+
+    <script type="application/bm-meta">
+    {
+        "name": "Contact",
+        "slug": "contact",
+        "endpoint": "/api/contact",
+        "schema": { "fields": {
+            "name":  { "type": "text", "label": "Name", "required": true },
+            "email": { "type": "Email", "label": "Email", "required": true },
+            "phone": { "type": "text", "label": "Phone" },
+            "notes": { "type": "textarea", "label": "Notes" }
+        }},
+        "layout": { "columns": 2, "fields": ["name", "email", "phone", "notes"] }
+    }
+    </script>
+</body>
+</html>
