@@ -289,17 +289,48 @@ static err_t pico_recv_cb(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t 
     }
     if (!hdr_end) return ERR_OK; /* wait for more data */
 
-    /* Parse Content-Length from headers to wait for full body */
+    /*
+     * Parse Content-Length from headers to wait for full body.
+     * SECURITY: scan only at start-of-header-line ("\r\nContent-Length:"),
+     * not anywhere in the raw buffer. Previous implementation matched
+     * "Content-Length:" inside a header VALUE supplied by the attacker,
+     * letting them spoof the body length. Also reject Transfer-Encoding
+     * (we don't implement chunked) to avoid CL.TE/TE.CL request smuggling
+     * if anyone ever puts a proxy in front of us.
+     */
     uint32_t content_length = 0;
     {
-        const char *cl = NULL;
-        for (uint16_t i = 0; i + 15 < hdr_end_offset; i++) {
-            if (strncasecmp((const char *)&conn->read_buf[i], "Content-Length:", 15) == 0) {
-                cl = (const char *)&conn->read_buf[i + 15];
-                while (*cl == ' ') cl++;
-                content_length = (uint32_t)strtoul(cl, NULL, 10);
-                break;
+        /* The first header starts after the request line; subsequent headers
+         * are preceded by "\r\n". Walk header lines explicitly. */
+        const uint8_t *line = (const uint8_t *)conn->read_buf;
+        const uint8_t *blob_end = (const uint8_t *)conn->read_buf + hdr_end_offset;
+        /* Skip the request line */
+        while (line + 1 < blob_end && !(line[0] == '\r' && line[1] == '\n')) line++;
+        if (line + 1 < blob_end) line += 2;
+        while (line + 1 < blob_end) {
+            if (line[0] == '\r' && line[1] == '\n') break; /* end of headers */
+            const uint8_t *eol = line;
+            while (eol + 1 < blob_end && !(eol[0] == '\r' && eol[1] == '\n')) eol++;
+            size_t name_max = (size_t)(eol - line);
+            if (name_max >= 18 &&
+                strncasecmp((const char *)line, "Transfer-Encoding:", 18) == 0) {
+                conn_close(pcb, conn);
+                return ERR_OK;
             }
+            if (name_max >= 15 &&
+                strncasecmp((const char *)line, "Content-Length:", 15) == 0) {
+                const char *cv = (const char *)line + 15;
+                while (cv < (const char *)eol && (*cv == ' ' || *cv == '\t')) cv++;
+                /* Validate digits only, then strtoul */
+                const char *q = cv;
+                while (q < (const char *)eol && *q >= '0' && *q <= '9') q++;
+                if (q == cv || q != (const char *)eol) {
+                    conn_close(pcb, conn);
+                    return ERR_OK;
+                }
+                content_length = (uint32_t)strtoul(cv, NULL, 10);
+            }
+            line = eol + 2;
         }
         /* Cap content length to prevent buffer overflow */
         if (content_length > BMW_PICO_READ_BUF - hdr_end_offset)

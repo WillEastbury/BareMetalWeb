@@ -75,5 +75,6 @@ int  bmw_app_start(bmw_app_t *app);
 void bmw_app_stop(bmw_app_t *app);
 void bmw_app_shutdown(bmw_app_t *app);
 bmw_result_t bmw_app_dispatch(bmw_app_t *app, bmw_request_t *req, bmw_response_t *resp);
+void bmw_app_tick(bmw_app_t *app);
 
 #endif /* BMW_MODULE_H */

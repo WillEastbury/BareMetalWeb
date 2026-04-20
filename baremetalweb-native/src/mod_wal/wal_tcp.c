@@ -94,12 +94,21 @@ static void wal_tcp_send_error(bmw_socket_t fd, uint8_t code) {
 }
 
 static void wal_tcp_process(wal_tcp_ctx_t *ctx, wal_tcp_client_t *client) {
+    /*
+     * Reliability: if any send() fails, drop the connection rather than
+     * silently consuming further requests. Otherwise an append() would commit
+     * to the WAL but the ACK would be lost, leaving the client unable to tell
+     * whether to retry. WAL identity is client-chosen (pack:id), so a clean
+     * close lets the client retry safely after re-handshake.
+     */
     while (client->buf_pos > 0) {
         uint8_t opcode = client->buf[0];
 
         if (opcode == WAL_TCP_OP_NOOP) {
             uint8_t ack = WAL_TCP_ACK_NOOP;
-            wal_tcp_send_all(client->fd, (const char *)&ack, 1);
+            if (wal_tcp_send_all(client->fd, (const char *)&ack, 1) != 0) {
+                wal_tcp_close_client(ctx, client); return;
+            }
             memmove(client->buf, client->buf + 1, --client->buf_pos);
             continue;
         }
@@ -121,16 +130,20 @@ static void wal_tcp_process(wal_tcp_ctx_t *ctx, wal_tcp_client_t *client) {
             uint32_t seq = 0;
             int rc = ctx->engine->append(ctx->engine, key,
                                          client->buf + 8, value_len, (wal_op_t)op, &seq);
+            int send_rc;
             if (rc == 0) {
                 uint8_t ack[5];
                 ack[0] = WAL_TCP_ACK_APPEND;
                 memcpy(ack + 1, &seq, 4);
-                wal_tcp_send_all(client->fd, (const char *)ack, 5);
+                send_rc = wal_tcp_send_all(client->fd, (const char *)ack, 5);
             } else if (rc == -1) {
-                wal_tcp_send_error(client->fd, WAL_TCP_ERR_FULL);
+                uint8_t resp[2] = { WAL_TCP_ACK_ERROR, WAL_TCP_ERR_FULL };
+                send_rc = wal_tcp_send_all(client->fd, (const char *)resp, 2);
             } else {
-                wal_tcp_send_error(client->fd, WAL_TCP_ERR_TOOBIG);
+                uint8_t resp[2] = { WAL_TCP_ACK_ERROR, WAL_TCP_ERR_TOOBIG };
+                send_rc = wal_tcp_send_all(client->fd, (const char *)resp, 2);
             }
+            if (send_rc != 0) { wal_tcp_close_client(ctx, client); return; }
 
             memmove(client->buf, client->buf + total_needed, client->buf_pos - total_needed);
             client->buf_pos -= total_needed;
@@ -154,13 +167,19 @@ static void wal_tcp_process(wal_tcp_ctx_t *ctx, wal_tcp_client_t *client) {
                 hdr[0] = WAL_TCP_ACK_READ;
                 memcpy(hdr + 1, &delta_count, 4);
                 memcpy(hdr + 5, &total_len, 2);
-                wal_tcp_send_all(client->fd, (const char *)hdr, 7);
-                if (total_len > 0)
-                    wal_tcp_send_all(client->fd, (const char *)result_buf, total_len);
+                if (wal_tcp_send_all(client->fd, (const char *)hdr, 7) != 0) {
+                    wal_tcp_close_client(ctx, client); return;
+                }
+                if (total_len > 0 &&
+                    wal_tcp_send_all(client->fd, (const char *)result_buf, total_len) != 0) {
+                    wal_tcp_close_client(ctx, client); return;
+                }
             } else {
                 /* Not found: return 0 deltas */
                 uint8_t hdr[7] = { WAL_TCP_ACK_READ, 0,0,0,0, 0,0 };
-                wal_tcp_send_all(client->fd, (const char *)hdr, 7);
+                if (wal_tcp_send_all(client->fd, (const char *)hdr, 7) != 0) {
+                    wal_tcp_close_client(ctx, client); return;
+                }
             }
 
             memmove(client->buf, client->buf + 5, client->buf_pos - 5);

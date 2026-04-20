@@ -244,14 +244,37 @@ static int gen_session_id(char *out, size_t len) {
 
 bmw_auth_session_t *bmw_auth_validate(bmw_auth_ctx_t *ctx, const char *cookie) {
     if (!cookie) return NULL;
-    /* Find "bm_session=" in cookie string */
-    const char *p = strstr(cookie, "bm_session=");
-    if (!p) return NULL;
-    p += 11;
+    /*
+     * RFC 6265 cookie parser: walk ';'-separated name=value tokens and
+     * match the cookie name exactly. Previously used strstr which would
+     * accept "bm_session=" as a substring of *any* cookie's value, allowing
+     * an attacker who could set a sibling-domain cookie (or any cookie at
+     * all containing that literal) to influence session lookup.
+     */
     char sid[BMW_AUTH_COOKIE_SIZE];
-    int i = 0;
-    while (*p && *p != ';' && i < BMW_AUTH_COOKIE_SIZE - 1) sid[i++] = *p++;
-    sid[i] = '\0';
+    sid[0] = '\0';
+    const char *p = cookie;
+    while (*p) {
+        while (*p == ' ' || *p == '\t') p++;
+        const char *name = p;
+        while (*p && *p != '=' && *p != ';') p++;
+        size_t name_len = (size_t)(p - name);
+        const char *val = NULL;
+        size_t val_len = 0;
+        if (*p == '=') {
+            val = ++p;
+            while (*p && *p != ';') p++;
+            val_len = (size_t)(p - val);
+        }
+        if (name_len == 10 && memcmp(name, "bm_session", 10) == 0 && val) {
+            if (val_len >= sizeof(sid)) val_len = sizeof(sid) - 1;
+            memcpy(sid, val, val_len);
+            sid[val_len] = '\0';
+            break;
+        }
+        if (*p == ';') p++;
+    }
+    if (sid[0] == '\0') return NULL;
 
     for (int s = 0; s < ctx->session_count; s++) {
         if (ctx->sessions[s].active && ct_streq(ctx->sessions[s].session_id, sid)) {
@@ -373,19 +396,29 @@ static bmw_result_t auth_callback(bmw_request_t *req, bmw_response_t *resp, void
     /*
      * OWASP-A07: Without a real IdP token exchange (POST to token_endpoint with
      * the code, PKCE verifier, then ID-token signature + claims validation),
-     * minting a session here would be an authentication bypass. Refuse unless
-     * the operator has explicitly enabled the exchange path.
+     * minting a session here would be an authentication bypass. Always 501;
+     * there is intentionally no config flag to bypass — implement the full
+     * exchange flow here before returning a Set-Cookie.
      */
-    if (!ctx->exchange_enabled) {
-        bmw_response_set_status(resp, 501);
-        bmw_response_add_header(resp, "Content-Type", "application/json");
-        bmw_response_set_body(resp,
-            "{\"error\":\"oidc_exchange_disabled\","
-            "\"detail\":\"set auth.exchange_enabled=true after wiring real token endpoint\"}",
-            96);
-        return BMW_HANDLED;
-    }
+    bmw_response_set_status(resp, 501);
+    bmw_response_add_header(resp, "Content-Type", "application/json");
+    bmw_response_set_body(resp,
+        "{\"error\":\"oidc_exchange_not_implemented\"}",
+        41);
+    return BMW_HANDLED;
 
+    /* --- Unreachable: future implementation seam ---------------------------
+     * When real exchange is implemented, REPLACE the block above with the
+     * code below (which mints the session) AFTER:
+     *   1. POSTing { grant_type=authorization_code, code, code_verifier,
+     *      client_id, redirect_uri } to ctx->token_endpoint over TLS.
+     *   2. Fetching JWKS from ctx->jwks_uri (cached) and verifying the ID
+     *      token's RS256 signature.
+     *   3. Validating iss == ctx->issuer, aud == client_id, exp/nbf/iat,
+     *      and nonce binding to the original auth request.
+     * Only then is creating a logged-in session safe.
+     */
+#if 0
     /* Find a free session slot (reuse inactive slots first) */
     bmw_auth_session_t *sess = NULL;
     for (int s = 0; s < ctx->session_count; s++) {
@@ -422,6 +455,7 @@ static bmw_result_t auth_callback(bmw_request_t *req, bmw_response_t *resp, void
     bmw_response_add_header(resp, "Location", "/");
     bmw_response_set_body(resp, "Authenticated", 13);
     return BMW_HANDLED;
+#endif
 }
 
 /* GET /auth/userinfo */
@@ -514,8 +548,6 @@ static int auth_init(bmw_module_t *self, bmw_config_t *config, bmw_service_regis
                 snprintf(ctx->redirect_uri, sizeof(ctx->redirect_uri), "%s", config->entries[i].value);
             else if (strcmp(config->entries[i].key, "scopes") == 0)
                 snprintf(ctx->scopes, sizeof(ctx->scopes), "%s", config->entries[i].value);
-            else if (strcmp(config->entries[i].key, "exchange_enabled") == 0)
-                ctx->exchange_enabled = (strcmp(config->entries[i].value, "true") == 0);
             else if (strcmp(config->entries[i].key, "cookie_secure") == 0)
                 ctx->cookie_secure = (strcmp(config->entries[i].value, "true") == 0);
         }

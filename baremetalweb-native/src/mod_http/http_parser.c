@@ -2,6 +2,8 @@
  * HTTP request parser - lightweight HTTP/1.1 parser
  */
 #include "bmw_http.h"
+#include <errno.h>
+#include <stdlib.h>
 
 #ifdef _WIN32
 #define strncasecmp _strnicmp
@@ -24,6 +26,8 @@ static bmw_http_method_t parse_method(const char *s, int len) {
 int bmw_http_parse_request(const char *buf, size_t len, bmw_request_t *req) {
     memset(req, 0, sizeof(*req));
     req->keep_alive = true;
+    bool cl_seen = false;
+    long cl_value = -1;
 
     /* Find end of headers */
     const char *end = NULL;
@@ -97,11 +101,34 @@ int bmw_http_parse_request(const char *buf, size_t len, bmw_request_t *req) {
             req->headers[req->header_count].value[vlen] = '\0';
 
             /* Check for content-length and connection */
-            /* Validate Content-Length: reject negative/overflow */
+            /*
+             * HTTP/1.1 framing hardening (request smuggling defence):
+             *   - Reject Transfer-Encoding entirely (we don't implement chunked).
+             *     If we ever sit behind a proxy that DOES, divergent framing
+             *     between the front-end and us is the classic CL.TE/TE.CL bug.
+             *   - Reject duplicate Content-Length unless byte-identical.
+             *   - Parse Content-Length strictly with strtoul + full consumption,
+             *     not atol() (which silently accepts " 10garbage" and overflow).
+             */
+            if (nlen == 17 && strncasecmp(req->headers[req->header_count].name, "Transfer-Encoding", 17) == 0) {
+                return -1;
+            }
             if (nlen == 14 && strncasecmp(req->headers[req->header_count].name, "Content-Length", 14) == 0) {
-                long cl = atol(req->headers[req->header_count].value);
-                if (cl < 0 || cl > 1048576) return -1; /* reject > 1MB or negative */
-                req->content_length = (size_t)cl;
+                const char *cv = req->headers[req->header_count].value;
+                if (!*cv) return -1;
+                char *endp = NULL;
+                errno = 0;
+                unsigned long ul = strtoul(cv, &endp, 10);
+                if (errno == ERANGE || !endp || *endp != '\0') return -1;
+                if (ul > 1048576UL) return -1; /* 1 MB cap */
+                long cl = (long)ul;
+                if (cl_seen) {
+                    if (cl != cl_value) return -1; /* conflicting CLs */
+                } else {
+                    cl_seen = true;
+                    cl_value = cl;
+                    req->content_length = (size_t)cl;
+                }
             }
             if (nlen == 10 && strncasecmp(req->headers[req->header_count].name, "Connection", 10) == 0) {
                 if (strncasecmp(req->headers[req->header_count].value, "close", 5) == 0)

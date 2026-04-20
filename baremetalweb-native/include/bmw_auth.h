@@ -50,9 +50,6 @@ typedef struct {
     /* Pending auth state nonces (CSRF protection) */
     char pending_states[BMW_AUTH_MAX_SESSIONS][BMW_AUTH_COOKIE_SIZE];
     int pending_state_count;
-    /* Security: enable real OIDC code-exchange path; if false, /auth/callback returns 501.
-     * Defaults false until token-endpoint POST + ID-token validation are implemented. */
-    bool exchange_enabled;
     /* Set Secure flag on session cookie (when serving over HTTPS / behind TLS proxy) */
     bool cookie_secure;
 } bmw_auth_ctx_t;

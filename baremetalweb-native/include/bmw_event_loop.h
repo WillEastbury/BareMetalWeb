@@ -22,6 +22,12 @@ typedef struct bmw_event_loop {
     int fd_count;
     bool running;
 
+    /* Periodic tick dispatch: bmw_loop_run() invokes (*tick_cb)(tick_userdata)
+     * roughly every 1s so modules can run timeouts (slowloris eviction, etc.). */
+    void (*tick_cb)(void *userdata);
+    void *tick_userdata;
+    uint32_t last_tick_ms;
+
 #ifdef BMW_USE_EPOLL
     int epoll_fd;
 #elif defined(BMW_USE_KQUEUE)
@@ -34,6 +40,7 @@ int  bmw_loop_add_fd(bmw_event_loop_t *loop, bmw_socket_t fd, int events,
                      bmw_fd_callback_t cb, void *userdata);
 int  bmw_loop_mod_fd(bmw_event_loop_t *loop, bmw_socket_t fd, int events);
 void bmw_loop_remove_fd(bmw_event_loop_t *loop, bmw_socket_t fd);
+void bmw_loop_set_tick(bmw_event_loop_t *loop, void (*cb)(void *), void *userdata);
 int  bmw_loop_run(bmw_event_loop_t *loop);
 void bmw_loop_stop(bmw_event_loop_t *loop);
 void bmw_loop_destroy(bmw_event_loop_t *loop);

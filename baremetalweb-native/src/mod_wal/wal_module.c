@@ -69,6 +69,7 @@ typedef struct {
 int  wal_tcp_init(wal_tcp_ctx_t *ctx, wal_engine_t *engine, uint16_t port);
 int  wal_tcp_start(wal_tcp_ctx_t *ctx, bmw_event_loop_t *loop);
 void wal_tcp_stop(wal_tcp_ctx_t *ctx);
+void wal_tcp_tick(wal_tcp_ctx_t *ctx);
 
 /* WAL module context */
 typedef struct {
@@ -251,6 +252,11 @@ static void wal_shutdown_fn(bmw_module_t *self) {
     }
 }
 
+static void wal_on_tick(bmw_module_t *self) {
+    wal_module_ctx_t *ctx = (wal_module_ctx_t *)self->ctx;
+    if (ctx && ctx->tcp_enabled) wal_tcp_tick(&ctx->tcp);
+}
+
 static bmw_module_t wal_module = {
     .name = "wal",
     .priority = 20,
@@ -260,7 +266,7 @@ static bmw_module_t wal_module = {
     .shutdown = wal_shutdown_fn,
     .on_fd_ready = NULL,
     .handle_request = NULL,
-    .on_tick = NULL,
+    .on_tick = wal_on_tick,
     .ctx = NULL
 };
 

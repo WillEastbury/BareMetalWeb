@@ -80,3 +80,10 @@ bmw_result_t bmw_app_dispatch(bmw_app_t *app, bmw_request_t *req, bmw_response_t
     }
     return BMW_DECLINED;
 }
+
+void bmw_app_tick(bmw_app_t *app) {
+    for (int i = 0; i < app->count; i++) {
+        if (app->modules[i]->on_tick)
+            app->modules[i]->on_tick(app->modules[i]);
+    }
+}

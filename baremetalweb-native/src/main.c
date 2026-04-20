@@ -107,6 +107,9 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    /* Wire periodic module tick (slowloris/idle eviction) into the event loop. */
+    bmw_loop_set_tick(&loop, (void(*)(void *))bmw_app_tick, &app);
+
     /* Signal handling */
 #ifdef _WIN32
     SetConsoleCtrlHandler(signal_handler, TRUE);

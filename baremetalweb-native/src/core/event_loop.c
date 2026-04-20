@@ -3,6 +3,7 @@
  */
 #include "bmw_event_loop.h"
 #include "bmw_module.h"
+#include <time.h>
 
 #ifdef BMW_USE_EPOLL
 #include <sys/epoll.h>
@@ -91,6 +92,17 @@ int bmw_loop_run(bmw_event_loop_t *loop) {
     loop->running = true;
 
     while (loop->running) {
+        /* Periodic tick: dispatch ~once per second so modules can run
+         * timeouts (slowloris/idle-conn eviction). Without this the
+         * http_on_tick / wal_tcp_tick handlers were dead code. */
+        if (loop->tick_cb) {
+            uint32_t now_s = (uint32_t)time(NULL);
+            if (now_s - loop->last_tick_ms >= 1) {
+                loop->tick_cb(loop->tick_userdata);
+                loop->last_tick_ms = now_s;
+            }
+        }
+
 #ifdef BMW_USE_EPOLL
         struct epoll_event events[64];
         int n = epoll_wait(loop->epoll_fd, events, 64, 50);
@@ -165,6 +177,12 @@ int bmw_loop_run(bmw_event_loop_t *loop) {
 
 void bmw_loop_stop(bmw_event_loop_t *loop) {
     loop->running = false;
+}
+
+void bmw_loop_set_tick(bmw_event_loop_t *loop, void (*cb)(void *), void *userdata) {
+    loop->tick_cb = cb;
+    loop->tick_userdata = userdata;
+    loop->last_tick_ms = (uint32_t)time(NULL);
 }
 
 void bmw_loop_destroy(bmw_event_loop_t *loop) {
