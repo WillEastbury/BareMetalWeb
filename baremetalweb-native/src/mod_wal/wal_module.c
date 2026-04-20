@@ -6,8 +6,12 @@
 #include "bmw_http.h"
 #include "bmw_event_loop.h"
 #include "bmw_auth.h"
+#include <errno.h>
 
-static bmw_auth_ctx_t *g_wal_auth = NULL;
+/* Service registry pointer captured at start() (after all modules have init'd).
+ * If NULL at request time AND auth is required → fail closed. */
+static bmw_service_registry_t *g_wal_services = NULL;
+static bool g_wal_auth_required = true;
 
 static const char *wal_get_cookie(bmw_request_t *req) {
     for (int i = 0; i < req->header_count; i++) {
@@ -22,8 +26,18 @@ static const char *wal_get_cookie(bmw_request_t *req) {
 }
 
 static bool wal_require_auth(bmw_request_t *req, bmw_response_t *resp) {
-    if (!g_wal_auth) return true;
-    if (bmw_auth_validate(g_wal_auth, wal_get_cookie(req))) return true;
+    /* Resolve auth ctx lazily so registration order doesn't matter */
+    bmw_auth_ctx_t *auth = g_wal_services
+        ? (bmw_auth_ctx_t *)bmw_registry_get(g_wal_services, "auth.ctx")
+        : NULL;
+    if (!auth) {
+        if (!g_wal_auth_required) return true; /* explicitly disabled */
+        bmw_response_set_status(resp, 503);
+        bmw_response_add_header(resp, "Content-Type", "application/json");
+        bmw_response_set_body(resp, "{\"error\":\"auth_unavailable\"}", 28);
+        return false;
+    }
+    if (bmw_auth_validate(auth, wal_get_cookie(req))) return true;
     bmw_response_set_status(resp, 401);
     bmw_response_add_header(resp, "Content-Type", "application/json");
     bmw_response_add_header(resp, "WWW-Authenticate", "Bearer realm=\"wal\"");
@@ -65,34 +79,48 @@ typedef struct {
 } wal_module_ctx_t;
 
 /* HTTP route handler: POST /wal/append  body: key=<key>&value=<value>&op=<op> */
-/* Helper: parse pack=N&id=N (or just id=N with default pack=0) from a query string.
- * Also accepts key=0xHEX or key=DEC as an already-packed value (advanced clients).
- * Returns 0 on success and sets *out_key. */
+/* Parse one specific key from a query string with strict boundary handling.
+ * Returns 0 + numeric value via *out on success; -1 if key not found / malformed.
+ * Requires: key starts at q[0] or after '&', and value is fully numeric up to '&' or '\0'.
+ * Caller bounds-checks the resulting numeric range.
+ */
+static int parse_query_u32(const char *q, const char *key, uint32_t *out) {
+    if (!q) return -1;
+    size_t klen = strlen(key);
+    const char *p = q;
+    while (*p) {
+        if ((p == q || p[-1] == '&') &&
+            strncmp(p, key, klen) == 0 && p[klen] == '=') {
+            const char *v = p + klen + 1;
+            char *end = NULL;
+            errno = 0;
+            unsigned long long n = strtoull(v, &end, 0); /* base 0: 0x.. allowed */
+            if (end == v) return -1;                      /* no digits */
+            if (*end != '\0' && *end != '&') return -1;   /* trailing junk in field */
+            if (errno == ERANGE || n > 0xFFFFFFFFULL) return -1;
+            *out = (uint32_t)n;
+            return 0;
+        }
+        p++;
+    }
+    return -1;
+}
+
+/* Build a packed WAL key from query params. Accepts:
+ *   ?pack=N&id=M           — preferred; bounds-checked against pack/id widths
+ *   ?key=N (or 0xN)        — pre-packed u32 (advanced clients)
+ * Returns 0 on success and sets *out_key.
+ */
 static int parse_pack_id(const char *q, uint32_t *out_key) {
     if (!q || !*q) return -1;
-    const char *p_pack = strstr(q, "pack=");
-    const char *p_id   = strstr(q, "id=");
-    const char *p_key  = strstr(q, "key=");
-    if (p_key) {
-        const char *v = p_key + 4;
-        char *end = NULL;
-        unsigned long k = strtoul(v, &end, 0); /* base 0: 0x.. allowed */
-        if (end == v) return -1;
-        *out_key = (uint32_t)k;
-        return 0;
-    }
-    if (!p_id) return -1;
-    unsigned long pack = 0, id = 0;
-    char *end = NULL;
-    if (p_pack) {
-        pack = strtoul(p_pack + 5, &end, 10);
-        if (end == p_pack + 5) return -1;
-    }
-    end = NULL;
-    id = strtoul(p_id + 3, &end, 10);
-    if (end == p_id + 3) return -1;
+    uint32_t key_raw = 0;
+    if (parse_query_u32(q, "key", &key_raw) == 0) { *out_key = key_raw; return 0; }
+    uint32_t pack = 0, id = 0;
+    /* pack defaults to 0 if absent; id is required */
+    (void)parse_query_u32(q, "pack", &pack);
+    if (parse_query_u32(q, "id", &id) != 0) return -1;
     if (pack > WAL_KEY_PACK_MAX || id > WAL_KEY_ID_MAX) return -1;
-    *out_key = bmw_wal_make_key((uint16_t)pack, (uint32_t)id);
+    *out_key = bmw_wal_make_key((uint16_t)pack, id);
     return 0;
 }
 
@@ -175,13 +203,16 @@ static int wal_init(bmw_module_t *self, bmw_config_t *config, bmw_service_regist
                 ctx->tcp_port = (uint16_t)atoi(config->entries[i].value);
             else if (strcmp(config->entries[i].key, "tcp_enabled") == 0)
                 ctx->tcp_enabled = (strcmp(config->entries[i].value, "true") == 0);
+            else if (strcmp(config->entries[i].key, "auth_required") == 0)
+                g_wal_auth_required = (strcmp(config->entries[i].value, "true") == 0);
         }
     }
 
     wal_engine_init(&ctx->engine);
 
-    /* Capture auth context for route gating */
-    g_wal_auth = (bmw_auth_ctx_t *)bmw_registry_get(services, "auth.ctx");
+    /* Stash service registry; wal_require_auth resolves auth.ctx lazily so
+     * module init order doesn't matter (audit fail-open fix). */
+    g_wal_services = services;
 
     /* Register engine as a service */
     bmw_registry_register(services, "wal.engine", &ctx->engine);

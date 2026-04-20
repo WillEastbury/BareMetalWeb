@@ -89,6 +89,14 @@ int bmw_static_serve(const char *root_dir, const char *path, bmw_response_t *res
             return -1;
         }
 #else
+        /* SECURITY NOTE: O_NOFOLLOW only protects the final path component.
+         * An attacker with write access under wwwroot could swap an intermediate
+         * directory for a symlink between resolution and open. The realpath()
+         * + prefix check below provides defence-in-depth but is itself subject
+         * to TOCTOU. For Linux production deployments behind untrusted writers,
+         * use openat2(2) with RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS to make the
+         * resolution atomic. The Pico/embedded build does not ship a writable
+         * filesystem, so the embedded target is unaffected. */
         int fd = open(fullpath, O_RDONLY | O_NOFOLLOW
 #ifdef O_CLOEXEC
                                 | O_CLOEXEC

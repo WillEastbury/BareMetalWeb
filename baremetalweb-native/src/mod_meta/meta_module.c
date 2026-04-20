@@ -12,14 +12,17 @@
 #define strncasecmp _strnicmp
 #endif
 
-/* JSON-escape a string into out (NUL-terminated). Returns chars written (excluding NUL),
- * or -1 if it would overflow. */
+/* JSON-escape a string into out (NUL-terminated). Returns chars written
+ * (excluding NUL), or -1 if it would overflow / contains invalid UTF-8.
+ * Validates UTF-8: rejects overlong sequences, surrogates, and >U+10FFFF. */
 static int json_escape(const char *in, char *out, size_t out_cap) {
     size_t o = 0;
-    for (const unsigned char *p = (const unsigned char *)in; *p; p++) {
+    const unsigned char *p = (const unsigned char *)in;
+    while (*p) {
+        unsigned char c = *p;
         const char *esc = NULL;
         char ubuf[8];
-        switch (*p) {
+        switch (c) {
             case '"':  esc = "\\\""; break;
             case '\\': esc = "\\\\"; break;
             case '\b': esc = "\\b";  break;
@@ -28,8 +31,8 @@ static int json_escape(const char *in, char *out, size_t out_cap) {
             case '\r': esc = "\\r";  break;
             case '\t': esc = "\\t";  break;
             default:
-                if (*p < 0x20) {
-                    snprintf(ubuf, sizeof(ubuf), "\\u%04x", *p);
+                if (c < 0x20) {
+                    snprintf(ubuf, sizeof(ubuf), "\\u%04x", c);
                     esc = ubuf;
                 }
                 break;
@@ -38,10 +41,35 @@ static int json_escape(const char *in, char *out, size_t out_cap) {
             size_t el = strlen(esc);
             if (o + el + 1 > out_cap) return -1;
             memcpy(out + o, esc, el); o += el;
-        } else {
-            if (o + 2 > out_cap) return -1;
-            out[o++] = (char)*p;
+            p++;
+            continue;
         }
+        if (c < 0x80) {
+            if (o + 2 > out_cap) return -1;
+            out[o++] = (char)c;
+            p++;
+            continue;
+        }
+        /* UTF-8 multi-byte: validate length, continuation bytes, range, no overlong/surrogate */
+        int seqlen;
+        uint32_t cp;
+        uint32_t min_cp;
+        if      ((c & 0xE0) == 0xC0) { seqlen = 2; cp = c & 0x1F; min_cp = 0x80; }
+        else if ((c & 0xF0) == 0xE0) { seqlen = 3; cp = c & 0x0F; min_cp = 0x800; }
+        else if ((c & 0xF8) == 0xF0) { seqlen = 4; cp = c & 0x07; min_cp = 0x10000; }
+        else return -1; /* invalid leading byte */
+        for (int i = 1; i < seqlen; i++) {
+            unsigned char cc = p[i];
+            if ((cc & 0xC0) != 0x80) return -1;
+            cp = (cp << 6) | (cc & 0x3F);
+        }
+        if (cp < min_cp) return -1;                       /* overlong */
+        if (cp >= 0xD800 && cp <= 0xDFFF) return -1;      /* surrogate */
+        if (cp > 0x10FFFF) return -1;                     /* out of Unicode */
+        if (o + seqlen + 1 > out_cap) return -1;
+        memcpy(out + o, p, seqlen);
+        o += seqlen;
+        p += seqlen;
     }
     if (o + 1 > out_cap) return -1;
     out[o] = '\0';
@@ -176,7 +204,9 @@ done_records:
 
 static bmw_meta_ctx_t *g_meta_ctx = NULL;
 static uint8_t *g_hmac_key = NULL;
-static bmw_auth_ctx_t *g_auth_ctx = NULL;
+/* Resolved lazily so module init order doesn't matter (audit fail-open fix) */
+static bmw_service_registry_t *g_meta_services = NULL;
+static bool g_meta_auth_required = true;
 
 /* Helper: extract Cookie header from request */
 static const char *get_cookie(bmw_request_t *req) {
@@ -189,8 +219,17 @@ static const char *get_cookie(bmw_request_t *req) {
 
 /* Helper: require authenticated session for mutating operations */
 static bool require_auth(bmw_request_t *req, bmw_response_t *resp) {
-    if (!g_auth_ctx) return true; /* auth disabled */
-    bmw_auth_session_t *sess = bmw_auth_validate(g_auth_ctx, get_cookie(req));
+    bmw_auth_ctx_t *auth = g_meta_services
+        ? (bmw_auth_ctx_t *)bmw_registry_get(g_meta_services, "auth.ctx")
+        : NULL;
+    if (!auth) {
+        if (!g_meta_auth_required) return true;
+        bmw_response_set_status(resp, 503);
+        bmw_response_add_header(resp, "Content-Type", "application/json");
+        bmw_response_set_body(resp, "{\"error\":\"auth_unavailable\"}", 28);
+        return false;
+    }
+    bmw_auth_session_t *sess = bmw_auth_validate(auth, get_cookie(req));
     if (!sess) {
         bmw_response_set_status(resp, 401);
         bmw_response_add_header(resp, "Content-Type", "application/json");
@@ -469,9 +508,20 @@ static int meta_init(bmw_module_t *self, bmw_config_t *config, bmw_service_regis
     ent->fields[3].type = BMW_FIELD_TEXTAREA;
     ctx->entity_count = 1;
 
-    /* Get HMAC key from auth service if available */
+    /* Stash registry; auth.ctx resolved lazily per-request (audit fix). */
+    g_meta_services = services;
+
+    /* Read auth_required config (default: true → fail closed) */
+    if (config) {
+        for (int i = 0; i < config->count; i++) {
+            if (strcmp(config->entries[i].key, "auth_required") == 0)
+                g_meta_auth_required = (strcmp(config->entries[i].value, "true") == 0);
+        }
+    }
+
+    /* HMAC key is needed at first BSO1 emit; resolve at request time too if absent now. */
     bmw_auth_ctx_t *auth = (bmw_auth_ctx_t *)bmw_registry_get(services, "auth.ctx");
-    if (auth) { g_hmac_key = auth->hmac_key; g_auth_ctx = auth; }
+    if (auth) g_hmac_key = auth->hmac_key;
 
     /* Register routes */
     bmw_router_t *router = (bmw_router_t *)bmw_registry_get(services, "http.router");

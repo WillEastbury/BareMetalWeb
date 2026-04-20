@@ -146,7 +146,7 @@ static int http_send_response(http_conn_t *conn, bmw_response_t *resp) {
         "X-Content-Type-Options: nosniff\r\n"
         "X-Frame-Options: DENY\r\n"
         "Referrer-Policy: no-referrer\r\n"
-        "Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'\r\n",
+        "Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-eval'\r\n",
         resp->status, status_text(resp->status),
         conn->keep_alive ? "keep-alive" : "close",
         actual_body);
