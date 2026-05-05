@@ -22,27 +22,28 @@ static int pico_parse_request(const uint8_t *buf, uint16_t len, bmw_pico_request
     const char *sp = memchr(s, ' ', eol - s);
     if (!sp) return -1;
     size_t mlen = sp - s;
-    if (mlen >= sizeof(req->method)) mlen = sizeof(req->method) - 1;
+    if (mlen >= sizeof(req->method)) return -1;
     memcpy(req->method, s, mlen);
     req->method[mlen] = '\0';
     s = sp + 1;
 
-    /* Path + query */
+    /* Path + query — reject oversized fields rather than truncating
+     * (truncation creates route/auth confusion; see native http_parser.c). */
     sp = memchr(s, ' ', eol - s);
     if (!sp) return -1;
     const char *qmark = memchr(s, '?', sp - s);
     if (qmark) {
         size_t plen = qmark - s;
-        if (plen >= sizeof(req->path)) plen = sizeof(req->path) - 1;
+        if (plen >= sizeof(req->path)) return -1;
         memcpy(req->path, s, plen);
         req->path[plen] = '\0';
         size_t qlen = sp - qmark - 1;
-        if (qlen >= sizeof(req->query)) qlen = sizeof(req->query) - 1;
+        if (qlen >= sizeof(req->query)) return -1;
         memcpy(req->query, qmark + 1, qlen);
         req->query[qlen] = '\0';
     } else {
         size_t plen = sp - s;
-        if (plen >= sizeof(req->path)) plen = sizeof(req->path) - 1;
+        if (plen >= sizeof(req->path)) return -1;
         memcpy(req->path, s, plen);
         req->path[plen] = '\0';
     }
@@ -57,13 +58,13 @@ static int pico_parse_request(const uint8_t *buf, uint16_t len, bmw_pico_request
         if (colon && req->header_count < BMW_PICO_MAX_HEADERS) {
             bmw_pico_header_t *h = &req->headers[req->header_count];
             size_t nlen = colon - s;
-            if (nlen >= sizeof(h->name)) nlen = sizeof(h->name) - 1;
+            if (nlen >= sizeof(h->name)) return -1;
             memcpy(h->name, s, nlen);
             h->name[nlen] = '\0';
             const char *val = colon + 1;
             while (val < eol && *val == ' ') val++;
             size_t vlen = eol - val;
-            if (vlen >= sizeof(h->value)) vlen = sizeof(h->value) - 1;
+            if (vlen >= sizeof(h->value)) return -1;
             memcpy(h->value, val, vlen);
             h->value[vlen] = '\0';
             req->header_count++;

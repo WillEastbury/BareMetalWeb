@@ -82,28 +82,35 @@ int main(int argc, char *argv[]) {
 
     if (bmw_app_add_module(&app, http_mod, &http_config) != 0) {
         fprintf(stderr, "Failed to init HTTP module\n");
+        bmw_app_shutdown(&app);
         return 1;
     }
     if (bmw_app_add_module(&app, auth_mod, &auth_config) != 0) {
         fprintf(stderr, "Failed to init Auth module\n");
+        bmw_app_shutdown(&app);
         return 1;
     }
     if (bmw_app_add_module(&app, wal_mod, &wal_config) != 0) {
         fprintf(stderr, "Failed to init WAL module\n");
+        bmw_app_shutdown(&app);
         return 1;
     }
     if (bmw_app_add_module(&app, meta_mod, NULL) != 0) {
         fprintf(stderr, "Failed to init Meta module\n");
+        bmw_app_shutdown(&app);
         return 1;
     }
     if (bmw_app_add_module(&app, ws_mod, NULL) != 0) {
         fprintf(stderr, "Failed to init WebSocket module\n");
+        bmw_app_shutdown(&app);
         return 1;
     }
 
-    /* Start modules */
+    /* Start modules — bmw_app_start unwinds partial-start internally; we
+     * still need shutdown() to free init-allocated resources. */
     if (bmw_app_start(&app) != 0) {
         fprintf(stderr, "Failed to start modules\n");
+        bmw_app_shutdown(&app);
         return 1;
     }
 

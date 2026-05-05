@@ -308,6 +308,8 @@ static bmw_result_t auth_discovery(bmw_request_t *req, bmw_response_t *resp, voi
         "\"grant_types_supported\":[\"authorization_code\",\"refresh_token\"],"
         "\"code_challenge_methods_supported\":[\"S256\"]}",
         ctx->issuer);
+    if (n < 0) n = 0;
+    else if ((size_t)n >= sizeof(json)) n = (int)sizeof(json) - 1;
     bmw_response_set_status(resp, 200);
     bmw_response_add_header(resp, "Content-Type", "application/json");
     bmw_response_set_body(resp, json, (size_t)n);
@@ -478,6 +480,8 @@ static bmw_result_t auth_userinfo(bmw_request_t *req, bmw_response_t *resp, void
     char json[256];
     int n = snprintf(json, sizeof(json),
         "{\"sub\":\"%s\",\"name\":\"%s\"}", sess->subject, sess->name);
+    if (n < 0) n = 0;
+    else if ((size_t)n >= sizeof(json)) n = (int)sizeof(json) - 1;
     bmw_response_set_status(resp, 200);
     bmw_response_add_header(resp, "Content-Type", "application/json");
     bmw_response_set_body(resp, json, (size_t)n);
@@ -504,14 +508,17 @@ static bmw_result_t auth_logout(bmw_request_t *req, bmw_response_t *resp, void *
     return BMW_HANDLED;
 }
 
-/* GET /_binary/_key - return public HMAC key identifier for BSO1 verification */
+/* GET /_binary/_key - return public key fingerprint for BSO1 verification.
+ * SECURITY: returns SHA-256(hmac_key)[:8] hex, not the key itself. Publishing
+ * raw key bytes would let any client forge BSO1 signatures. */
 static bmw_result_t auth_binary_key(bmw_request_t *req, bmw_response_t *resp, void *ud) {
     (void)req;
     bmw_auth_ctx_t *ctx = (bmw_auth_ctx_t *)ud;
-    /* Return key fingerprint (first 8 bytes as hex) */
+    uint8_t digest[32];
+    sha256(ctx->hmac_key, 32, digest);
     char hex[17];
     for (int i = 0; i < 8; i++)
-        snprintf(hex + i*2, 3, "%02x", ctx->hmac_key[i]);
+        snprintf(hex + i*2, 3, "%02x", digest[i]);
     bmw_response_set_status(resp, 200);
     bmw_response_add_header(resp, "Content-Type", "text/plain");
     bmw_response_set_body(resp, hex, 16);

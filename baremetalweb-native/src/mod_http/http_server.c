@@ -36,6 +36,13 @@ typedef struct {
     char write_buf[BMW_WRITE_BUF_SIZE];
     size_t write_pos;
     size_t write_len;
+    /* Streaming body: when a response body exceeds what we inlined into
+     * write_buf, we take ownership of resp->body and drain it in a second
+     * send-loop after write_buf is fully sent. body_buf is malloc-owned and
+     * freed when body_pos == body_len, on close, or on next request. */
+    char *body_buf;
+    size_t body_pos;
+    size_t body_len;
     bool keep_alive;
     time_t last_activity;
 } http_conn_t;
@@ -128,15 +135,11 @@ static const char *status_text(int code) {
 }
 
 static int http_send_response(http_conn_t *conn, bmw_response_t *resp) {
-    /* First, compute how much body we can actually fit.
-     * Reserve ~2KB for headers (generous upper bound). */
-    size_t hdr_budget = 2048;
-    size_t body_budget = BMW_WRITE_BUF_SIZE > hdr_budget ? BMW_WRITE_BUF_SIZE - hdr_budget : 0;
-    size_t actual_body = resp->body_len < body_budget ? resp->body_len : body_budget;
-    bool truncated = (actual_body < resp->body_len);
-
-    /* If truncated, force connection close so client doesn't wait for more */
-    if (truncated) conn->keep_alive = false;
+    /* Clamping helper inline */
+    #define CLAMP_N(n, cap) do { \
+        if ((n) < 0) (n) = 0; \
+        else if ((size_t)(n) >= (cap)) (n) = (int)(cap) - 1; \
+    } while (0)
 
     int n = snprintf(conn->write_buf, BMW_WRITE_BUF_SIZE,
         "HTTP/1.1 %d %s\r\n"
@@ -149,28 +152,69 @@ static int http_send_response(http_conn_t *conn, bmw_response_t *resp) {
         "Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-eval'\r\n",
         resp->status, status_text(resp->status),
         conn->keep_alive ? "keep-alive" : "close",
-        actual_body);
+        resp->body_len);
+    CLAMP_N(n, BMW_WRITE_BUF_SIZE);
 
-    /* Custom headers */
-    for (int i = 0; i < resp->header_count && n < (int)BMW_WRITE_BUF_SIZE - 256; i++) {
-        n += snprintf(conn->write_buf + n, BMW_WRITE_BUF_SIZE - n,
-                      "%s: %s\r\n", resp->headers[i].name, resp->headers[i].value);
+    /* Custom headers — clamp each append */
+    for (int i = 0; i < resp->header_count && (size_t)n + 256 < BMW_WRITE_BUF_SIZE; i++) {
+        int r = snprintf(conn->write_buf + n, BMW_WRITE_BUF_SIZE - (size_t)n,
+                         "%s: %s\r\n", resp->headers[i].name, resp->headers[i].value);
+        if (r < 0) break;
+        if ((size_t)r >= BMW_WRITE_BUF_SIZE - (size_t)n) {
+            n = (int)BMW_WRITE_BUF_SIZE - 1;
+            break;
+        }
+        n += r;
     }
 
-    n += snprintf(conn->write_buf + n, BMW_WRITE_BUF_SIZE - n, "\r\n");
-
-    /* Append body — only the portion we advertised */
-    if (resp->body && actual_body > 0) {
-        size_t remaining = BMW_WRITE_BUF_SIZE - (size_t)n;
-        size_t copy = actual_body < remaining ? actual_body : remaining;
-        memcpy(conn->write_buf + n, resp->body, copy);
-        n += (int)copy;
+    if ((size_t)n + 2 < BMW_WRITE_BUF_SIZE) {
+        int r = snprintf(conn->write_buf + n, BMW_WRITE_BUF_SIZE - (size_t)n, "\r\n");
+        if (r > 0) n += r;
+    } else {
+        /* Headers ate the whole buffer. Refuse: serialize 500 with no body. */
+        n = snprintf(conn->write_buf, BMW_WRITE_BUF_SIZE,
+            "HTTP/1.1 500 Internal Server Error\r\n"
+            "Server: BareMetalWeb\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+        CLAMP_N(n, BMW_WRITE_BUF_SIZE);
+        conn->keep_alive = false;
+        conn->write_len = (size_t)n;
+        conn->write_pos = 0;
+        conn->state = CONN_WRITING;
+        if (conn->body_buf) { free(conn->body_buf); conn->body_buf = NULL; }
+        conn->body_pos = conn->body_len = 0;
+        return 0;
     }
 
-    conn->write_len = (size_t)n;
+    /* Inline as much body as fits in write_buf; the rest streams via body_buf. */
+    size_t header_len = (size_t)n;
+    size_t inline_cap = BMW_WRITE_BUF_SIZE - header_len;
+    size_t inline_body = (resp->body && resp->body_len < inline_cap) ? resp->body_len :
+                        (resp->body ? inline_cap : 0);
+
+    if (resp->body && inline_body > 0) {
+        memcpy(conn->write_buf + header_len, resp->body, inline_body);
+    }
+    conn->write_len = header_len + inline_body;
     conn->write_pos = 0;
+
+    /* Free any prior streaming body before taking ownership of new one */
+    if (conn->body_buf) { free(conn->body_buf); conn->body_buf = NULL; }
+    conn->body_pos = conn->body_len = 0;
+
+    /* If body didn't fit in write_buf, take ownership of resp->body and
+     * stream the remainder in http_on_writable. */
+    if (resp->body && inline_body < resp->body_len) {
+        conn->body_buf = resp->body;       /* take ownership */
+        conn->body_pos = inline_body;
+        conn->body_len = resp->body_len;
+        resp->body = NULL;                 /* prevent double-free */
+        resp->body_len = 0;
+        resp->body_cap = 0;
+    }
+
     conn->state = CONN_WRITING;
     return 0;
+    #undef CLAMP_N
 }
 
 /* Find connection by fd */
@@ -185,6 +229,12 @@ static void close_conn(http_ctx_t *ctx, http_conn_t *conn) {
     bmw_loop_remove_fd(ctx->loop, conn->fd);
     bmw_close_socket(conn->fd);
     conn->state = CONN_CLOSED;
+    /* Free any in-flight streaming body to prevent leak across connections */
+    if (conn->body_buf) {
+        free(conn->body_buf);
+        conn->body_buf = NULL;
+    }
+    conn->body_pos = conn->body_len = 0;
     /* Compact */
     int idx = (int)(conn - ctx->connections);
     if (idx < ctx->conn_count - 1)
@@ -269,28 +319,58 @@ static void http_on_conn_ready(bmw_socket_t fd, int events, void *userdata) {
     }
 
     if (conn->state == CONN_WRITING && (events & BMW_EVENT_WRITE)) {
-        int n = send(fd, conn->write_buf + conn->write_pos,
-                     (int)(conn->write_len - conn->write_pos), BMW_SEND_FLAGS);
-        if (n < 0) {
+        /* Phase 1: drain headers + inlined body from write_buf */
+        if (conn->write_pos < conn->write_len) {
+            int n = send(fd, conn->write_buf + conn->write_pos,
+                         (int)(conn->write_len - conn->write_pos), BMW_SEND_FLAGS);
+            if (n < 0) {
 #ifdef _WIN32
-            if (WSAGetLastError() == WSAEWOULDBLOCK) return;
+                if (WSAGetLastError() == WSAEWOULDBLOCK) return;
 #else
-            if (errno == EAGAIN || errno == EWOULDBLOCK) return;
+                if (errno == EAGAIN || errno == EWOULDBLOCK) return;
 #endif
-            close_conn(ctx, conn);
-            return;
-        }
-        if (n == 0) return; /* nothing sent, try again later */
-        conn->write_pos += (size_t)n;
-        if (conn->write_pos >= conn->write_len) {
-            if (conn->keep_alive) {
-                conn->state = CONN_READING;
-                conn->write_pos = 0;
-                conn->write_len = 0;
-                bmw_loop_mod_fd(ctx->loop, fd, BMW_EVENT_READ);
-            } else {
                 close_conn(ctx, conn);
+                return;
             }
+            if (n == 0) return; /* nothing sent, try again later */
+            conn->write_pos += (size_t)n;
+            if (conn->write_pos < conn->write_len) return; /* partial; resume on next writable */
+        }
+
+        /* Phase 2: stream remaining body_buf in chunks */
+        if (conn->body_buf && conn->body_pos < conn->body_len) {
+            size_t remaining = conn->body_len - conn->body_pos;
+            /* Cap each send to write_buf size to keep loop fair across connections */
+            int chunk = remaining > BMW_WRITE_BUF_SIZE ? (int)BMW_WRITE_BUF_SIZE : (int)remaining;
+            int n = send(fd, conn->body_buf + conn->body_pos, chunk, BMW_SEND_FLAGS);
+            if (n < 0) {
+#ifdef _WIN32
+                if (WSAGetLastError() == WSAEWOULDBLOCK) return;
+#else
+                if (errno == EAGAIN || errno == EWOULDBLOCK) return;
+#endif
+                close_conn(ctx, conn);
+                return;
+            }
+            if (n == 0) return;
+            conn->body_pos += (size_t)n;
+            if (conn->body_pos < conn->body_len) return; /* still draining */
+        }
+
+        /* All sent: free streaming body, transition state */
+        if (conn->body_buf) {
+            free(conn->body_buf);
+            conn->body_buf = NULL;
+        }
+        conn->body_pos = conn->body_len = 0;
+
+        if (conn->keep_alive) {
+            conn->state = CONN_READING;
+            conn->write_pos = 0;
+            conn->write_len = 0;
+            bmw_loop_mod_fd(ctx->loop, fd, BMW_EVENT_READ);
+        } else {
+            close_conn(ctx, conn);
         }
     }
 }

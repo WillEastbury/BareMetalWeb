@@ -51,7 +51,16 @@ int bmw_app_start(bmw_app_t *app) {
     for (int i = 0; i < app->count; i++) {
         if (app->modules[i]->start) {
             int rc = app->modules[i]->start(app->modules[i], app->loop);
-            if (rc != 0) return rc;
+            if (rc != 0) {
+                /* Unwind: stop modules 0..i-1 in reverse so partial-start
+                 * doesn't leave listening sockets / WAL handles / event-loop
+                 * registrations dangling for the caller to leak on exit. */
+                for (int j = i - 1; j >= 0; j--) {
+                    if (app->modules[j]->stop)
+                        app->modules[j]->stop(app->modules[j]);
+                }
+                return rc;
+            }
         }
     }
     return 0;

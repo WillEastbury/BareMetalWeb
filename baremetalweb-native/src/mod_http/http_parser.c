@@ -51,20 +51,28 @@ int bmw_http_parse_request(const char *buf, size_t len, bmw_request_t *req) {
     const char *path_end = memchr(p, ' ', end - p);
     if (!path_end) return -1;
 
+    /*
+     * Hardened length handling: reject (caller maps -1 → 400) instead of
+     * silently truncating. Truncation creates routing/auth confusion because
+     * the path/query/header value seen by handlers differs from what the
+     * client sent. A future request with `/admin/very-long-segment-...-extra`
+     * could collapse to `/admin/very-long-segment` and bypass an exact-prefix
+     * check; that class of bug is closed by hard-rejecting the request here.
+     */
     const char *query = memchr(p, '?', path_end - p);
     if (query) {
         size_t plen = (size_t)(query - p);
-        if (plen >= BMW_MAX_PATH) plen = BMW_MAX_PATH - 1;
+        if (plen >= BMW_MAX_PATH) return -1;
         memcpy(req->path, p, plen);
         req->path[plen] = '\0';
 
         size_t qlen = (size_t)(path_end - query - 1);
-        if (qlen >= BMW_MAX_PATH) qlen = BMW_MAX_PATH - 1;
+        if (qlen >= BMW_MAX_PATH) return -1;
         memcpy(req->query, query + 1, qlen);
         req->query[qlen] = '\0';
     } else {
         size_t plen = (size_t)(path_end - p);
-        if (plen >= BMW_MAX_PATH) plen = BMW_MAX_PATH - 1;
+        if (plen >= BMW_MAX_PATH) return -1;
         memcpy(req->path, p, plen);
         req->path[plen] = '\0';
     }
@@ -88,7 +96,7 @@ int bmw_http_parse_request(const char *buf, size_t len, bmw_request_t *req) {
 
         if (req->header_count < BMW_MAX_HEADERS) {
             size_t nlen = (size_t)(colon - p);
-            if (nlen >= sizeof(req->headers[0].name)) nlen = sizeof(req->headers[0].name) - 1;
+            if (nlen >= sizeof(req->headers[0].name)) return -1;
             memcpy(req->headers[req->header_count].name, p, nlen);
             req->headers[req->header_count].name[nlen] = '\0';
 
@@ -96,7 +104,7 @@ int bmw_http_parse_request(const char *buf, size_t len, bmw_request_t *req) {
             while (val < line_end && *val == ' ') val++;
             size_t vlen = (size_t)(line_end - val);
             if (vlen > 0 && val[vlen-1] == '\r') vlen--;
-            if (vlen >= BMW_MAX_HEADER_VAL) vlen = BMW_MAX_HEADER_VAL - 1;
+            if (vlen >= BMW_MAX_HEADER_VAL) return -1;
             memcpy(req->headers[req->header_count].value, val, vlen);
             req->headers[req->header_count].value[vlen] = '\0';
 

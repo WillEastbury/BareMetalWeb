@@ -7,10 +7,32 @@
 #include "bmw_http.h"
 #include "bmw_auth.h"
 #include "bmw_compress.h"
+#include <stdarg.h>
 
 #ifdef _WIN32
 #define strncasecmp _strnicmp
 #endif
+
+/*
+ * Safe accumulating snprintf: append into buf at offset *pos with the
+ * remaining capacity (cap - *pos), advancing *pos by the bytes actually
+ * written. If snprintf reports truncation OR error, *pos is pinned at
+ * cap-1 (last writable index) and the function returns -1; callers must
+ * stop appending. This closes the (size_t)0-1 underflow that otherwise
+ * happens when the unsigned `cap - *pos` argument wraps after the first
+ * truncation, causing snprintf to write hundreds of bytes past the
+ * destination stack buffer. */
+static int safe_appendf(char *buf, size_t *pos, size_t cap, const char *fmt, ...) {
+    if (*pos + 1 >= cap) { *pos = cap - 1; return -1; }
+    va_list ap;
+    va_start(ap, fmt);
+    int r = vsnprintf(buf + *pos, cap - *pos, fmt, ap);
+    va_end(ap);
+    if (r < 0) { *pos = cap - 1; return -1; }
+    if ((size_t)r >= cap - *pos) { *pos = cap - 1; return -1; }
+    *pos += (size_t)r;
+    return 0;
+}
 
 /* JSON-escape a string into out (NUL-terminated). Returns chars written
  * (excluding NUL), or -1 if it would overflow / contains invalid UTF-8.
@@ -245,20 +267,19 @@ static bmw_result_t meta_list_all(bmw_request_t *req, bmw_response_t *resp, void
     (void)req;
     bmw_meta_ctx_t *ctx = (bmw_meta_ctx_t *)ud;
     char json[2048];
-    int n = snprintf(json, sizeof(json), "[");
+    size_t pos = 0;
+    safe_appendf(json, &pos, sizeof(json), "[");
     for (int i = 0; i < ctx->entity_count; i++) {
-        if (n >= (int)sizeof(json) - 1) break; /* truncation guard */
-        if (i > 0) n += snprintf(json + n, sizeof(json) - n, ",");
-        n += snprintf(json + n, sizeof(json) - n,
+        if (i > 0 && safe_appendf(json, &pos, sizeof(json), ",") < 0) break;
+        if (safe_appendf(json, &pos, sizeof(json),
             "{\"name\":\"%s\",\"slug\":\"%s\",\"endpoint\":\"/api/%s\",\"fieldCount\":%d}",
             ctx->entities[i].name, ctx->entities[i].slug,
-            ctx->entities[i].slug, ctx->entities[i].field_count);
+            ctx->entities[i].slug, ctx->entities[i].field_count) < 0) break;
     }
-    if (n < (int)sizeof(json)) n += snprintf(json + n, sizeof(json) - n, "]");
-    if (n >= (int)sizeof(json)) n = (int)sizeof(json) - 1;
+    safe_appendf(json, &pos, sizeof(json), "]");
     bmw_response_set_status(resp, 200);
     bmw_response_add_header(resp, "Content-Type", "application/json");
-    bmw_response_set_body(resp, json, (size_t)n);
+    bmw_response_set_body(resp, json, pos);
     return BMW_HANDLED;
 }
 
@@ -297,48 +318,57 @@ static bmw_result_t meta_api_handler(bmw_request_t *req, bmw_response_t *resp, v
         if (id < 0) {
             /* List all records */
             char json[4096];
-            int n = snprintf(json, sizeof(json), "[");
+            size_t pos = 0;
+            safe_appendf(json, &pos, sizeof(json), "[");
+            bool first = true;
             for (int r = 0; r < ctx->record_counts[eidx]; r++) {
                 if (!ctx->records[eidx][r].active) continue;
-                if (n >= (int)sizeof(json) - 2) break; /* truncation guard */
-                if (n > 1) n += snprintf(json+n, sizeof(json)-n, ",");
-                n += snprintf(json+n, sizeof(json)-n, "{\"id\":%u", ctx->records[eidx][r].id);
+                if (!first && safe_appendf(json, &pos, sizeof(json), ",") < 0) break;
+                first = false;
+                if (safe_appendf(json, &pos, sizeof(json),
+                                 "{\"id\":%u", ctx->records[eidx][r].id) < 0) break;
+                bool field_overflow = false;
                 for (int f = 0; f < ent->field_count; f++) {
-                    if (n >= (int)sizeof(json) - 2) break;
                     if (ctx->records[eidx][r].values[f][0]) {
                         char esc_name[80], esc_val[BMW_META_VALUE_SIZE * 6 + 4];
                         if (json_escape(ent->fields[f].name, esc_name, sizeof(esc_name)) < 0) continue;
                         if (json_escape(ctx->records[eidx][r].values[f], esc_val, sizeof(esc_val)) < 0) continue;
-                        n += snprintf(json+n, sizeof(json)-n, ",\"%s\":\"%s\"", esc_name, esc_val);
+                        if (safe_appendf(json, &pos, sizeof(json),
+                                         ",\"%s\":\"%s\"", esc_name, esc_val) < 0) {
+                            field_overflow = true;
+                            break;
+                        }
                     }
                 }
-                n += snprintf(json+n, sizeof(json)-n, "}");
+                if (field_overflow) break;
+                if (safe_appendf(json, &pos, sizeof(json), "}") < 0) break;
             }
-            if (n < (int)sizeof(json)) n += snprintf(json+n, sizeof(json)-n, "]");
-            if (n >= (int)sizeof(json)) n = (int)sizeof(json) - 1;
+            safe_appendf(json, &pos, sizeof(json), "]");
             bmw_response_set_status(resp, 200);
             bmw_response_add_header(resp, "Content-Type", "application/json");
-            bmw_response_set_body(resp, json, (size_t)n);
+            bmw_response_set_body(resp, json, pos);
         } else {
             /* Get single record */
             for (int r = 0; r < ctx->record_counts[eidx]; r++) {
                 if (ctx->records[eidx][r].active && (int)ctx->records[eidx][r].id == id) {
                     char json[1024];
-                    int n = snprintf(json, sizeof(json), "{\"id\":%u", ctx->records[eidx][r].id);
-                    for (int f = 0; f < ent->field_count; f++) {
-                        if (n >= (int)sizeof(json) - 2) break;
-                        if (ctx->records[eidx][r].values[f][0]) {
-                            char esc_name[80], esc_val[BMW_META_VALUE_SIZE * 6 + 4];
-                            if (json_escape(ent->fields[f].name, esc_name, sizeof(esc_name)) < 0) continue;
-                            if (json_escape(ctx->records[eidx][r].values[f], esc_val, sizeof(esc_val)) < 0) continue;
-                            n += snprintf(json+n, sizeof(json)-n, ",\"%s\":\"%s\"", esc_name, esc_val);
+                    size_t pos = 0;
+                    if (safe_appendf(json, &pos, sizeof(json),
+                                     "{\"id\":%u", ctx->records[eidx][r].id) == 0) {
+                        for (int f = 0; f < ent->field_count; f++) {
+                            if (ctx->records[eidx][r].values[f][0]) {
+                                char esc_name[80], esc_val[BMW_META_VALUE_SIZE * 6 + 4];
+                                if (json_escape(ent->fields[f].name, esc_name, sizeof(esc_name)) < 0) continue;
+                                if (json_escape(ctx->records[eidx][r].values[f], esc_val, sizeof(esc_val)) < 0) continue;
+                                if (safe_appendf(json, &pos, sizeof(json),
+                                                 ",\"%s\":\"%s\"", esc_name, esc_val) < 0) break;
+                            }
                         }
+                        safe_appendf(json, &pos, sizeof(json), "}");
                     }
-                    if (n < (int)sizeof(json)) n += snprintf(json+n, sizeof(json)-n, "}");
-                    if (n >= (int)sizeof(json)) n = (int)sizeof(json) - 1;
                     bmw_response_set_status(resp, 200);
                     bmw_response_add_header(resp, "Content-Type", "application/json");
-                    bmw_response_set_body(resp, json, (size_t)n);
+                    bmw_response_set_body(resp, json, pos);
                     return BMW_HANDLED;
                 }
             }
@@ -381,6 +411,8 @@ static bmw_result_t meta_api_handler(bmw_request_t *req, bmw_response_t *resp, v
         }
         char json[64];
         int n = snprintf(json, sizeof(json), "{\"id\":%u}", rec->id);
+        if (n < 0) n = 0;
+        else if ((size_t)n >= sizeof(json)) n = (int)sizeof(json) - 1;
         bmw_response_set_status(resp, 201);
         bmw_response_add_header(resp, "Content-Type", "application/json");
         bmw_response_set_body(resp, json, (size_t)n);
@@ -429,15 +461,15 @@ static bmw_result_t meta_schema_handler(bmw_request_t *req, bmw_response_t *resp
 
     bmw_entity_def_t *ent = &ctx->entities[eidx];
     char json[2048];
-    int n = snprintf(json, sizeof(json),
+    size_t pos = 0;
+    safe_appendf(json, &pos, sizeof(json),
         "{\"name\":\"%s\",\"slug\":\"%s\",\"endpoint\":\"/api/%s\","
         "\"schema\":{\"fields\":{",
         ent->name, ent->slug, ent->slug);
 
     for (int f = 0; f < ent->field_count; f++) {
-        if (n >= (int)sizeof(json) - 2) break; /* truncation guard */
-        if (f > 0) n += snprintf(json+n, sizeof(json)-n, ",");
-        n += snprintf(json+n, sizeof(json)-n,
+        if (f > 0 && safe_appendf(json, &pos, sizeof(json), ",") < 0) break;
+        if (safe_appendf(json, &pos, sizeof(json),
             "\"%s\":{\"type\":\"%s\",\"label\":\"%s\",\"required\":%s}",
             ent->fields[f].name,
             ent->fields[f].type == BMW_FIELD_TEXT ? "text" :
@@ -448,14 +480,13 @@ static bmw_result_t meta_schema_handler(bmw_request_t *req, bmw_response_t *resp
             ent->fields[f].type == BMW_FIELD_SELECT ? "select" :
             ent->fields[f].type == BMW_FIELD_TEXTAREA ? "textarea" : "text",
             ent->fields[f].label,
-            ent->fields[f].required ? "true" : "false");
+            ent->fields[f].required ? "true" : "false") < 0) break;
     }
-    if (n < (int)sizeof(json)) n += snprintf(json+n, sizeof(json)-n, "}},\"layout\":{\"columns\":%d}}", ent->columns);
-    if (n >= (int)sizeof(json)) n = (int)sizeof(json) - 1;
+    safe_appendf(json, &pos, sizeof(json), "}},\"layout\":{\"columns\":%d}}", ent->columns);
 
     bmw_response_set_status(resp, 200);
     bmw_response_add_header(resp, "Content-Type", "application/json");
-    bmw_response_set_body(resp, json, (size_t)n);
+    bmw_response_set_body(resp, json, pos);
     return BMW_HANDLED;
 }
 

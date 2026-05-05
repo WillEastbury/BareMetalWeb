@@ -14,17 +14,31 @@
 /* Minimal Base64 encoder for WebSocket accept key */
 static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
+/* Base64 encoder for WebSocket accept key (RFC 4648).
+ * Output length is 4*ceil(len/3) chars (caller must size out >= that + 1). */
 static void base64_encode(const uint8_t *in, size_t len, char *out) {
     size_t i = 0, j = 0;
-    while (i < len) {
-        uint32_t a = i < len ? in[i++] : 0;
-        uint32_t b = i < len ? in[i++] : 0;
-        uint32_t c = i < len ? in[i++] : 0;
-        uint32_t triple = (a << 16) | (b << 8) | c;
+    while (i + 3 <= len) {
+        uint32_t triple = ((uint32_t)in[i] << 16) | ((uint32_t)in[i+1] << 8) | in[i+2];
         out[j++] = b64[(triple >> 18) & 0x3F];
         out[j++] = b64[(triple >> 12) & 0x3F];
-        out[j++] = (i > len + 1) ? '=' : b64[(triple >> 6) & 0x3F];
-        out[j++] = (i > len) ? '=' : b64[triple & 0x3F];
+        out[j++] = b64[(triple >>  6) & 0x3F];
+        out[j++] = b64[ triple        & 0x3F];
+        i += 3;
+    }
+    size_t rem = len - i;
+    if (rem == 1) {
+        uint32_t triple = (uint32_t)in[i] << 16;
+        out[j++] = b64[(triple >> 18) & 0x3F];
+        out[j++] = b64[(triple >> 12) & 0x3F];
+        out[j++] = '=';
+        out[j++] = '=';
+    } else if (rem == 2) {
+        uint32_t triple = ((uint32_t)in[i] << 16) | ((uint32_t)in[i+1] << 8);
+        out[j++] = b64[(triple >> 18) & 0x3F];
+        out[j++] = b64[(triple >> 12) & 0x3F];
+        out[j++] = b64[(triple >>  6) & 0x3F];
+        out[j++] = '=';
     }
     out[j] = '\0';
 }
@@ -138,11 +152,13 @@ static void ws_process_bmw_frame(ws_ctx_t *ctx, ws_client_t *client,
         /* Minimal JSON schema as payload */
         int n = snprintf((char *)resp + 9, sizeof(resp) - 9,
             "{\"name\":\"%s\",\"fields\":%d}", ent->name, ent->field_count);
+        if (n < 0) n = 0;
+        else if ((size_t)n >= sizeof(resp) - 9) n = (int)(sizeof(resp) - 9) - 1;
         /* 3-byte JSON length */
         resp[6] = (uint8_t)(n & 0xFF);
         resp[7] = (uint8_t)((n >> 8) & 0xFF);
         resp[8] = 0;
-        resp_len = 9 + n;
+        resp_len = 9 + (size_t)n;
         break;
     }
     case BMW_WS_OP_LIST_REQ: {
@@ -152,10 +168,12 @@ static void ws_process_bmw_frame(ws_ctx_t *ctx, ws_client_t *client,
         memcpy(resp + 2, &entity_id, 4);
         int n = snprintf((char *)resp + 9, sizeof(resp) - 9, "{\"count\":%d}",
                          ctx->meta->record_counts[entity_id]);
+        if (n < 0) n = 0;
+        else if ((size_t)n >= sizeof(resp) - 9) n = (int)(sizeof(resp) - 9) - 1;
         resp[6] = (uint8_t)(n & 0xFF);
         resp[7] = (uint8_t)((n >> 8) & 0xFF);
         resp[8] = 0;
-        resp_len = 9 + n;
+        resp_len = 9 + (size_t)n;
         break;
     }
     default: {
@@ -263,6 +281,28 @@ static bmw_result_t ws_upgrade_handler(bmw_request_t *req, bmw_response_t *resp,
     char accept_b64[32];
     base64_encode(hash, 20, accept_b64);
 
+    bmw_response_set_status(resp, 501);
+    bmw_response_add_header(resp, "Content-Type", "application/json");
+    bmw_response_set_body(resp,
+        "{\"error\":\"websocket_handoff_not_implemented\","
+        "\"detail\":\"Sec-WebSocket-Accept computed correctly but the connection upgrade hands the raw socket to a frame loop that does not exist yet\"}",
+        148);
+
+    /*
+     * Until the upgraded socket is detached from the HTTP keep-alive loop
+     * and registered with a WS frame reader, advertising 101 Switching Protocols
+     * would let the HTTP server keep reading the same fd as plain text after
+     * the client switched to RFC 6455 framing. That confused state has caused
+     * spurious request errors and is a pre-auth attack surface, so we explicitly
+     * 501 until the handoff path lands. Sec-WebSocket-Accept (computed below) is
+     * preserved so the future implementation can drop the 501 in one diff.
+     */
+    (void)hash; (void)accept_b64; (void)ctx;
+    return BMW_HANDLED;
+}
+
+/* Reachable when the 501 above is removed; preserved as the future implementation seam. */
+#if 0
     bmw_response_set_status(resp, 101);
     bmw_response_add_header(resp, "Upgrade", "websocket");
     bmw_response_add_header(resp, "Connection", "Upgrade");
@@ -272,7 +312,7 @@ static bmw_result_t ws_upgrade_handler(bmw_request_t *req, bmw_response_t *resp,
      * The proper Sec-WebSocket-Accept is now sent so clients can complete the handshake. */
     (void)ctx;
     return BMW_HANDLED;
-}
+#endif
 
 /* Module interface */
 static int ws_init(bmw_module_t *self, bmw_config_t *config, bmw_service_registry_t *services) {

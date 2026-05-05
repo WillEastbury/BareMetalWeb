@@ -150,6 +150,8 @@ static bmw_result_t wal_http_append(bmw_request_t *req, bmw_response_t *resp, vo
     if (rc == 0) {
         char buf[64];
         int n = snprintf(buf, sizeof(buf), "{\"seq\":%u}", seq);
+        if (n < 0) n = 0;
+        else if ((size_t)n >= sizeof(buf)) n = (int)sizeof(buf) - 1;
         bmw_response_set_status(resp, 201);
         bmw_response_add_header(resp, "Content-Type", "application/json");
         bmw_response_set_body(resp, buf, (size_t)n);
