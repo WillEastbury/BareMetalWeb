@@ -102,7 +102,7 @@ jobs:
             -p:InformationalVersion=${{ needs.version.outputs.info_version }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: aot-linux-x64
           path: ./publish
@@ -143,7 +143,7 @@ jobs:
             -p:InformationalVersion=${{ needs.version.outputs.info_version }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: aot-linux-arm64
           path: ./publish
@@ -181,7 +181,7 @@ jobs:
             -p:InformationalVersion=${{ needs.version.outputs.info_version }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: aot-linux-arm64-bookworm
           path: ./publish
@@ -222,7 +222,7 @@ jobs:
             -p:InformationalVersion=${{ needs.version.outputs.info_version }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bmw-agent-linux-x64
           path: ./agent-out
@@ -263,7 +263,7 @@ jobs:
             -p:InformationalVersion=${{ needs.version.outputs.info_version }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bmw-agent-linux-arm64
           path: ./agent-out
