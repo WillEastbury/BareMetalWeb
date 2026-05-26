@@ -48,7 +48,10 @@ public class FieldDefinition : DataRecord
     private const int Ord_CascadeFilterField = BaseFieldCount + 35;
     private const int Ord_FieldGroup = BaseFieldCount + 36;
     private const int Ord_ColumnSpan = BaseFieldCount + 37;
-    internal const int TotalFieldCount = BaseFieldCount + 38;
+    private const int Ord_LookupQueryField = BaseFieldCount + 38;
+    private const int Ord_LookupQueryOperator = BaseFieldCount + 39;
+    private const int Ord_LookupQueryValue = BaseFieldCount + 40;
+    internal const int TotalFieldCount = BaseFieldCount + 41;
     private static readonly FieldSlot[] _fieldMap = new[]
     {
         new FieldSlot("CalculatedDisplayFormat", Ord_CalculatedDisplayFormat),
@@ -78,6 +81,9 @@ public class FieldDefinition : DataRecord
         new FieldSlot("LookupCopyFields", Ord_LookupCopyFields),
         new FieldSlot("LookupDisplayField", Ord_LookupDisplayField),
         new FieldSlot("LookupEntitySlug", Ord_LookupEntitySlug),
+        new FieldSlot("LookupQueryField", Ord_LookupQueryField),
+        new FieldSlot("LookupQueryOperator", Ord_LookupQueryOperator),
+        new FieldSlot("LookupQueryValue", Ord_LookupQueryValue),
         new FieldSlot("LookupValueField", Ord_LookupValueField),
         new FieldSlot("MaxLength", Ord_MaxLength),
         new FieldSlot("MinLength", Ord_MinLength),
@@ -291,8 +297,29 @@ public class FieldDefinition : DataRecord
         set => _values[Ord_LookupDisplayField] = value;
     }
 
+    [DataField(Label = "Lookup Query Field", Order = 25)]
+    public string? LookupQueryField
+    {
+        get => (string?)_values[Ord_LookupQueryField];
+        set => _values[Ord_LookupQueryField] = value;
+    }
+
+    [DataField(Label = "Lookup Query Operator", Order = 26)]
+    public string? LookupQueryOperator
+    {
+        get => (string?)_values[Ord_LookupQueryOperator];
+        set => _values[Ord_LookupQueryOperator] = value;
+    }
+
+    [DataField(Label = "Lookup Query Value", Order = 27)]
+    public string? LookupQueryValue
+    {
+        get => (string?)_values[Ord_LookupQueryValue];
+        set => _values[Ord_LookupQueryValue] = value;
+    }
+
     /// <summary>Render as multiline textarea (for string fields).</summary>
-    [DataField(Label = "Multiline", Order = 25)]
+    [DataField(Label = "Multiline", Order = 28)]
     public bool Multiline
     {
         get => _values[Ord_Multiline] is true;

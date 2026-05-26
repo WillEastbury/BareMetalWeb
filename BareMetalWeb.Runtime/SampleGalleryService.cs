@@ -218,6 +218,9 @@ public static class SampleGalleryService
                     LookupEntitySlug = srcField.LookupEntitySlug,
                     LookupValueField = srcField.LookupValueField,
                     LookupDisplayField = srcField.LookupDisplayField,
+                    LookupQueryField = srcField.LookupQueryField,
+                    LookupQueryOperator = srcField.LookupQueryOperator,
+                    LookupQueryValue = srcField.LookupQueryValue,
                     Multiline = srcField.Multiline
                 };
 
