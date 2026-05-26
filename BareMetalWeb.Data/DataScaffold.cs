@@ -361,6 +361,80 @@ public static class DataScaffold
     }
 
     /// <summary>
+    /// Builds hidden mapping entity metadata for a many-to-many relationship.
+    /// The returned entity uses ordinary lookup fields so existing list, form,
+    /// query, lookup and persistence code paths can handle relation rows without
+    /// dynamic type construction.
+    /// </summary>
+    public static DataEntityMetadata BuildManyToManyMappingEntity(ManyToManyRelationConfig relation)
+    {
+        ArgumentNullException.ThrowIfNull(relation);
+        var schema = new EntitySchema.Builder(relation.RelationName, relation.MappingSlug)
+            .AddField(relation.SourceField, FieldType.StringUtf8, typeof(string), required: true)
+            .AddField(relation.TargetField, FieldType.StringUtf8, typeof(string), required: true)
+            .Build();
+
+        var fields = new[]
+        {
+            new DataFieldMetadata(
+                ClrType: typeof(string),
+                Name: relation.SourceField,
+                Label: DeCamelcase(relation.SourceField),
+                FieldType: FormFieldType.LookupList,
+                Order: 1,
+                Required: true,
+                List: true,
+                View: true,
+                Edit: true,
+                Create: true,
+                ReadOnly: false,
+                Placeholder: null,
+                Lookup: new DataLookupConfig(relation.Source.Type, "Id", relation.SourceDisplayField, null, QueryOperator.Equals, null, relation.SourceDisplayField, SortDirection.Asc, TimeSpan.FromMinutes(5), relation.Source.Slug),
+                IdGeneration: IdGenerationStrategy.None,
+                Computed: null,
+                Upload: null,
+                Calculated: null,
+                Validation: null,
+                StorageOrdinal: DataRecord.BaseFieldCount),
+            new DataFieldMetadata(
+                ClrType: typeof(string),
+                Name: relation.TargetField,
+                Label: DeCamelcase(relation.TargetField),
+                FieldType: FormFieldType.LookupList,
+                Order: 2,
+                Required: true,
+                List: true,
+                View: true,
+                Edit: true,
+                Create: true,
+                ReadOnly: false,
+                Placeholder: null,
+                Lookup: new DataLookupConfig(relation.Target.Type, "Id", relation.TargetDisplayField, null, QueryOperator.Equals, null, relation.TargetDisplayField, SortDirection.Asc, TimeSpan.FromMinutes(5), relation.Target.Slug),
+                IdGeneration: IdGenerationStrategy.None,
+                Computed: null,
+                Upload: null,
+                Calculated: null,
+                Validation: null,
+                StorageOrdinal: DataRecord.BaseFieldCount + 1)
+        };
+
+        return new DataEntityMetadata(
+            Type: typeof(DataRecord),
+            Name: relation.RelationName,
+            Slug: relation.MappingSlug,
+            Permissions: relation.Source.Permissions,
+            ShowOnNav: false,
+            NavGroup: null,
+            NavOrder: 0,
+            IdGeneration: AutoIdStrategy.Sequential,
+            ViewType: ViewType.Table,
+            ParentField: fields[0],
+            Fields: fields,
+            Handlers: BuildStoreHandlers(relation.RelationName, schema.CreateRecord),
+            Commands: Array.Empty<RemoteCommandMetadata>());
+    }
+
+    /// <summary>
     /// Registers an entity by name using an existing <see cref="EntitySchema"/>.
     /// Returns the entity ordinal. For entities defined in SystemEntitySchemas or
     /// SystemCatalog metadata — no CLR type required.
