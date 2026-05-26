@@ -167,6 +167,9 @@ public static class SystemEntitySchemas
         .AddField("CascadeFilterField", FieldType.StringUtf8, typeof(string), nullable: true)
         .AddField("FieldGroup", FieldType.StringUtf8, typeof(string), nullable: true)
         .AddField("ColumnSpan", FieldType.Int32, typeof(int?), nullable: true)
+        .AddField("LookupQueryField", FieldType.StringUtf8, typeof(string), nullable: true)
+        .AddField("LookupQueryOperator", FieldType.StringUtf8, typeof(string), nullable: true)
+        .AddField("LookupQueryValue", FieldType.StringUtf8, typeof(string), nullable: true)
         .Build();
 
     public static EntitySchema IndexDefinition { get; } = new EntitySchema.Builder("IndexDefinition", "index-definitions")

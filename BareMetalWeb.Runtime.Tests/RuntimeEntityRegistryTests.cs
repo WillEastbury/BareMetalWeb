@@ -140,6 +140,28 @@ public class RuntimeEntityRegistryTests : IDisposable
     }
 
     [Fact]
+    public void Compile_PreservesLookupFilterMetadata()
+    {
+        var compiler = new RuntimeEntityCompiler();
+        var entity = MakeEntity("Task", "tasks");
+        var field = MakeField(entity.Key.ToString(), "ParentTaskId", "lookup", ordinal: 1);
+        field.LookupEntitySlug = "tasks";
+        field.LookupValueField = "Id";
+        field.LookupDisplayField = "Name";
+        field.LookupQueryField = "Status";
+        field.LookupQueryOperator = "NotEquals";
+        field.LookupQueryValue = "Completed";
+
+        var model = compiler.Compile(entity, new[] { field }, Array.Empty<IndexDefinition>(),
+            Array.Empty<ActionDefinition>(), Array.Empty<ActionCommandDefinition>(), out _);
+
+        var compiled = Assert.Single(model!.Fields);
+        Assert.Equal("Status", compiled.LookupQueryField);
+        Assert.Equal("NotEquals", compiled.LookupQueryOperator);
+        Assert.Equal("Completed", compiled.LookupQueryValue);
+    }
+
+    [Fact]
     public void Compile_DifferentFields_ProducesDifferentHash()
     {
         var compiler = new RuntimeEntityCompiler();

@@ -153,7 +153,10 @@ public static class MetadataExtractor
                 EnumValues = enumValues,
                 LookupEntitySlug = lookupSlug,
                 LookupValueField = hasLookup ? f.Lookup!.ValueField : null,
-                LookupDisplayField = hasLookup ? f.Lookup!.DisplayField : null
+                LookupDisplayField = hasLookup ? f.Lookup!.DisplayField : null,
+                LookupQueryField = hasLookup ? f.Lookup!.QueryField : null,
+                LookupQueryOperator = hasLookup ? f.Lookup!.QueryOperator.ToString() : null,
+                LookupQueryValue = hasLookup ? f.Lookup!.QueryValue : null
             });
 
             if (f.DataIndex != null)

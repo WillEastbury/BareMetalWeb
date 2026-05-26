@@ -106,9 +106,9 @@ public sealed class RuntimeEntityModel
                     TargetType: targetMeta.Type,
                     ValueField: f.LookupValueField ?? "Id",
                     DisplayField: f.LookupDisplayField ?? (f.LookupValueField ?? "Id"),
-                    QueryField: null,
-                    QueryOperator: QueryOperator.Contains,
-                    QueryValue: null,
+                    QueryField: f.LookupQueryField,
+                    QueryOperator: ParseLookupQueryOperator(f.LookupQueryOperator),
+                    QueryValue: f.LookupQueryValue,
                     SortField: null,
                     SortDirection: SortDirection.Asc,
                     CacheTtl: TimeSpan.FromMinutes(5),
@@ -225,13 +225,14 @@ public sealed class RuntimeEntityModel
                 parentField = fm;
                 break;
             }
+
         }
 
-            var docRelFields = new List<DataFieldMetadata>();
-            foreach (var f in fields)
-                if (f.RelatedDocument != null) docRelFields.Add(f);
+        var docRelFields = new List<DataFieldMetadata>();
+        foreach (var f in fields)
+            if (f.RelatedDocument != null) docRelFields.Add(f);
 
-            return new DataEntityMetadata(
+        return new DataEntityMetadata(
             Type: typeof(DataRecord),
             Name: Name,
             Slug: Slug,
@@ -248,5 +249,12 @@ public sealed class RuntimeEntityModel
             DocumentRelationFields: docRelFields,
             EnableGetIngress: EnableGetIngress
         );
+    }
+
+    private static QueryOperator ParseLookupQueryOperator(string? value)
+    {
+        if (Enum.TryParse<QueryOperator>(value, ignoreCase: true, out var parsed))
+            return parsed;
+        return QueryOperator.Equals;
     }
 }

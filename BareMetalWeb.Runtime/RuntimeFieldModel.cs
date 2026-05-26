@@ -25,6 +25,9 @@ namespace BareMetalWeb.Runtime;
 /// <param name="LookupEntitySlug">Slug of the lookup target entity (only when FieldType is LookupList).</param>
 /// <param name="LookupValueField">Value field on the lookup target.</param>
 /// <param name="LookupDisplayField">Display field on the lookup target.</param>
+/// <param name="LookupQueryField">Optional target field used to filter lookup options.</param>
+/// <param name="LookupQueryOperator">Optional lookup filter operator.</param>
+/// <param name="LookupQueryValue">Optional lookup filter value.</param>
 /// <param name="MinLength">Optional minimum string length validation.</param>
 /// <param name="MaxLength">Optional maximum string length validation.</param>
 /// <param name="RangeMin">Optional numeric range minimum.</param>
@@ -49,6 +52,9 @@ public sealed record RuntimeFieldModel(
     string? LookupEntitySlug,
     string? LookupValueField,
     string? LookupDisplayField,
+    string? LookupQueryField,
+    string? LookupQueryOperator,
+    string? LookupQueryValue,
     int? MinLength,
     int? MaxLength,
     double? RangeMin,

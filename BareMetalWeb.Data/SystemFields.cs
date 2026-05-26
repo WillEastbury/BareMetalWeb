@@ -172,6 +172,9 @@ public static class FieldDefinitionFields
     public const int LookupEntitySlug = DataRecord.BaseFieldCount + 21;
     public const int LookupValueField = DataRecord.BaseFieldCount + 22;
     public const int LookupDisplayField = DataRecord.BaseFieldCount + 23;
+    public const int LookupQueryField = DataRecord.BaseFieldCount + 38;
+    public const int LookupQueryOperator = DataRecord.BaseFieldCount + 39;
+    public const int LookupQueryValue = DataRecord.BaseFieldCount + 40;
     public const int Multiline = DataRecord.BaseFieldCount + 24;
     public const int ChildEntitySlug = DataRecord.BaseFieldCount + 25;
     public const int LookupCopyFields = DataRecord.BaseFieldCount + 26;

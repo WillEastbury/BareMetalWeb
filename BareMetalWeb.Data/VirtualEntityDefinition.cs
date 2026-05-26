@@ -99,6 +99,9 @@ public sealed class VirtualFieldDef
     /// <summary>Query operator for lookup filtering: "equals", "notequals", "contains", etc.</summary>
     public string? LookupQueryOperator { get; set; }
 
+    /// <summary>Query value used to filter lookup results.</summary>
+    public string? LookupQueryValue { get; set; }
+
     /// <summary>Display order in forms and list views.</summary>
     public int Order { get; set; } = 0;
 
